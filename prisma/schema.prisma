@@ -1,13 +1,1290 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// Prisma Schema for IBS ONE Admin Platform
+// Phase 1: Core + M1 (Employee) + M3 (Attendance) + System
+// Phase 2: M4 (Recruitment) + M5 (Training) + M8 (Discipline)
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+// ==================== ENUMS ====================
+
+enum UserRole {
+  EMPLOYEE
+  TEAM_LEAD
+  MANAGER
+  HR_ADMIN
+  BOM
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  PROBATION
+  ON_LEAVE
+  RESIGNED
+  TERMINATED
+}
+
+enum PositionLevel {
+  C_LEVEL
+  MANAGER
+  TEAM_LEAD
+  SPECIALIST
+  WORKER
+}
+
+enum TeamType {
+  GA_LAP
+  HAN
+  PHA_CAT
+  GCCK
+  SON
+  TONG_HOP
+}
+
+enum ContractType {
+  PROBATION
+  DEFINITE_12M
+  DEFINITE_24M
+  DEFINITE_36M
+  INDEFINITE
+}
+
+enum ContractStatus {
+  ACTIVE
+  EXPIRING_SOON
+  EXPIRED
+  TERMINATED
+  RENEWED
+}
+
+enum CertificateStatus {
+  VALID
+  EXPIRING_SOON
+  EXPIRED
+  REVOKED
+}
+
+enum WorkHistoryType {
+  JOINED
+  PROMOTED
+  TRANSFERRED
+  DEMOTED
+  SALARY_CHANGE
+  RESIGNED
+  TERMINATED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT_APPROVED
+  ABSENT_UNAPPROVED
+  LATE
+  BUSINESS_TRIP
+  HALF_DAY
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  PERSONAL
+  WEDDING
+  FUNERAL
+  MATERNITY
+  PATERNITY
+  UNPAID
+}
+
+enum ApprovalStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum NotificationType {
+  APPROVAL_REQUIRED
+  APPROVED
+  REJECTED
+  EXPIRY_WARNING
+  HSE_ALERT
+  SYSTEM
+}
+
+// ==================== M4 ENUMS ====================
+
+enum CandidateStatus {
+  NEW
+  SCREENING
+  INTERVIEW
+  INTERVIEWED
+  OFFERED
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+// ==================== M5 ENUMS ====================
+
+enum TrainingType {
+  SAFETY
+  TECHNICAL
+  QUALITY
+  MANAGEMENT
+  ONBOARDING
+}
+
+enum EventStatus {
+  PLANNING
+  PREPARING
+  READY
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ==================== M8 ENUMS ====================
+
+enum RegulationCategory {
+  GATE_SECURITY
+  DISCIPLINE
+  EQUIPMENT
+  SEAL
+  UNIFORM
+  GENERAL
+}
+
+enum DisciplinaryStatus {
+  PENDING
+  ISSUED
+  APPEALED
+  CLOSED
+}
+
+// ==================== CORE MODELS ====================
+
+model User {
+  id             String   @id @default(uuid())
+  employeeCode   String   @unique
+  email          String   @unique
+  passwordHash   String
+  role           UserRole @default(EMPLOYEE)
+  isActive             Boolean  @default(true)
+  forcePasswordChange  Boolean  @default(false)
+  telegramChatId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  employee      Employee?
+  notifications Notification[]
+  auditLogs     AuditLog[]
+  mealRegistrations MealRegistration[] @relation("mealRegistrations")
+}
+
+model Directorate {
+  id         String  @id @default(uuid())
+  name       String // "Commercial Director", "COO", "Production Director"
+  nameVi     String // "Giám đốc Thương mại"
+  directorId String?
+
+  departments Department[]
+  createdAt   DateTime     @default(now())
+}
+
+model Department {
+  id            String  @id @default(uuid())
+  code          String  @unique // "SX", "QLDA", "KT"
+  name          String // "P. Sản xuất"
+  nameEn        String? // "Production Dept."
+  directorateId String?
+  managerId     String?
+  headcount     Int // Biên chế
+  sortOrder     Int     @default(0)
+  isActive      Boolean @default(true)
+
+  directorate         Directorate?         @relation(fields: [directorateId], references: [id], onDelete: SetNull)
+  employees           Employee[]
+  positions           Position[]
+  productionTeams     ProductionTeam[]
+  trainingPlans       TrainingPlan[]
+  recruitmentRequests RecruitmentRequest[]
+  kpiTemplates        KPITemplate[]
+  kpiScores           KPIScore[]
+  safetyBriefings     SafetyBriefing[]
+  mealRegistrations   MealRegistration[]
+  mealCostReports     MealCostReport[]
+  createdAt           DateTime             @default(now())
+}
+
+model Position {
+  id           String        @id @default(uuid())
+  name         String // "Chairman", "CEO", "Trưởng phòng"
+  level        PositionLevel
+  departmentId String?
+
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  employees  Employee[]
+  createdAt  DateTime    @default(now())
+}
+
+model ProductionTeam {
+  id           String   @id @default(uuid())
+  name         String // "Gá lắp 1", "Hàn 1"
+  teamType     TeamType
+  leaderId     String?
+  memberCount  Int      @default(0)
+  departmentId String
+
+  department       Department       @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  employees        Employee[]
+  pieceRateRecords PieceRateRecord[]
+  createdAt        DateTime         @default(now())
+}
+
+// ==================== M1: EMPLOYEE ====================
+
+model Employee {
+  id                  String         @id @default(uuid())
+  userId              String         @unique
+  code                String         @unique // "IBS-001"
+  fullName            String
+  gender              Gender
+  dateOfBirth         DateTime
+  idNumber            String // CCCD/CMND
+  idIssuedDate        DateTime?
+  idIssuedPlace       String?
+  phone               String
+  address             String
+  currentAddress      String?
+  photo               String?
+  departmentId        String
+  positionId          String
+  teamId              String?
+  startDate           DateTime
+  status              EmployeeStatus @default(ACTIVE)
+  salaryGrade         Int? // 1-7
+  salaryCoefficient   Float? // Hệ số lương
+  taxCode             String?
+  bankAccount         String?
+  bankName            String?
+  insuranceNumber     String?
+  emergencyContact    String?
+  emergencyPhone      String?
+  dependents          Int            @default(0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  user              User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  department        Department        @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  position          Position          @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  team              ProductionTeam?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  contracts         Contract[]
+  certificates      Certificate[]
+  workHistory       WorkHistory[]
+  attendanceRecords AttendanceRecord[]
+  leaveRequests     LeaveRequest[]
+  otRequests          OTRequest[]
+  leaveBalances       LeaveBalance[]
+  trainingRecords     TrainingRecord[]
+  disciplinaryActions DisciplinaryAction[]
+  payrollRecords      PayrollRecord[]
+  hseIncidents        HSEIncident[]        @relation("reporter")
+  hseInductions       HSEInduction[]
+  ppeIssuances        PPEIssuance[]
+  vehicleBookings     VehicleBooking[]
+  visitorRequests     VisitorRequest[]     @relation("host")
+  pieceRateRecords    PieceRateRecord[]    @relation("teamMembers")
+  evaluationsReceived Evaluation360[]      @relation("evalTarget")
+  evaluationsGiven    Evaluation360[]      @relation("evalAuthor")
+  ncrAssignments      NCR[]
+  kpiRecords          KPIRecord[]
+  mealFeedbacks       MealFeedback[]
+  cleaningIssues      CleaningIssue[]
+  safetyBriefings     SafetyBriefing[]
+
+  @@index([departmentId])
+  @@index([code])
+}
+
+model Contract {
+  id             String         @id @default(uuid())
+  employeeId     String
+  contractNumber String
+  contractType   ContractType
+  startDate      DateTime
+  endDate        DateTime? // null = indefinite
+  baseSalary     Int // VND
+  status         ContractStatus @default(ACTIVE)
+  fileUrl        String?
+  createdAt      DateTime       @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+}
+
+model Certificate {
+  id         String            @id @default(uuid())
+  employeeId String
+  name       String // "Chứng chỉ hàn AWS D1.1"
+  issuer     String
+  issueDate  DateTime
+  expiryDate DateTime?
+  status     CertificateStatus @default(VALID)
+  fileUrl    String?
+  createdAt  DateTime          @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+}
+
+model WorkHistory {
+  id             String          @id @default(uuid())
+  employeeId     String
+  eventType      WorkHistoryType
+  fromDepartment String?
+  toDepartment   String?
+  fromPosition   String?
+  toPosition     String?
+  effectiveDate  DateTime
+  decisionNumber String?
+  note           String?
+  createdAt      DateTime        @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+}
+
+// ==================== M3: ATTENDANCE ====================
+
+model AttendanceRecord {
+  id         String           @id @default(uuid())
+  employeeId String
+  date       DateTime
+  checkIn    DateTime?
+  checkOut   DateTime?
+  workHours  Float            @default(0)
+  status     AttendanceStatus @default(PRESENT)
+  otHours    Float            @default(0)
+  note       String?
+  createdBy  String
+  createdAt  DateTime         @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, date])
+  @@index([employeeId])
+}
+
+model LeaveRequest {
+  id             String         @id @default(uuid())
+  employeeId     String
+  leaveType      LeaveType
+  startDate      DateTime
+  endDate        DateTime
+  totalDays      Float // Can be 0.5
+  reason         String
+  status         ApprovalStatus @default(DRAFT)
+  approvedBy     String?
+  approvedAt     DateTime?
+  rejectedReason String?
+  createdAt      DateTime       @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+model OTRequest {
+  id         String         @id @default(uuid())
+  employeeId String
+  date       DateTime
+  startTime  String // "17:30"
+  endTime    String // "20:00"
+  hours      Float
+  reason     String
+  otRate     Float // 1.5, 2.0, 3.0
+  status     ApprovalStatus @default(DRAFT)
+  approvedBy String?
+  createdAt  DateTime       @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+}
+
+model LeaveBalance {
+  id            String @id @default(uuid())
+  employeeId    String
+  year          Int // 2026
+  totalDays     Float // 12 + seniority
+  usedDays      Float  @default(0)
+  remainingDays Float // computed
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, year])
+}
+
+// ==================== SYSTEM ====================
+
+model Notification {
+  id            String           @id @default(uuid())
+  userId        String
+  title         String
+  message       String
+  type          NotificationType
+  referenceType String // "leave_request", "vehicle_booking"
+  referenceId   String
+  isRead        Boolean          @default(false)
+  createdAt     DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  action     String // "CREATE", "UPDATE", "DELETE", "APPROVE", "REJECT"
+  entityType String // "Employee", "LeaveRequest"
+  entityId   String
+  oldValue   String? // JSON
+  newValue   String? // JSON
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([entityType, entityId])
+}
+
+// ==================== M4: TUYỂN DỤNG ====================
+
+model RecruitmentRequest {
+  id           String         @id @default(uuid())
+  departmentId String
+  positionName String
+  quantity     Int            @default(1)
+  reason       String
+  requirements String         @default("")
+  status       ApprovalStatus @default(PENDING)
+  requestedBy  String // FK → Employee.id
+  approvedBy   String? // FK → User.id
+  approvedAt   DateTime?
+  rejectedReason String?
+  createdAt    DateTime       @default(now())
+
+  department Department  @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  candidates Candidate[]
+
+  @@index([departmentId])
+  @@index([status])
+}
+
+model Candidate {
+  id              String          @id @default(uuid())
+  recruitmentId   String
+  fullName        String
+  phone           String
+  email           String?
+  resumeUrl       String?
+  referredBy      String?
+  status          CandidateStatus @default(NEW)
+  interviewDate   DateTime?
+  interviewNote   String?
+  interviewScore  Int? // 1-10
+  createdAt       DateTime        @default(now())
+
+  recruitment RecruitmentRequest @relation(fields: [recruitmentId], references: [id], onDelete: Cascade)
+
+  @@index([recruitmentId])
+  @@index([status])
+}
+
+// ==================== M5: ĐÀO TẠO ====================
+
+model TrainingPlan {
+  id              String       @id @default(uuid())
+  title           String
+  type            TrainingType
+  departmentId    String?
+  scheduledDate   DateTime
+  trainer         String
+  maxParticipants Int          @default(30)
+  status          EventStatus  @default(PLANNING)
+  description     String?
+  createdAt       DateTime     @default(now())
+
+  department Department?      @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  records    TrainingRecord[]
+
+  @@index([departmentId])
+  @@index([scheduledDate])
+}
+
+model TrainingRecord {
+  id            String   @id @default(uuid())
+  trainingId    String
+  employeeId    String
+  attended      Boolean  @default(false)
+  score         Int? // 0-100
+  certificateId String? // FK → Certificate.id
+  note          String?
+  createdAt     DateTime @default(now())
+
+  training TrainingPlan @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  employee Employee     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([trainingId, employeeId])
+  @@index([employeeId])
+}
+
+// ==================== M8: KỶ LUẬT & QUY ĐỊNH ====================
+
+model Regulation {
+  id            String             @id @default(uuid())
+  code          String             @unique // "QĐ-V02"
+  title         String
+  category      RegulationCategory @default(GENERAL)
+  content       String             @default("")
+  effectiveDate DateTime
+  fileUrl       String?
+  isActive      Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+
+  disciplinaryActions DisciplinaryAction[]
+
+  @@index([category])
+  @@index([isActive])
+}
+
+model DisciplinaryAction {
+  id              String             @id @default(uuid())
+  employeeId      String
+  violationType   String
+  regulationId    String?
+  description     String
+  penalty         String
+  decisionNumber  String?
+  effectiveDate   DateTime
+  status          DisciplinaryStatus @default(PENDING)
+  createdAt       DateTime           @default(now())
+
+  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  regulation Regulation? @relation(fields: [regulationId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+// ==================== M7 ENUMS ====================
+
+enum PayrollStatus {
+  DRAFT
+  PROCESSING
+  APPROVED
+  PAID
+}
+
+// ==================== M9 ENUMS ====================
+
+enum IncidentType {
+  INJURY        // kept for backward compat with existing rows
+  LTI           // Lost Time Injury — spec primary type
+  NEAR_MISS
+  FIRST_AID     // Sơ cứu tại chỗ
+  PROPERTY_DAMAGE
+  OBSERVATION   // Quan sát (positive/negative)
+  ENVIRONMENTAL
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  REPORTED
+  INVESTIGATING
+  ACTION_REQUIRED // Cần hành động khắc phục
+  RESOLVED
+  CLOSED
+}
+
+// ==================== M10 ENUMS ====================
+
+enum VehiclePurpose {
+  DELIVERY
+  CLIENT_PICKUP
+  BUSINESS_TRIP
+  PROCUREMENT
+  OTHER
+}
+
+enum VisitorPurpose {
+  FACTORY_TOUR
+  AUDIT
+  SURVEY
+  BUSINESS
+  DELIVERY
+  OTHER
+}
+
+enum VehicleType {
+  CAR
+  VAN
+  TRUCK
+  MOTORBIKE
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  IN_USE
+  MAINTENANCE
+  OUT_OF_SERVICE // Hỏng / Ngừng sử dụng
+}
+
+enum BookingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum VisitorStatus {
+  PENDING
+  CHECKED_IN
+  CHECKED_OUT
+  REJECTED
+}
+
+// MealType enum removed — MealRegistration is now per-department (lunchCount/dinnerCount/guestCount)
+
+enum CompanyEventType {
+  AUDIT_INTERNAL
+  AUDIT_EXTERNAL
+  MEETING
+  TRAINING_EVENT
+  CELEBRATION
+  OTHER
+}
+
+// ==================== M6 ENUMS ====================
+
+enum KPIPeriodType {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum EvaluatorRelationship {
+  SELF
+  MANAGER
+  PEER
+  SUBORDINATE
+}
+
+// ==================== M7: LƯƠNG ====================
+
+model PayrollPeriod {
+  id         String        @id @default(uuid())
+  month      Int
+  year       Int
+  status     PayrollStatus @default(DRAFT)
+  notes      String?
+  approvedBy String?
+  approvedAt DateTime?
+  createdAt  DateTime      @default(now())
+
+  records PayrollRecord[]
+
+  @@unique([month, year])
+  @@index([status])
+}
+
+model PayrollRecord {
+  id                  String   @id @default(uuid())
+  periodId            String
+  employeeId          String
+  standardDays        Int      @default(26)
+  workDays            Float    @default(0)
+  otHours             Float    @default(0)
+  baseSalary          Int
+  pieceRateSalary     Int      @default(0)
+  hazardAllowance     Int      @default(0)
+  responsibilityAllow Int      @default(0)
+  mealAllowance       Int      @default(0)
+  otherIncome         Int      @default(0)
+  otPay               Int      @default(0)
+  grossSalary         Int      @default(0)
+  bhxh                Int      @default(0)
+  bhyt                Int      @default(0)
+  bhtn                Int      @default(0)
+  tncn                Int      @default(0)
+  deductions          Int      @default(0)
+  netSalary           Int      @default(0)
+  notes               String?
+  createdAt           DateTime @default(now())
+
+  period   PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  employee Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([periodId, employeeId])
+  @@index([employeeId])
+}
+
+model PieceRateRecord {
+  id             String   @id @default(uuid())
+  teamId         String
+  month          Int
+  year           Int
+  projectCode    String
+  totalHours     Float
+  unitPrice      Int
+  completionRate Float    @default(1.0)
+  totalAmount    Int      // totalHours × unitPrice × completionRate
+  memberCount    Int      @default(1)  // Số thành viên để chia lương
+  createdAt      DateTime @default(now())
+
+  team    ProductionTeam @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  members Employee[]     @relation("teamMembers")
+
+  @@index([teamId])
+  @@index([month, year])
+}
+
+// ==================== M9: HSE ====================
+
+model HSEIncident {
+  id               String           @id @default(uuid())
+  reportedBy       String
+  incidentDate     DateTime
+  type             IncidentType
+  severity         IncidentSeverity @default(LOW)
+  location         String
+  description      String
+  injuredPerson    String?
+  investigation    String?          // Kết quả điều tra
+  correctiveAction String?
+  status           IncidentStatus   @default(REPORTED)
+  closedAt         DateTime?
+  createdAt        DateTime         @default(now())
+
+  reporter Employee @relation("reporter", fields: [reportedBy], references: [id], onDelete: Restrict)
+
+  @@index([reportedBy])
+  @@index([status])
+  @@index([incidentDate])
+}
+
+model HSEInduction {
+  id            String    @id @default(uuid())
+  employeeId    String?
+  visitorRegId  String?
+  personType    String    @default("EMPLOYEE")
+  conductedBy   String?
+  inductionDate DateTime
+  passed        Boolean   @default(false)
+  status        String    @default("PENDING")
+  score         Int?
+  nextDueDate   DateTime?
+  expiryDate    DateTime?
+  notes         String?
+  signOffBy     String?
+  signOffAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+  @@index([visitorRegId])
+}
+
+model PPEItem {
+  id            String    @id @default(uuid())
+  name          String
+  code          String    @unique
+  unit          String
+  stockQuantity Int       @default(0)
+  minimumStock  Int       @default(10)
+  lastRestocked DateTime?
+  notes         String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  issuances PPEIssuance[]
+}
+
+model PPEIssuance {
+  id         String    @id @default(uuid())
+  itemId     String
+  employeeId String
+  quantity   Int       @default(1)
+  issuedDate DateTime  @default(now())
+  returnDate DateTime?
+  notes      String?
+
+  item     PPEItem  @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+  @@index([itemId])
+}
+
+// ==================== M10: HÀNH CHÍNH ====================
+
+model Vehicle {
+  id                  String        @id @default(uuid())
+  licensePlate        String        @unique
+  model               String
+  type                VehicleType
+  seats               Int           @default(5)
+  driverName          String?       // Lái xe phụ trách
+  status              VehicleStatus @default(AVAILABLE)
+  nextMaintenanceDate DateTime?     // Ngày bảo dưỡng tiếp theo
+  notes               String?
+  isActive            Boolean       @default(true)
+  createdAt           DateTime      @default(now())
+
+  bookings           VehicleBooking[]
+  fuelLogs           FuelLog[]
+  maintenanceRecords MaintenanceRecord[]
+}
+
+model VehicleBooking {
+  id             String        @id @default(uuid())
+  vehicleId      String
+  requestedBy    String
+  startDate      DateTime
+  endDate        DateTime
+  destination    String
+  purpose        VehiclePurpose @default(OTHER)
+  passengers     Int            @default(1)
+  status         BookingStatus @default(PENDING)
+  approvedBy     String?
+  approvedAt     DateTime?
+  rejectedReason String?
+  actualKm       Int?          // Số km thực tế sau chuyến đi
+  returnTime     String?       // Giờ về thực tế "17:30"
+  notes          String?
+  createdAt      DateTime      @default(now())
+
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  requester Employee @relation(fields: [requestedBy], references: [id], onDelete: Restrict)
+
+  @@index([vehicleId])
+  @@index([requestedBy])
+  @@index([status])
+}
+
+model MealRegistration {
+  id           String    @id @default(uuid())
+  departmentId String
+  date         DateTime
+  lunchCount   Int       @default(0)
+  dinnerCount  Int       @default(0)
+  guestCount   Int       @default(0)
+  specialNote  String?
+  registeredBy String
+  createdAt    DateTime  @default(now())
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  registrant User       @relation("mealRegistrations", fields: [registeredBy], references: [id], onDelete: Restrict)
+
+  @@unique([departmentId, date])
+  @@index([departmentId])
+  @@index([date])
+}
+
+model MealCostReport {
+  id           String   @id @default(uuid())
+  departmentId String
+  month        Int
+  year         Int
+  totalMeals   Int
+  unitPrice    Int      @default(35000)
+  totalCost    Int
+  createdAt    DateTime @default(now())
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@unique([departmentId, month, year])
+  @@index([month, year])
+}
+
+model VisitorRequest {
+  id             String        @id @default(uuid())
+  visitorName    String
+  visitorCompany String?
+  visitorPhone   String
+  hostEmployeeId String
+  visitDate      DateTime
+  purpose        VisitorPurpose @default(OTHER)
+  visitorCount   Int            @default(1)
+  needsMeal      Boolean        @default(false)
+  mealCount      Int            @default(0)
+  badgeNumber    String?
+  status         VisitorStatus  @default(PENDING)
+  checkedInAt    DateTime?
+  checkedOutAt   DateTime?
+  notes          String?
+  createdAt      DateTime      @default(now())
+
+  host   Employee       @relation("host", fields: [hostEmployeeId], references: [id], onDelete: Restrict)
+  badge  VisitorBadge?
+
+  @@index([hostEmployeeId])
+  @@index([visitDate])
+  @@index([status])
+}
+
+model VisitorBadge {
+  id             String    @id @default(uuid())
+  registrationId String    @unique
+  badgeNumber    String    @unique
+  qrData         String
+  allowedZones   String[]
+  inductionId    String?
+  createdAt      DateTime  @default(now())
+
+  registration VisitorRequest @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@index([badgeNumber])
+}
+
+model CleaningZone {
+  id         String   @id @default(uuid())
+  name       String
+  location   String?
+  frequency  String   @default("DAILY") // "DAILY", "TWICE_DAILY", "WEEKLY"
+  assignedTo String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  schedules CleaningSchedule[]
+  logs      CleaningLog[]
+}
+
+model CleaningSchedule {
+  id            String    @id @default(uuid())
+  zoneId        String
+  scheduledDate DateTime
+  completedAt   DateTime?
+  completedBy   String?
+  qualityScore  Int?
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  zone CleaningZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@index([zoneId])
+  @@index([scheduledDate])
+}
+
+model CompanyEvent {
+  id          String           @id @default(uuid())
+  title       String
+  type        CompanyEventType @default(OTHER)
+  startDate   DateTime
+  endDate     DateTime?
+  location    String?
+  organizer   String
+  description String?
+  attendees           String?
+  externalOrg         String?
+  responsibleDept     String?
+  preparationProgress Int             @default(0)
+  status              EventStatus      @default(PLANNING)
+  createdAt           DateTime         @default(now())
+
+  checklist AuditChecklist[]
+
+  @@index([startDate])
+  @@index([type])
+}
+
+// ==================== M6: KPI ====================
+
+model KPITemplate {
+  id           String        @id @default(uuid())
+  title        String
+  description  String?
+  unit         String
+  target       Float
+  weight       Float         @default(1.0)
+  departmentId String?
+  periodType   KPIPeriodType @default(MONTHLY)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+
+  department Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  records    KPIRecord[]
+
+  @@index([departmentId])
+}
+
+model KPIRecord {
+  id           String    @id @default(uuid())
+  templateId   String
+  employeeId   String?
+  departmentId String?
+  period       Int
+  year         Int
+  actualValue  Float
+  score        Float?
+  notes        String?
+  reviewedBy   String?
+  createdAt    DateTime  @default(now())
+
+  template KPITemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  employee Employee?   @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId])
+  @@index([departmentId])
+}
+
+// ==================== M6: KPI SCORES (Auto-calculated) ====================
+
+model KPIScore {
+  id               String   @id @default(uuid())
+  departmentId     String
+  quarter          Int
+  year             Int
+  attendanceRate   Float    @default(0)
+  productivityRate Float    @default(0)
+  qualityRate      Float    @default(0)
+  safetyRate       Float    @default(0)
+  overallScore     Float    @default(0)
+  trend            Float    @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@unique([departmentId, quarter, year])
+  @@index([quarter, year])
+}
+
+model Evaluation360 {
+  id           String                @id @default(uuid())
+  employeeId   String
+  evaluatorId  String
+  period       String
+  relationship EvaluatorRelationship
+  scores       Json
+  comment      String?
+  createdAt    DateTime              @default(now())
+
+  employee  Employee @relation("evalTarget", fields: [employeeId], references: [id], onDelete: Restrict)
+  evaluator Employee @relation("evalAuthor", fields: [evaluatorId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, evaluatorId, period])
+  @@index([employeeId, period])
+}
+
+// ==================== M10.5: NCR ====================
+
+enum NCRStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING_REVIEW
+  CLOSED
+  OVERDUE
+}
+
+model NCR {
+  id               String    @id @default(uuid())
+  ncrNumber        String    @unique
+  sourceEventId    String?
+  description      String
+  responsibleDept  String
+  assignedToId     String?
+  dueDate          DateTime
+  status           NCRStatus @default(OPEN)
+  rootCause        String?
+  correctiveAction String?
+  closedAt         DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  assignedTo Employee? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([dueDate])
+}
+
+// ==================== M10.2: WEEKLY MENU ====================
+
+model WeeklyMenu {
+  id         String   @id @default(uuid())
+  weekNumber Int
+  year       Int
+  dayOfWeek  Int
+  mainDish   String
+  sideDish   String
+  soup       String
+  dessert    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([weekNumber, year, dayOfWeek])
+  @@index([weekNumber, year])
+}
+
+// ==================== M10.2: MEAL FEEDBACK ====================
+
+model MealFeedback {
+  id         String   @id @default(uuid())
+  employeeId String
+  date       DateTime
+  rating     Int      // 1-5 sao
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, date])
+  @@index([date])
+}
+
+// ==================== M10.3: CLEANING LOG ====================
+
+enum CleaningLogStatus {
+  COMPLETED
+  NEEDS_IMPROVEMENT
+  MISSED
+}
+
+model CleaningLog {
+  id         String           @id @default(uuid())
+  zoneId     String
+  date       DateTime
+  status     CleaningLogStatus @default(COMPLETED)
+  score      Int?             // Điểm 1-100
+  photoUrls  String[]         // Ảnh chụp
+  note       String?
+  checkedBy  String           // FK → User.id
+  createdAt  DateTime         @default(now())
+
+  zone CleaningZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@index([zoneId])
+  @@index([date])
+}
+
+// ==================== M10.1: FUEL LOG ====================
+
+model FuelLog {
+  id          String   @id @default(uuid())
+  vehicleId   String
+  date        DateTime
+  liters      Float
+  cost        Int      // VND
+  odometerKm  Int
+  note        String?
+  createdAt   DateTime @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@index([date])
+}
+
+// ==================== M10.1b: VEHICLE MAINTENANCE ====================
+
+model MaintenanceRecord {
+  id          String    @id @default(uuid())
+  vehicleId   String
+  type        String    // "Thay dầu", "Thay lốp", "Sửa chữa lớn"
+  description String
+  cost        Int       // VND
+  startDate   DateTime
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@index([startDate])
+}
+
+// ==================== M10.3: CLEANING ISSUE ====================
+
+enum IssueStatus {
+  REPORTED
+  IN_PROGRESS
+  RESOLVED
+}
+
+model CleaningIssue {
+  id          String      @id @default(uuid())
+  reportedBy  String
+  zoneName    String
+  description String
+  status      IssueStatus @default(REPORTED)
+  assignedTo  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime    @default(now())
+
+  reporter Employee @relation(fields: [reportedBy], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ==================== M9: SAFETY BRIEFING ====================
+
+model SafetyBriefing {
+  id              String   @id @default(uuid())
+  date            DateTime
+  topic           String
+  presenter       String
+  departmentId    String
+  totalAttendees  Int      @default(0)
+  totalTarget     Int      @default(1)
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  presenterEmployee Employee   @relation(fields: [presenter], references: [id], onDelete: Restrict)
+  department        Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@index([departmentId])
+  @@index([date])
+}
+
+// ==================== M10.5: AUDIT CHECKLIST ====================
+
+model AuditChecklist {
+  id          String    @id @default(uuid())
+  eventId     String
+  item        String    // "Document review: QMS manual, procedures"
+  assignedTo  String?   // FK → Employee.id
+  isCompleted Boolean   @default(false)
+  completedAt DateTime?
+  note        String?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  event CompanyEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
 }
