@@ -1,9 +1,14 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import { hashSync } from "bcryptjs";
 import "dotenv/config";
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL!,
+  ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
+});
+const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {

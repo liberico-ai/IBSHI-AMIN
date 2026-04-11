@@ -27,7 +27,7 @@ for (const f of [".env.local", ".env"]) {
   } catch {}
 }
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+const adapter = new PrismaPg(new (require("pg").Pool)({ connectionString: process.env.DATABASE_URL!, ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined }));
 const prisma = new PrismaClient({ adapter } as any);
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -55,8 +55,8 @@ function detectFemale(fullName: string): boolean {
 
 // ─── 2. Production teams definition ──────────────────────────────────────────
 
-// SX department ID (fetched once)
-const SX_DEPT_ID = "01c56224-3f08-4958-8df6-c59f2c637af3";
+// SX department ID (fetched once) — "P. Sản xuất"
+const SX_DEPT_ID = "92d578a4-7abc-4547-a32a-e99a6d675099";
 
 interface TeamDef {
   name: string;           // exact name used in ERP CSV
