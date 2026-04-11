@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "db:seed": "npx tsx prisma/seed.ts",
-    "db:reset": "npx prisma migrate reset --force"
+    "db:reset": "npx prisma migrate reset --force",
+    "import:erp-users": "npx tsx scripts/import-erp-users.ts",
+    "import:erp-users:dry": "npx tsx scripts/import-erp-users.ts --dry-run"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
