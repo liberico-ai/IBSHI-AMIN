@@ -5,7 +5,7 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,7 +18,7 @@ export default function LoginPage() {
 
     try {
       const result = await signIn("credentials", {
-        email,
+        username,
         password,
         redirect: false,
       });
@@ -69,13 +69,13 @@ export default function LoginPage() {
               className="block text-xs font-medium mb-1.5"
               style={{ color: "var(--ibs-text-dim)" }}
             >
-              Email
+              Tên đăng nhập
             </label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@ibs.com.vn"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="toannd"
               required
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-colors"
               style={{
