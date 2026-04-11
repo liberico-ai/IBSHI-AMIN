@@ -300,5 +300,185 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  // ── kpi-trend: month-by-month KPI for trend charts ───────────────────────
+  if (type === "kpi-trend") {
+    const year = parseInt(searchParams.get("year") || String(new Date().getFullYear()));
+    const months = Array.from({ length: 12 }, (_, i) => i + 1);
+
+    const rows = await Promise.all(
+      months.map(async (m) => {
+        const from = new Date(year, m - 1, 1);
+        const to   = new Date(year, m, 0, 23, 59, 59);
+
+        const [attStats, pendingLeaves, openIncidents, newHires, resigned, activeEmp] = await Promise.all([
+          prisma.attendanceRecord.groupBy({ by: ["status"], where: { date: { gte: from, lte: to } }, _count: true }),
+          prisma.leaveRequest.count({ where: { createdAt: { gte: from, lte: to }, status: "PENDING" } }),
+          prisma.hSEIncident.count({ where: { incidentDate: { gte: from, lte: to } } }),
+          prisma.employee.count({ where: { startDate: { gte: from, lte: to } } }),
+          prisma.employee.count({ where: { status: "RESIGNED", updatedAt: { gte: from, lte: to } } }),
+          prisma.employee.count({ where: { status: { in: ["ACTIVE", "PROBATION"] }, startDate: { lte: to } } }),
+        ]);
+
+        const attMap: Record<string, number> = {};
+        for (const r of attStats) attMap[r.status] = r._count;
+        const totalAtt = Object.values(attMap).reduce((s, v) => s + v, 0);
+        const present  = (attMap["PRESENT"] || 0) + (attMap["LATE"] || 0);
+
+        return {
+          month: m,
+          year,
+          activeEmployees: activeEmp,
+          newHires,
+          resigned,
+          attendanceRate: totalAtt > 0 ? Math.round((present / totalAtt) * 100) : null,
+          presentDays: present,
+          absentDays: (attMap["ABSENT_UNAPPROVED"] || 0) + (attMap["ABSENT_APPROVED"] || 0),
+          lateDays: attMap["LATE"] || 0,
+          pendingLeaves,
+          hseIncidents: openIncidents,
+        };
+      })
+    );
+
+    return NextResponse.json({ data: rows, year });
+  }
+
+  // ── hse-dashboard ─────────────────────────────────────────────────────────
+  if (type === "hse-dashboard") {
+    const year = parseInt(searchParams.get("year") || String(new Date().getFullYear()));
+    const from = new Date(year, 0, 1);
+    const to   = new Date(year, 11, 31, 23, 59, 59);
+
+    const [byType, bySeverity, byStatus, byMonth, recentIncidents] = await Promise.all([
+      prisma.hSEIncident.groupBy({ by: ["type"], where: { incidentDate: { gte: from, lte: to } }, _count: true }),
+      prisma.hSEIncident.groupBy({ by: ["severity"], where: { incidentDate: { gte: from, lte: to } }, _count: true }),
+      prisma.hSEIncident.groupBy({ by: ["status"], where: { incidentDate: { gte: from, lte: to } }, _count: true }),
+      prisma.hSEIncident.findMany({
+        where: { incidentDate: { gte: from, lte: to } },
+        select: { incidentDate: true },
+        orderBy: { incidentDate: "asc" },
+      }),
+      prisma.hSEIncident.findMany({
+        where: { incidentDate: { gte: from, lte: to } },
+        include: { reporter: { select: { fullName: true, department: { select: { name: true } } } } },
+        orderBy: { incidentDate: "desc" },
+        take: 10,
+      }),
+    ]);
+
+    // Group by month
+    const monthBuckets: Record<number, number> = {};
+    for (const r of byMonth) {
+      const m = new Date(r.incidentDate).getMonth() + 1;
+      monthBuckets[m] = (monthBuckets[m] || 0) + 1;
+    }
+    const trend = Array.from({ length: 12 }, (_, i) => ({ month: i + 1, count: monthBuckets[i + 1] || 0 }));
+
+    return NextResponse.json({
+      data: {
+        year,
+        total: byMonth.length,
+        byType: Object.fromEntries(byType.map((r) => [r.type, r._count])),
+        bySeverity: Object.fromEntries(bySeverity.map((r) => [r.severity, r._count])),
+        byStatus: Object.fromEntries(byStatus.map((r) => [r.status, r._count])),
+        trend,
+        recent: recentIncidents,
+      },
+    });
+  }
+
+  // ── attendance-analytics ──────────────────────────────────────────────────
+  if (type === "attendance-analytics") {
+    const month = parseInt(searchParams.get("month") || String(new Date().getMonth() + 1));
+    const year  = parseInt(searchParams.get("year")  || String(new Date().getFullYear()));
+    const from  = new Date(year, month - 1, 1);
+    const to    = new Date(year, month, 0, 23, 59, 59);
+
+    const [byStatus, byDept, topAbsent, dailyTrend, lateEmployees] = await Promise.all([
+      prisma.attendanceRecord.groupBy({ by: ["status"], where: { date: { gte: from, lte: to } }, _count: true }),
+      prisma.attendanceRecord.groupBy({
+        by: ["employeeId"],
+        where: { date: { gte: from, lte: to }, status: { in: ["ABSENT_UNAPPROVED", "ABSENT_APPROVED"] } },
+        _count: true,
+        orderBy: { _count: { employeeId: "desc" } },
+        take: 10,
+      }),
+      prisma.attendanceRecord.findMany({
+        where: { date: { gte: from, lte: to }, status: { in: ["ABSENT_UNAPPROVED", "ABSENT_APPROVED"] } },
+        include: { employee: { select: { code: true, fullName: true, department: { select: { name: true } } } } },
+        orderBy: { date: "desc" },
+        take: 20,
+      }),
+      prisma.attendanceRecord.groupBy({
+        by: ["date", "status"],
+        where: { date: { gte: from, lte: to }, status: { in: ["PRESENT", "ABSENT_UNAPPROVED", "LATE"] } },
+        _count: true,
+        orderBy: { date: "asc" },
+      }),
+      prisma.attendanceRecord.findMany({
+        where: { date: { gte: from, lte: to }, status: "LATE" },
+        include: { employee: { select: { code: true, fullName: true, department: { select: { name: true } } } } },
+        orderBy: { date: "desc" },
+        take: 15,
+      }),
+    ]);
+
+    // daily trend map
+    const dailyMap: Record<string, { present: number; absent: number; late: number }> = {};
+    for (const r of dailyTrend) {
+      const d = new Date(r.date).toISOString().slice(0, 10);
+      if (!dailyMap[d]) dailyMap[d] = { present: 0, absent: 0, late: 0 };
+      if (r.status === "PRESENT") dailyMap[d].present += r._count;
+      if (r.status === "ABSENT_UNAPPROVED") dailyMap[d].absent += r._count;
+      if (r.status === "LATE") dailyMap[d].late += r._count;
+    }
+
+    const statusMap: Record<string, number> = {};
+    for (const r of byStatus) statusMap[r.status] = r._count;
+    const total = Object.values(statusMap).reduce((s, v) => s + v, 0);
+
+    // absent employee breakdown from topAbsent groupBy
+    const absentEmpIds = byDept.map((r) => r.employeeId);
+    const absentEmps = await prisma.employee.findMany({
+      where: { id: { in: absentEmpIds } },
+      select: { id: true, code: true, fullName: true, department: { select: { name: true } } },
+    });
+    const absentEmpMap = Object.fromEntries(absentEmps.map((e) => [e.id, e]));
+    const topAbsentList = byDept.map((r) => ({
+      ...absentEmpMap[r.employeeId],
+      absentDays: r._count,
+    })).filter((r) => r.id);
+
+    return NextResponse.json({
+      data: {
+        period: { month, year },
+        summary: {
+          total,
+          present: statusMap["PRESENT"] || 0,
+          absent: (statusMap["ABSENT_UNAPPROVED"] || 0) + (statusMap["ABSENT_APPROVED"] || 0),
+          late: statusMap["LATE"] || 0,
+          halfDay: statusMap["HALF_DAY"] || 0,
+          attendanceRate: total > 0 ? Math.round(((statusMap["PRESENT"] || 0) / total) * 100) : 0,
+        },
+        dailyTrend: Object.entries(dailyMap).map(([date, v]) => ({ date, ...v })),
+        topAbsent: topAbsentList,
+        recentAbsences: topAbsent.map((r) => ({
+          code: r.employee.code,
+          fullName: r.employee.fullName,
+          department: r.employee.department?.name,
+          date: r.date,
+          status: r.status,
+        })),
+        lateEmployees: lateEmployees.map((r) => ({
+          code: r.employee.code,
+          fullName: r.employee.fullName,
+          department: r.employee.department?.name,
+          date: r.date,
+          checkIn: r.checkIn,
+        })),
+      },
+    });
+  }
+
   return NextResponse.json({ error: { code: "INVALID_TYPE" } }, { status: 400 });
 }

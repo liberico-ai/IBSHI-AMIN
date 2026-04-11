@@ -61,18 +61,36 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.totalCost - a.totalCost);
 
     // Also aggregate guest meals from VisitorRequest for the same month
-    const guestMealResult = await prisma.visitorRequest.aggregate({
-      where: {
-        needsMeal: true,
-        checkedInAt: { gte: startOfMonth, lte: endOfMonth },
-      },
-      _sum: { mealCount: true },
-    });
+    const [guestMealResult, feedbackAgg] = await Promise.all([
+      prisma.visitorRequest.aggregate({
+        where: { needsMeal: true, checkedInAt: { gte: startOfMonth, lte: endOfMonth } },
+        _sum: { mealCount: true },
+      }),
+      prisma.mealFeedback.aggregate({
+        where: { date: { gte: startOfMonth, lte: endOfMonth } },
+        _avg: { rating: true },
+        _count: { id: true },
+      }),
+    ]);
     const guestMeals = guestMealResult._sum.mealCount ?? 0;
     const guestMealCost = guestMeals * MEAL_UNIT_PRICE;
 
     const grandTotal = data.reduce((s, d) => s + d.totalCost, 0) + guestMealCost;
-    return NextResponse.json({ data, meta: { grandTotal, unitPrice: MEAL_UNIT_PRICE, month, year, guestMeals, guestMealCost } });
+    const avgFeedbackRating = feedbackAgg._avg.rating ?? null;
+    const feedbackCount = feedbackAgg._count.id;
+
+    return NextResponse.json({
+      data,
+      meta: {
+        grandTotal,
+        unitPrice: MEAL_UNIT_PRICE,
+        month,
+        year,
+        guestMeals,
+        guestMealCost,
+        feedback: { avgRating: avgFeedbackRating ? Math.round(avgFeedbackRating * 10) / 10 : null, count: feedbackCount },
+      },
+    });
   }
 
   // ── list registrations by date ────────────────────────────────────────────
@@ -111,7 +129,7 @@ export async function POST(request: NextRequest) {
   const { departmentId, date, lunchCount, dinnerCount, guestCount, specialNote } = parsed.data;
 
   // MANAGER can only register for their own department
-  if (!canDo(userRole, "meals", "readAll")) {
+  if (!canDo(userRole, "meals", "manageCosts")) {
     const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
     if (!emp || emp.departmentId !== departmentId) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ có thể đăng ký bữa ăn cho phòng ban của mình" } }, { status: 403 });
@@ -149,7 +167,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   // MANAGER can only delete registrations for their own department
-  if (!canDo(userRole, "meals", "readAll")) {
+  if (!canDo(userRole, "meals", "manageCosts")) {
     const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
     if (!emp || emp.departmentId !== departmentId) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ có thể xóa bữa ăn của phòng ban mình" } }, { status: 403 });

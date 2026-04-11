@@ -32,6 +32,7 @@ export function FileUpload({
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [preview, setPreview] = useState<string | null>(currentUrl || null);
   const [fileName, setFileName] = useState<string | null>(null);
 
@@ -45,33 +46,49 @@ export function FileUpload({
     }
 
     setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("bucket", bucket);
-      formData.append("folder", folder);
+    setProgress(0);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("bucket", bucket);
+    formData.append("folder", folder);
 
-      const res = await fetch("/api/v1/upload", { method: "POST", body: formData });
-      const json = await res.json();
+    await new Promise<void>((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/v1/upload");
 
-      if (!res.ok || json.error) {
-        const msg = json.error?.message || "Upload thất bại";
-        onError?.(msg);
-        return;
-      }
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          setProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
 
-      setFileName(json.data.fileName);
-      if (isImage(json.data.fileName)) {
-        setPreview(json.data.url);
-      } else {
-        setPreview(null);
-      }
-      onUploaded(json.data);
-    } catch {
-      onError?.("Không thể kết nối máy chủ");
-    } finally {
-      setUploading(false);
-    }
+      xhr.onload = () => {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          if (xhr.status < 200 || xhr.status >= 300 || json.error) {
+            onError?.(json.error?.message || "Upload thất bại");
+          } else {
+            setFileName(json.data.fileName);
+            setPreview(isImage(json.data.fileName) ? json.data.url : null);
+            onUploaded(json.data);
+          }
+        } catch {
+          onError?.("Phản hồi không hợp lệ");
+        }
+        setUploading(false);
+        setProgress(0);
+        resolve();
+      };
+
+      xhr.onerror = () => {
+        onError?.("Không thể kết nối máy chủ");
+        setUploading(false);
+        setProgress(0);
+        resolve();
+      };
+
+      xhr.send(formData);
+    });
   }
 
   function handleFiles(files: FileList | null) {
@@ -150,6 +167,22 @@ export function FileUpload({
           </div>
         )}
       </div>
+
+      {/* Progress bar */}
+      {uploading && progress > 0 && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-gray-500">
+            <span>Đang tải lên...</span>
+            <span>{progress}%</span>
+          </div>
+          <div className="w-full h-1.5 rounded-full bg-gray-200 overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-200"
+              style={{ width: `${progress}%`, background: "#3b82f6" }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Show current URL link if no new file selected */}
       {currentUrl && !fileName && (

@@ -8,7 +8,7 @@ import Link from "next/link";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 type CostItem = { departmentId: string; departmentName: string; lunchCount: number; dinnerCount: number; guestCount: number; totalMeals: number; totalCost: number; unitPrice: number };
-type CostMeta = { grandTotal: number; unitPrice: number; month: number; year: number; guestMeals?: number; guestMealCost?: number };
+type CostMeta = { grandTotal: number; unitPrice: number; month: number; year: number; guestMeals?: number; guestMealCost?: number; feedback?: { avgRating: number | null; count: number } };
 type Department = { id: string; code: string; name: string };
 type MealReg = {
   id: string; departmentId: string; date: string;
@@ -325,9 +325,22 @@ export default function NhaAnPage() {
             </div>
             <button onClick={() => fetchCostReport()} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
             {costMeta && (
-              <div className="ml-auto text-[13px]">
-                Tổng tháng {costMonth}/{costYear}:{" "}
-                <span className="font-bold" style={{ color: "var(--ibs-accent)" }}>{(costMeta.grandTotal).toLocaleString("vi-VN")}đ</span>
+              <div className="ml-auto flex items-center gap-4 text-[13px]">
+                {costMeta.feedback?.avgRating != null && (
+                  <div className="flex items-center gap-1.5">
+                    <span style={{ color: "var(--ibs-text-dim)" }}>Đánh giá:</span>
+                    <span className="font-bold" style={{ color: "#f59e0b" }}>
+                      {"★".repeat(Math.round(costMeta.feedback.avgRating))}{"☆".repeat(5 - Math.round(costMeta.feedback.avgRating))}
+                    </span>
+                    <span style={{ color: "var(--ibs-text-dim)" }}>
+                      {costMeta.feedback.avgRating}/5 ({costMeta.feedback.count} đánh giá)
+                    </span>
+                  </div>
+                )}
+                <div>
+                  Tổng tháng {costMonth}/{costYear}:{" "}
+                  <span className="font-bold" style={{ color: "var(--ibs-accent)" }}>{(costMeta.grandTotal).toLocaleString("vi-VN")}đ</span>
+                </div>
               </div>
             )}
           </div>

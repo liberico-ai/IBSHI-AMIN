@@ -356,6 +356,7 @@ function PeriodDetailModal({
                     "BHXH+BHYT+BHTN",
                     "TNCN",
                     "Lương Net",
+                    "Phiếu lương",
                   ].map((h) => (
                     <th
                       key={h}
@@ -441,6 +442,16 @@ function PeriodDetailModal({
                       >
                         {formatVND(r.netSalary)}
                       </td>
+                      <td className="px-3 py-2 border-b text-center" style={{ borderColor: "rgba(51,65,85,0.3)" }}>
+                        <a
+                          href={`/api/v1/payroll/${period.id}/slip/pdf?employeeId=${r.employeeId}`}
+                          download
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] border transition-colors hover:bg-white/5"
+                          style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-accent)" }}
+                        >
+                          <Download size={11} /> PDF
+                        </a>
+                      </td>
                     </tr>
                   );
                 })}
@@ -478,6 +489,7 @@ function PeriodDetailModal({
                   >
                     {formatVND(totalNet)}
                   </td>
+                  <td className="border-t" style={{ borderColor: "var(--ibs-border)" }} />
                 </tr>
               </tfoot>
             </table>

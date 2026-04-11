@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { logAudit } from "@/lib/audit";
 import { z } from "zod";
 
 const FuelSchema = z.object({
@@ -64,6 +65,14 @@ export async function POST(
       odometerKm: parsed.data.odometerKm,
       note: parsed.data.note ?? null,
     },
+  });
+
+  logAudit({
+    userId: (session.user as any).id,
+    action: "CREATE",
+    entityType: "FuelLog",
+    entityId: log.id,
+    newValue: { vehicleId, liters: log.liters, cost: log.cost },
   });
 
   return NextResponse.json({ data: log }, { status: 201 });

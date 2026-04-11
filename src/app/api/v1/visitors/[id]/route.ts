@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { logAudit } from "@/lib/audit";
 import QRCode from "qrcode";
 import { sendTelegramMessage } from "@/services/telegram.service";
 
@@ -223,6 +224,15 @@ export async function PUT(
         );
       }
     }
+    logAudit({
+      userId: (session.user as any).id,
+      action: "APPROVE",
+      entityType: "VisitorRequest",
+      entityId: id,
+      oldValue: { status: "PENDING" },
+      newValue: { status: "APPROVED" },
+    });
+
     return NextResponse.json({ data: updated });
   }
 

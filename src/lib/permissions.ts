@@ -129,7 +129,13 @@ export const MODULE_PERMISSIONS = {
     read: "EMPLOYEE",
     create: "HR_ADMIN",
     update: "HR_ADMIN",
-    manageNCR: "HR_ADMIN",
+  },
+  // M10.5 — NCR (dedicated module, không dùng 'events')
+  ncr: {
+    read: "EMPLOYEE",    // mọi NV xem được NCR
+    create: "HR_ADMIN",  // HC/BOM tạo NCR
+    update: "MANAGER",   // TP+ cập nhật tiến độ
+    close: "HR_ADMIN",   // HC đóng NCR
   },
   // M1 — contracts
   contracts: {

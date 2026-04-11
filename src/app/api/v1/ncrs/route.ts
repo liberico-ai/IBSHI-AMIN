@@ -16,6 +16,11 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
+  const userRole = (session.user as any).role;
+  if (!canDo(userRole, "ncr", "read")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  }
+
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status") ?? undefined;
 
@@ -39,7 +44,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "events", "create")) {
+  if (!canDo(userRole, "ncr", "create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

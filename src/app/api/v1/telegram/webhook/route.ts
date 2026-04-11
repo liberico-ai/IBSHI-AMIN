@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
 
 // ─── In-memory rate limiter ──────────────────────────────────────────────────
 // Track: chatId → { count, windowStart }
 const rateLimitMap = new Map<string, { count: number; windowStart: number }>();
 const RATE_LIMIT = 10;       // max requests
 const RATE_WINDOW_MS = 60_000; // per 60 seconds
-
-// ─── Processed update IDs (idempotency) ─────────────────────────────────────
-// Keep last 500 update_ids to prevent duplicate processing
-const processedUpdates = new Set<number>();
-const MAX_STORED_IDS = 500;
 
 function isRateLimited(chatId: string): boolean {
   const now = Date.now();
@@ -35,18 +31,19 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
 
-    // ── Idempotency: skip already-processed update_id ──────────────────────
+    // ── Idempotency: skip already-processed update_id (DB-backed) ────────
     const updateId: number | undefined = body?.update_id;
     if (updateId !== undefined) {
-      if (processedUpdates.has(updateId)) {
+      try {
+        await prisma.telegramUpdate.create({ data: { updateId } });
+      } catch {
+        // Unique constraint violation → already processed
         return NextResponse.json({ ok: true, skipped: true });
       }
-      processedUpdates.add(updateId);
-      // Prune old ids if set grows too large
-      if (processedUpdates.size > MAX_STORED_IDS) {
-        const oldest = processedUpdates.values().next().value as number;
-        processedUpdates.delete(oldest);
-      }
+      // Prune records older than 7 days to keep the table small
+      prisma.telegramUpdate
+        .deleteMany({ where: { createdAt: { lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } })
+        .catch(() => {});
     }
 
     // ── Rate limiting by chatId ────────────────────────────────────────────

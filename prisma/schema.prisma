@@ -477,6 +477,14 @@ model AuditLog {
   @@index([entityType, entityId])
 }
 
+// Telegram idempotency — processed update IDs stored in DB (survives restarts)
+model TelegramUpdate {
+  updateId  Int      @id  // Telegram update_id (unique per bot)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 // ==================== M4: TUYỂN DỤNG ====================
 
 model RecruitmentRequest {

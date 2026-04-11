@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { logAudit } from "@/lib/audit";
 import { z } from "zod";
 
 const CompleteSchema = z.object({
@@ -35,5 +36,15 @@ export async function POST(
   }
 
   const updated = await prisma.vehicleBooking.update({ where: { id }, data: updateData });
+
+  logAudit({
+    userId: (session.user as any).id,
+    action: "UPDATE",
+    entityType: "VehicleBooking",
+    entityId: id,
+    oldValue: { status: booking.status },
+    newValue: { status: "COMPLETED", ...updateData },
+  });
+
   return NextResponse.json({ data: updated });
 }

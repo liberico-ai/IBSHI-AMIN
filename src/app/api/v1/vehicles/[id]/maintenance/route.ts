@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { logAudit } from "@/lib/audit";
 import { z } from "zod";
 
 const MaintenanceSchema = z.object({
@@ -67,6 +68,14 @@ export async function POST(
       startDate: new Date(parsed.data.startDate),
       endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
     },
+  });
+
+  logAudit({
+    userId: (session.user as any).id,
+    action: "CREATE",
+    entityType: "MaintenanceRecord",
+    entityId: record.id,
+    newValue: { vehicleId, type: record.type, cost: record.cost },
   });
 
   return NextResponse.json({ data: record }, { status: 201 });
