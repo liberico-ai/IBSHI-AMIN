@@ -106,6 +106,7 @@ enum LeaveType {
 enum ApprovalStatus {
   DRAFT
   PENDING
+  PENDING_HR
   APPROVED
   REJECTED
   COMPLETED
@@ -311,6 +312,7 @@ model Employee {
   mealFeedbacks       MealFeedback[]
   cleaningIssues      CleaningIssue[]
   safetyBriefings     SafetyBriefing[]
+  eventEnrollments    EventAttendee[]
 
   @@index([departmentId])
   @@index([code])
@@ -530,6 +532,7 @@ model TrainingPlan {
   maxParticipants Int          @default(30)
   status          EventStatus  @default(PLANNING)
   description     String?
+  materialUrl     String?      // Training material/slides file
   createdAt       DateTime     @default(now())
 
   department Department?      @relation(fields: [departmentId], references: [id], onDelete: SetNull)
@@ -665,6 +668,7 @@ enum VehicleStatus {
 
 enum BookingStatus {
   PENDING
+  PENDING_HR
   APPROVED
   REJECTED
   COMPLETED
@@ -673,6 +677,7 @@ enum BookingStatus {
 
 enum VisitorStatus {
   PENDING
+  APPROVED
   CHECKED_IN
   CHECKED_OUT
   REJECTED
@@ -786,6 +791,7 @@ model HSEIncident {
   injuredPerson    String?
   investigation    String?          // Kết quả điều tra
   correctiveAction String?
+  photos           String?          // JSON array of photo URLs
   status           IncidentStatus   @default(REPORTED)
   closedAt         DateTime?
   createdAt        DateTime         @default(now())
@@ -1017,10 +1023,26 @@ model CompanyEvent {
   status              EventStatus      @default(PLANNING)
   createdAt           DateTime         @default(now())
 
-  checklist AuditChecklist[]
+  checklist  AuditChecklist[]
+  enrollments EventAttendee[]
 
   @@index([startDate])
   @@index([type])
+}
+
+model EventAttendee {
+  id         String   @id @default(uuid())
+  eventId    String
+  employeeId String
+  enrolledAt DateTime @default(now())
+  attended   Boolean  @default(false)
+
+  event    CompanyEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  employee Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, employeeId])
+  @@index([eventId])
+  @@index([employeeId])
 }
 
 // ==================== M6: KPI ====================

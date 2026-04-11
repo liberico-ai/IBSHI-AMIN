@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 
 export async function GET() {
   const session = await auth();
@@ -10,7 +10,7 @@ export async function GET() {
   }
 
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "MANAGER")) {
+  if (!canDo(userRole, "reports", "read")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

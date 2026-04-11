@@ -48,6 +48,8 @@ export async function GET(
     data: {
       ...badge,
       inductionStatus,
+      // Convenience: expose QR image URL for frontend to use
+      qrImageUrl: `/api/v1/visitors/${id}/badge/qr`,
     },
   });
 }

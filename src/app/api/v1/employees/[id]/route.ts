@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
 export async function GET(
@@ -96,7 +96,7 @@ export async function PUT(
 
   // Non-HR_ADMIN cannot change status
   const updateData = { ...parsed.data };
-  if (!checkPermission(userRole, "HR_ADMIN") && updateData.status) {
+  if (!canDo(userRole, "employees", "readAll") && updateData.status) {
     delete updateData.status;
   }
 
@@ -129,7 +129,7 @@ export async function DELETE(
   }
 
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "BOM")) {
+  if (!canDo(userRole, "employees", "delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

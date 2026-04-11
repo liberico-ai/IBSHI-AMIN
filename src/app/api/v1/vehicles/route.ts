@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "vehicleBookings", "approve2")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

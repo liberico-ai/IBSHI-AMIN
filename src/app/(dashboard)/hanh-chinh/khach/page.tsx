@@ -6,6 +6,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { Plus, RefreshCw, X, UserCheck, UserX, LogIn, LogOut } from "lucide-react";
 import Link from "next/link";
+import { MonthCalendar } from "@/components/shared/month-calendar";
 
 type Employee = { id: string; code: string; fullName: string; department: { name: string } };
 type VisitorRequest = {
@@ -36,6 +37,7 @@ export default function KhachPage() {
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [filterDate, setFilterDate] = useState(new Date().toISOString().slice(0, 10));
   const [filterStatus, setFilterStatus] = useState("");
 
@@ -119,6 +121,31 @@ export default function KhachPage() {
         ))}
       </div>
 
+      {/* View toggle */}
+      <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        {(["list", "calendar"] as const).map((m) => (
+          <button key={m} onClick={() => setViewMode(m)} className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
+            style={{ background: viewMode === m ? "var(--ibs-accent)" : "transparent", color: viewMode === m ? "#fff" : "var(--ibs-text-dim)" }}>
+            {m === "list" ? "Danh sách" : "Lịch"}
+          </button>
+        ))}
+      </div>
+
+      {viewMode === "calendar" && (
+        <MonthCalendar
+          events={visitors.map((v) => ({
+            date: v.visitDate,
+            label: `${v.visitorName}${v.visitorCompany ? ` (${v.visitorCompany})` : ""}`,
+            color: VISITOR_STATUS[v.status]?.color,
+          }))}
+          onDayClick={(dateStr, evs) => {
+            setFilterDate(dateStr);
+            setViewMode("list");
+          }}
+        />
+      )}
+
+      {viewMode === "list" && (
       <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <div className="flex items-center gap-3 px-5 py-4 border-b flex-wrap" style={{ borderColor: "var(--ibs-border)" }}>
           <div className="text-[14px] font-semibold">Danh sách khách</div>
@@ -136,6 +163,7 @@ export default function KhachPage() {
         </div>
         <DataTable columns={columns} data={visitors} loading={loading} emptyText="Không có khách nào" />
       </div>
+      )}
 
       {showNew && (
         <NewVisitorModal employees={employees} onClose={() => setShowNew(false)}

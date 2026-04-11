@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
+import { rangesOverlap } from "@/lib/validation";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "events", "create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -50,11 +51,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
   }
 
+  const startDate = new Date(parsed.data.startDate);
+  const endDate = parsed.data.endDate ? new Date(parsed.data.endDate) : startDate;
+
+  // Check for overlapping events at the same location
+  if (parsed.data.location) {
+    const existing = await prisma.companyEvent.findMany({
+      where: {
+        location: parsed.data.location,
+        status: { notIn: ["CANCELLED"] },
+        startDate: { lte: endDate },
+      },
+      select: { id: true, title: true, startDate: true, endDate: true },
+    });
+    const overlap = existing.find((e) =>
+      rangesOverlap(startDate, endDate, e.startDate, e.endDate ?? e.startDate)
+    );
+    if (overlap) {
+      return NextResponse.json({
+        error: {
+          code: "TIME_CONFLICT",
+          message: `Địa điểm "${parsed.data.location}" đã có sự kiện "${overlap.title}" trong khung thời gian này`,
+        },
+      }, { status: 409 });
+    }
+  }
+
   const event = await prisma.companyEvent.create({
     data: {
       ...parsed.data,
-      startDate: new Date(parsed.data.startDate),
-      endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
+      startDate,
+      endDate: parsed.data.endDate ? endDate : null,
       status: "PLANNING",
     },
   });

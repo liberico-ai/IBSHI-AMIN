@@ -170,6 +170,7 @@ export default function VeSinhPage() {
               </button>
             )}
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
               <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
@@ -209,6 +210,7 @@ export default function VeSinhPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -256,6 +258,7 @@ export default function VeSinhPage() {
               </button>
             )}
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
               <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
@@ -289,6 +292,7 @@ export default function VeSinhPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

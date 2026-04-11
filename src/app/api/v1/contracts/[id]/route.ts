@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
 const UpdateContractSchema = z.object({
@@ -24,7 +24,7 @@ export async function PUT(
   }
 
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "contracts", "update")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -75,7 +75,7 @@ export async function DELETE(
   }
 
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "BOM")) {
+  if (!canDo(userRole, "contracts", "delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

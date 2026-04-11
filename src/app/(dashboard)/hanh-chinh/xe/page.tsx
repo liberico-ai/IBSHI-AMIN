@@ -6,6 +6,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench } from "lucide-react";
 import Link from "next/link";
+import { MonthCalendar } from "@/components/shared/month-calendar";
 
 type Vehicle = {
   id: string; licensePlate: string; model: string; type: string;
@@ -52,7 +53,7 @@ const VEHICLE_PURPOSE_LABELS: Record<string, string> = {
 };
 
 export default function XePage() {
-  const [tab, setTab] = useState<"bookings" | "fleet" | "fuel" | "maintenance">("bookings");
+  const [tab, setTab] = useState<"bookings" | "fleet" | "fuel" | "maintenance" | "calendar">("bookings");
   const [bookings, setBookings] = useState<VehicleBooking[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [fuelLogs, setFuelLogs] = useState<FuelLog[]>([]);
@@ -184,10 +185,10 @@ export default function XePage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
-        {(["bookings", "fleet", "fuel", "maintenance"] as const).map((t) => (
+        {(["bookings", "calendar", "fleet", "fuel", "maintenance"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)} className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
             style={{ background: tab === t ? "var(--ibs-accent)" : "transparent", color: tab === t ? "#fff" : "var(--ibs-text-dim)" }}>
-            {t === "bookings" ? "Đặt xe" : t === "fleet" ? "Đội xe" : t === "fuel" ? "Nhiên liệu" : "Bảo trì"}
+            {t === "bookings" ? "Đặt xe" : t === "calendar" ? "Lịch" : t === "fleet" ? "Đội xe" : t === "fuel" ? "Nhiên liệu" : "Bảo trì"}
           </button>
         ))}
       </div>
@@ -208,6 +209,17 @@ export default function XePage() {
           </div>
           <DataTable columns={bookingColumns} data={bookings} loading={loading} emptyText="Chưa có lịch đặt xe" />
         </div>
+      )}
+
+      {tab === "calendar" && (
+        <MonthCalendar
+          events={bookings.map((b) => ({
+            date: b.startDatetime,
+            label: `${b.vehicle.licensePlate} — ${b.requester.fullName}`,
+            color: BOOKING_STATUS[b.status]?.color,
+          }))}
+          onDayClick={(dateStr, evs) => alert(`${dateStr}\n${evs.map((e) => e.label).join("\n")}`)}
+        />
       )}
 
       {tab === "fleet" && (

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 
 export async function PUT(
   request: NextRequest,
@@ -22,7 +22,7 @@ export async function PUT(
   if (!req) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
   if (action === "APPROVE" || action === "REJECT") {
-    if (!checkPermission(userRole, "BOM")) {
+    if (!canDo(userRole, "recruitment", "delete")) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
     }
     const updated = await prisma.recruitmentRequest.update({
@@ -56,7 +56,7 @@ export async function PUT(
   }
 
   // HR_ADMIN can update other fields (status=COMPLETED when filled)
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "recruitment", "create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
   const { status } = body;

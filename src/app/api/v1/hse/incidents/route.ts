@@ -11,6 +11,7 @@ const CreateSchema = z.object({
   description: z.string().min(5),
   injuredPerson: z.string().optional().nullable(),
   correctiveAction: z.string().optional().nullable(),
+  photos: z.array(z.string().url()).optional().nullable(),
 });
 
 export async function GET(request: NextRequest) {
@@ -48,11 +49,13 @@ export async function POST(request: NextRequest) {
   const emp = await prisma.employee.findFirst({ where: { userId: (session.user as any).id } });
   if (!emp) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy hồ sơ nhân viên" } }, { status: 404 });
 
+  const { photos, ...rest } = parsed.data;
   const incident = await prisma.hSEIncident.create({
     data: {
-      ...parsed.data,
-      incidentDate: new Date(parsed.data.incidentDate),
+      ...rest,
+      incidentDate: new Date(rest.incidentDate),
       reportedBy: emp.id,
+      photos: photos && photos.length > 0 ? JSON.stringify(photos) : undefined,
     },
     include: { reporter: { select: { id: true, code: true, fullName: true } } },
   });

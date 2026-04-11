@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
 const createContractSchema = z.object({
@@ -23,7 +23,7 @@ export async function POST(
   }
 
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "employees", "readAll")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { approveLeave } from "@/services/leave.service";
+import { logAudit } from "@/lib/audit";
 import prisma from "@/lib/prisma";
 
 export async function PUT(
@@ -13,14 +14,14 @@ export async function PUT(
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!checkPermission(userRole, "MANAGER")) {
+  if (!canDo(userRole, "leaveRequests", "approve1")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
   const { id } = await params;
 
-  // MANAGER can only approve requests from their own department
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  // MANAGER scope check: can only act on requests from their department
+  if (!canDo(userRole, "leaveRequests", "approve2")) {
     const leaveReq = await prisma.leaveRequest.findUnique({
       where: { id },
       include: { employee: { select: { departmentId: true } } },
@@ -34,9 +35,22 @@ export async function PUT(
   }
 
   try {
-    const updated = await approveLeave(id, userId);
-    return NextResponse.json({ data: updated });
-  } catch {
+    const updated = await approveLeave(id, userId, userRole);
+    const isForwarded = updated.status === "PENDING_HR";
+    logAudit({ userId, action: "APPROVE", entityType: "LeaveRequest", entityId: id, newValue: { status: updated.status, approverRole: userRole } });
+    return NextResponse.json({
+      data: updated,
+      message: isForwarded
+        ? "Đã chuyển HR duyệt cấp 2"
+        : "Đơn nghỉ phép đã được duyệt hoàn tất",
+    });
+  } catch (err: any) {
+    if (err.message === "INSUFFICIENT_BALANCE") {
+      return NextResponse.json({ error: { code: "INSUFFICIENT_BALANCE", message: "Nhân viên không còn đủ số ngày phép để duyệt" } }, { status: 422 });
+    }
+    if (err.message === "ALREADY_PROCESSED") {
+      return NextResponse.json({ error: { code: "ALREADY_PROCESSED", message: "Đơn này đã được xử lý trước đó" } }, { status: 409 });
+    }
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   }
 }

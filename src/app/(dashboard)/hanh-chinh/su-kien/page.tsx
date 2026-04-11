@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { formatDate } from "@/lib/utils";
-import { Plus, RefreshCw, X, Trash2, CheckSquare, Square } from "lucide-react";
+import { Plus, RefreshCw, X, Trash2, CheckSquare, Square, Users } from "lucide-react";
 import Link from "next/link";
+import { MonthCalendar } from "@/components/shared/month-calendar";
 
 type CompanyEvent = {
   id: string; title: string; type: string; startDate: string; endDate: string;
@@ -33,9 +34,12 @@ export default function SuKienPage() {
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [filterType, setFilterType] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [checklistEventId, setChecklistEventId] = useState<string | null>(null);
+  const [attendeesEventId, setAttendeesEventId] = useState<string | null>(null);
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
 
   function fetchEvents() {
     setLoading(true);
@@ -48,7 +52,10 @@ export default function SuKienPage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.data?.role || ""));
+    fetch("/api/v1/me").then((r) => r.json()).then((res) => {
+      setUserRole(res.data?.role || "");
+      setMyEmployeeId(res.data?.employeeId || null);
+    });
   }, []);
   useEffect(() => { fetchEvents(); }, [filterType, filterStatus]);
 
@@ -94,6 +101,28 @@ export default function SuKienPage() {
         ))}
       </div>
 
+      {/* View toggle */}
+      <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        {(["list", "calendar"] as const).map((m) => (
+          <button key={m} onClick={() => setViewMode(m)} className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
+            style={{ background: viewMode === m ? "var(--ibs-accent)" : "transparent", color: viewMode === m ? "#fff" : "var(--ibs-text-dim)" }}>
+            {m === "list" ? "Danh sách" : "Lịch"}
+          </button>
+        ))}
+      </div>
+
+      {viewMode === "calendar" && (
+        <MonthCalendar
+          events={events.map((ev) => ({
+            date: ev.startDate,
+            label: ev.title,
+            color: EVENT_TYPE[ev.type]?.color,
+          }))}
+          onDayClick={() => setViewMode("list")}
+        />
+      )}
+
+      {viewMode === "list" && (
       <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <div className="flex items-center gap-3 px-5 py-4 border-b flex-wrap" style={{ borderColor: "var(--ibs-border)" }}>
           <div className="text-[14px] font-semibold">Danh sách sự kiện</div>
@@ -136,6 +165,9 @@ export default function SuKienPage() {
                   {ev.description && <div className="text-[12px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>{ev.description}</div>}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => setAttendeesEventId(ev.id)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34,197,94,0.12)", color: "var(--ibs-success)" }}>
+                    <Users size={11} /> Tham gia
+                  </button>
                   <button onClick={() => setChecklistEventId(ev.id)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>
                     <CheckSquare size={11} /> Checklist
                   </button>
@@ -163,11 +195,16 @@ export default function SuKienPage() {
         </div>
       </div>
 
+      )}
+
       {showNew && (
         <NewEventModal onClose={() => setShowNew(false)} onSuccess={() => { setShowNew(false); fetchEvents(); }} />
       )}
       {checklistEventId && (
         <ChecklistModal eventId={checklistEventId} canManage={canManage} onClose={() => setChecklistEventId(null)} />
+      )}
+      {attendeesEventId && (
+        <AttendeesModal eventId={attendeesEventId} canManage={canManage} myEmployeeId={myEmployeeId} onClose={() => setAttendeesEventId(null)} />
       )}
     </div>
   );
@@ -351,6 +388,118 @@ function NewEventModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
             <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>{saving ? "Đang lưu..." : "Tạo"}</button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+type EventAttendee = {
+  id: string;
+  employeeId: string;
+  attended: boolean;
+  enrolledAt: string;
+  employee: { id: string; code: string; fullName: string; department: { name: string } };
+};
+
+function AttendeesModal({ eventId, canManage, myEmployeeId, onClose }: {
+  eventId: string; canManage: boolean; myEmployeeId: string | null; onClose: () => void;
+}) {
+  const [attendees, setAttendees] = useState<EventAttendee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [enrolling, setEnrolling] = useState(false);
+  const [error, setError] = useState("");
+
+  function fetchAttendees() {
+    setLoading(true);
+    fetch(`/api/v1/events/${eventId}/attendees`)
+      .then((r) => r.json()).then((res) => setAttendees(res.data || []))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => { fetchAttendees(); }, [eventId]);
+
+  const isEnrolled = attendees.some((a) => a.employeeId === myEmployeeId);
+  const myEnrollment = attendees.find((a) => a.employeeId === myEmployeeId);
+
+  async function enroll() {
+    setEnrolling(true); setError("");
+    const res = await fetch(`/api/v1/events/${eventId}/attendees`, { method: "POST" });
+    if (!res.ok) { const d = await res.json(); setError(d.error?.message || "Có lỗi"); }
+    setEnrolling(false);
+    fetchAttendees();
+  }
+
+  async function unenroll() {
+    if (!myEnrollment || !confirm("Hủy đăng ký tham gia?")) return;
+    await fetch(`/api/v1/events/${eventId}/attendees/${myEnrollment.id}`, { method: "DELETE" });
+    fetchAttendees();
+  }
+
+  async function toggleAttended(a: EventAttendee) {
+    await fetch(`/api/v1/events/${eventId}/attendees/${a.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attended: !a.attended }),
+    });
+    fetchAttendees();
+  }
+
+  const attendedCount = attendees.filter((a) => a.attended).length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="rounded-2xl w-full max-w-lg mx-4 p-6 max-h-[85vh] flex flex-col" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="text-[16px] font-bold">Danh sách tham gia</div>
+            <div className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
+              {attendees.length} đăng ký · {attendedCount} đã tham dự
+            </div>
+          </div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {/* Self-enroll / unenroll */}
+        {myEmployeeId && (
+          <div className="mb-4">
+            {error && <div className="text-[12px] text-red-500 mb-2">{error}</div>}
+            {isEnrolled ? (
+              <button onClick={unenroll} className="text-[13px] px-4 py-2 rounded-lg border font-medium" style={{ borderColor: "var(--ibs-danger)", color: "var(--ibs-danger)" }}>
+                Hủy đăng ký tham gia
+              </button>
+            ) : (
+              <button onClick={enroll} disabled={enrolling} className="text-[13px] px-4 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-success)", color: "#fff", opacity: enrolling ? 0.6 : 1 }}>
+                {enrolling ? "Đang đăng ký..." : "Đăng ký tham gia"}
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto divide-y" style={{ borderColor: "var(--ibs-border)" }}>
+          {loading && <div className="py-8 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>}
+          {!loading && attendees.length === 0 && (
+            <div className="py-8 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có ai đăng ký</div>
+          )}
+          {attendees.map((a) => (
+            <div key={a.id} className="flex items-center gap-3 py-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-medium truncate">{a.employee.fullName}</div>
+                <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{a.employee.code} · {a.employee.department.name}</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {a.attended ? (
+                  <span className="text-[11px] px-2 py-0.5 rounded-lg font-semibold" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}>Đã tham dự</span>
+                ) : (
+                  <span className="text-[11px] px-2 py-0.5 rounded-lg" style={{ background: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Chưa xác nhận</span>
+                )}
+                {canManage && (
+                  <button onClick={() => toggleAttended(a)} className="text-[11px] px-2 py-0.5 rounded border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>
+                    {a.attended ? "Bỏ xác nhận" : "Xác nhận"}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

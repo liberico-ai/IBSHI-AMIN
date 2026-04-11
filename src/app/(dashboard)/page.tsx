@@ -268,6 +268,7 @@ export default async function DashboardPage() {
                 Không có mục nào cần xử lý
               </div>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <tbody>
                   {pendingItems.map((item, i) => {
@@ -299,6 +300,7 @@ export default async function DashboardPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>

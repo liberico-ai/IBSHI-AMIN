@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  if (departmentId && checkPermission(userRole, "MANAGER")) {
+  if (departmentId && canDo(userRole, "attendance", "readDept")) {
     where.employee = { departmentId };
   }
   if (employeeId) where.employeeId = employeeId;
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "attendance", "bulkUpsert")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -109,6 +109,17 @@ export async function POST(request: NextRequest) {
 
   if (!Array.isArray(records)) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR" } }, { status: 400 });
+  }
+
+  // Reject any record with a future date (attendance can only be entered for past/today)
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  const futureRecord = records.find((r: { date: string }) => new Date(r.date) > today);
+  if (futureRecord) {
+    return NextResponse.json(
+      { error: { code: "VALIDATION_ERROR", message: "Không thể nhập chấm công cho ngày trong tương lai" } },
+      { status: 400 }
+    );
   }
 
   const created = await Promise.all(

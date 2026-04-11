@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 
 export async function GET(
   _request: NextRequest,
@@ -57,7 +57,7 @@ export async function PUT(
   const { action, note } = body as { action: "APPROVE" | "REJECT"; note?: string };
 
   if (action === "APPROVE") {
-    if (!checkPermission(userRole, "MANAGER")) {
+    if (!canDo(userRole, "leaveRequests", "approve1")) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
     }
 
@@ -100,7 +100,7 @@ export async function PUT(
   }
 
   if (action === "REJECT") {
-    if (!checkPermission(userRole, "MANAGER")) {
+    if (!canDo(userRole, "leaveRequests", "reject")) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
     }
 

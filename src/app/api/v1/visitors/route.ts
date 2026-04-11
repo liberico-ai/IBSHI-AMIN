@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
 import { z } from "zod";
 
 const VisitorPurposeEnum = z.enum(["FACTORY_TOUR", "AUDIT", "SURVEY", "BUSINESS", "DELIVERY", "OTHER"]);

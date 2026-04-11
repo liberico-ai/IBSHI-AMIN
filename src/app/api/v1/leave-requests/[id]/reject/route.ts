@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { rejectLeave } from "@/services/leave.service";
+import { logAudit } from "@/lib/audit";
 import prisma from "@/lib/prisma";
 
 export async function PUT(
@@ -13,14 +14,14 @@ export async function PUT(
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!checkPermission(userRole, "MANAGER")) {
+  if (!canDo(userRole, "leaveRequests", "reject")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
   const { id } = await params;
 
   // MANAGER can only reject requests from their own department
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "leaveRequests", "approve2")) {
     const leaveReq = await prisma.leaveRequest.findUnique({
       where: { id },
       include: { employee: { select: { departmentId: true } } },
@@ -36,6 +37,7 @@ export async function PUT(
   const body = await request.json().catch(() => ({}));
   try {
     const updated = await rejectLeave(id, userId, body.note);
+    logAudit({ userId, action: "REJECT", entityType: "LeaveRequest", entityId: id, newValue: { note: body.note } });
     return NextResponse.json({ data: updated });
   } catch {
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });

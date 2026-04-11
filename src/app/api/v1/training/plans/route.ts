@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -12,6 +12,7 @@ const CreateSchema = z.object({
   trainer: z.string().min(2),
   maxParticipants: z.number().int().min(1).default(30),
   description: z.string().optional().nullable(),
+  materialUrl: z.string().optional().nullable(),
 });
 
 export async function GET(request: NextRequest) {
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "training", "create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

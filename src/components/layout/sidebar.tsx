@@ -100,8 +100,8 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onC
 
   return (
     <>
-      {/* Mobile overlay */}
-      {!open && (
+      {/* Mobile overlay — visible when sidebar is open on small screens */}
+      {open && (
         <div
           className="fixed inset-0 z-40 bg-black/60 md:hidden"
           onClick={onClose}

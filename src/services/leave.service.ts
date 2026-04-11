@@ -19,21 +19,86 @@ export async function createLeaveRequest(data: {
   });
 }
 
-export async function approveLeave(id: string, approvedById: string) {
+/**
+ * Multi-level approval:
+ * - TEAM_LEAD / MANAGER + status=PENDING → PENDING_HR (notify HR)
+ * - HR_ADMIN / BOM + status=PENDING|PENDING_HR → APPROVED (check balance if ANNUAL)
+ */
+export async function approveLeave(id: string, approvedById: string, approverRole: string) {
   const req = await prisma.leaveRequest.findUniqueOrThrow({
     where: { id },
     include: { employee: { select: { userId: true } } },
   });
+
+  if (req.status === "APPROVED" || req.status === "REJECTED") {
+    throw new Error("ALREADY_PROCESSED");
+  }
+
+  const year = new Date().getFullYear();
+  const isHrOrAbove = approverRole === "HR_ADMIN" || approverRole === "BOM";
+
+  // First-level approval: TEAM_LEAD / MANAGER forwards to HR
+  if (req.status === "PENDING" && !isHrOrAbove) {
+    const hrAdmins = await prisma.user.findMany({
+      where: { role: { in: ["HR_ADMIN"] }, isActive: true },
+      select: { id: true },
+    });
+
+    const updated = await prisma.leaveRequest.update({
+      where: { id },
+      data: { status: "PENDING_HR", approvedBy: approvedById, approvedAt: new Date() },
+    });
+
+    await Promise.all(
+      hrAdmins.map((u) =>
+        prisma.notification.create({
+          data: {
+            userId: u.id,
+            title: "Đơn nghỉ phép chờ duyệt cấp 2",
+            message: `Trưởng phòng đã xác nhận, đơn nghỉ ${req.totalDays} ngày chờ HC duyệt lần cuối.`,
+            type: "APPROVAL_REQUIRED",
+            referenceType: "leave_request",
+            referenceId: id,
+          },
+        })
+      )
+    );
+
+    return updated;
+  }
+
+  // Final approval: HR_ADMIN or BOM (can approve PENDING or PENDING_HR)
+  if (req.leaveType === "ANNUAL") {
+    const balance = await prisma.leaveBalance.findUnique({
+      where: { employeeId_year: { employeeId: req.employeeId, year } },
+    });
+    if (!balance || balance.remainingDays < req.totalDays) {
+      throw new Error("INSUFFICIENT_BALANCE");
+    }
+  }
 
   const updated = await prisma.leaveRequest.update({
     where: { id },
     data: { status: "APPROVED", approvedBy: approvedById, approvedAt: new Date() },
   });
 
+  // Update balance for ALL leave types
   if (req.leaveType === "ANNUAL") {
     await prisma.leaveBalance.updateMany({
-      where: { employeeId: req.employeeId, year: new Date().getFullYear() },
+      where: { employeeId: req.employeeId, year },
       data: { usedDays: { increment: req.totalDays }, remainingDays: { decrement: req.totalDays } },
+    });
+  } else {
+    await prisma.leaveBalance.upsert({
+      where: { employeeId_year: { employeeId: req.employeeId, year } },
+      update: { usedDays: { increment: req.totalDays } },
+      create: {
+        employeeId: req.employeeId,
+        year,
+        totalDays: 0,
+        usedDays: req.totalDays,
+        remainingDays: 0,
+      },
     });
   }
 
@@ -41,7 +106,7 @@ export async function approveLeave(id: string, approvedById: string) {
     data: {
       userId: req.employee.userId,
       title: "Đơn nghỉ phép được duyệt",
-      message: `Đơn nghỉ phép ${req.totalDays} ngày của bạn đã được phê duyệt.`,
+      message: `Đơn nghỉ phép ${req.totalDays} ngày của bạn đã được phê duyệt hoàn tất.`,
       type: "APPROVED",
       referenceType: "leave_request",
       referenceId: id,

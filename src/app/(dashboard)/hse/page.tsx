@@ -5,6 +5,8 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, ShieldAlert, AlertTriangle } from "lucide-react";
+import { FileUpload } from "@/components/shared/file-upload";
+import { BUCKETS } from "@/lib/minio-constants";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -915,6 +917,7 @@ function ReportIncidentModal({
     injuredPerson: "",
     correctiveAction: "",
   });
+  const [photos, setPhotos] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -924,6 +927,7 @@ function ReportIncidentModal({
     const body: Record<string, unknown> = { ...form };
     if (!body.injuredPerson) delete body.injuredPerson;
     if (!body.correctiveAction) delete body.correctiveAction;
+    if (photos.length > 0) body.photos = photos;
     const res = await fetch("/api/v1/hse/incidents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1026,6 +1030,32 @@ function ReportIncidentModal({
             className="w-full rounded-lg px-3 py-2 text-[13px] border resize-none"
             style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
           />
+        </div>
+        <div>
+          <FieldLabel>Ảnh hiện trường (tối đa 5 ảnh)</FieldLabel>
+          {photos.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {photos.map((url, i) => (
+                <div key={i} className="relative">
+                  <img src={url} alt={`photo-${i}`} className="h-16 w-16 object-cover rounded border" style={{ borderColor: "var(--ibs-border)" }} />
+                  <button type="button" onClick={() => setPhotos(photos.filter((_, j) => j !== i))}
+                    className="absolute -top-1 -right-1 rounded-full bg-red-500 text-white w-4 h-4 flex items-center justify-center text-[10px]">
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {photos.length < 5 && (
+            <FileUpload
+              bucket={BUCKETS.HSE_PHOTOS}
+              folder="incidents"
+              accept="image/*"
+              label={`Tải ảnh hiện trường (${photos.length}/5)`}
+              onUploaded={(result) => setPhotos([...photos, result.url])}
+              onError={(msg) => setError(msg)}
+            />
+          )}
         </div>
         {error && <div className="text-[12px] text-red-500">{error}</div>}
         <ModalFooter onClose={onClose} saving={saving} label="Báo cáo sự cố" color="var(--ibs-danger)" />

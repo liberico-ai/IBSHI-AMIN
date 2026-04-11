@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 
 // GET /api/v1/salary/slips
 // HR_ADMIN/BOM: all records (filterable by month, year, employeeId)
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  const isHR = checkPermission(userRole, "HR_ADMIN");
+  const isHR = canDo(userRole, "payroll", "readAll");
 
   const { searchParams } = new URL(request.url);
   const month = searchParams.get("month") ? Number(searchParams.get("month")) : undefined;

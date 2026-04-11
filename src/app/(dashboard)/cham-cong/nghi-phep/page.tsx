@@ -5,7 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ApprovalWorkflow } from "@/components/shared/approval-workflow";
 import { formatDate } from "@/lib/utils";
-import { Plus, X, Calendar, Clock } from "lucide-react";
+import { Plus, X, Calendar, Clock, Download } from "lucide-react";
 
 type LeaveRequest = {
   id: string;
@@ -183,6 +183,52 @@ export default function NghiPhepPage() {
   }, [statusFilter]);
 
   const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM";
+  const isHR = userRole === "HR_ADMIN" || userRole === "BOM";
+
+  async function exportExcel() {
+    const { default: ExcelJS } = await import("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Danh sách nghỉ phép");
+    ws.columns = [
+      { header: "STT", key: "stt", width: 6 },
+      { header: "Mã NV", key: "code", width: 11 },
+      { header: "Họ tên", key: "name", width: 26 },
+      { header: "Phòng ban", key: "dept", width: 18 },
+      { header: "Loại nghỉ", key: "leaveType", width: 16 },
+      { header: "Từ ngày", key: "startDate", width: 13 },
+      { header: "Đến ngày", key: "endDate", width: 13 },
+      { header: "Số ngày", key: "totalDays", width: 10 },
+      { header: "Lý do", key: "reason", width: 30 },
+      { header: "Trạng thái", key: "status", width: 16 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    const STATUS_VN: Record<string, string> = {
+      PENDING: "Chờ duyệt", PENDING_HR: "Chờ HR duyệt",
+      APPROVED: "Đã duyệt", REJECTED: "Từ chối",
+    };
+    requests.forEach((r, idx) => {
+      ws.addRow({
+        stt: idx + 1,
+        code: r.employee.code,
+        name: r.employee.fullName,
+        dept: r.employee.department?.name,
+        leaveType: LEAVE_TYPE_LABELS[r.leaveType] ?? r.leaveType,
+        startDate: r.startDate.slice(0, 10),
+        endDate: r.endDate.slice(0, 10),
+        totalDays: r.totalDays,
+        reason: r.reason,
+        status: STATUS_VN[r.status] ?? r.status,
+      });
+    });
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "nghi-phep.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   async function handleAction(id: string, action: "APPROVE" | "REJECT") {
     setActionLoading(id + action);
@@ -237,7 +283,16 @@ export default function NghiPhepPage() {
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {isHR && (
+            <button
+              onClick={exportExcel}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border"
+              style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}
+            >
+              <Download size={13} /> Export Excel
+            </button>
+          )}
           <button
             onClick={() => setShowNew(true)}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white"

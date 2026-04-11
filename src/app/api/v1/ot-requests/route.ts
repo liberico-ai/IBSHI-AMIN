@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
+import { isInPast } from "@/lib/validation";
 
 const CreateOTSchema = z.object({
   date: z.string().transform((s) => new Date(s)),
@@ -75,9 +76,35 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Allow OT submission up to 3 days in the past (grace period for missed submissions)
+  const threeDaysAgo = new Date();
+  threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+  threeDaysAgo.setHours(0, 0, 0, 0);
+  if (date < threeDaysAgo) {
+    return NextResponse.json(
+      { error: { code: "VALIDATION_ERROR", message: "Chỉ được kê khai OT trong vòng 3 ngày trước" } },
+      { status: 400 }
+    );
+  }
+
   const employee = await prisma.employee.findFirst({ where: { userId }, include: { department: true } });
   if (!employee) {
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy nhân viên" } }, { status: 404 });
+  }
+
+  // Duplicate OT check — same employee, same date, overlapping time
+  const existingOT = await prisma.oTRequest.findFirst({
+    where: {
+      employeeId: employee.id,
+      date,
+      status: { not: "REJECTED" },
+    },
+  });
+  if (existingOT) {
+    return NextResponse.json(
+      { error: { code: "DUPLICATE", message: `Đã có đơn OT cho ngày ${date.toLocaleDateString("vi-VN")} chưa bị từ chối` } },
+      { status: 409 }
+    );
   }
 
   const hours = (timeToMinutes(endTime) - timeToMinutes(startTime)) / 60;

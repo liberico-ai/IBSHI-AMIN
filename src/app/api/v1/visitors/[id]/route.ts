@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
+import QRCode from "qrcode";
+import { sendTelegramMessage } from "@/services/telegram.service";
 
 export async function GET(
   _request: NextRequest,
@@ -30,14 +32,14 @@ export async function PUT(
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "visitors", "approve")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
   const { id } = await params;
   const visitor = await prisma.visitorRequest.findUnique({
     where: { id },
-    include: { host: { select: { departmentId: true } } },
+    include: { host: { select: { id: true, departmentId: true } } },
   });
   if (!visitor) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
@@ -46,6 +48,12 @@ export async function PUT(
 
   // ── CHECK IN ──────────────────────────────────────────────────────────
   if (action === "CHECK_IN") {
+    // Require HC/BOM approval before check-in
+    if (visitor.status !== "APPROVED") {
+      return NextResponse.json({
+        error: { code: "NOT_APPROVED", message: "Khách chưa được HC/BOM duyệt. Vui lòng duyệt trước khi check-in." },
+      }, { status: 422 });
+    }
     // 1. Generate sequential badge number
     const badgeCount = await prisma.visitorBadge.count();
     const year = new Date().getFullYear();
@@ -74,20 +82,23 @@ export async function PUT(
       },
     });
 
-    // 4. Create VisitorBadge
-    const qrData = JSON.stringify({
+    // 4. Generate QR code (SVG string) and create VisitorBadge
+    const qrPayload = JSON.stringify({
       regId: id,
       badgeNumber,
       visitDate: visitor.visitDate,
       allowedZones,
       inductionId: induction.id,
     });
+    // Generate as SVG data URL for easy embedding in print/badge view
+    const qrSvg = await QRCode.toString(qrPayload, { type: "svg", width: 200, margin: 1 });
+    const qrDataUrl = `data:image/svg+xml;base64,${Buffer.from(qrSvg).toString("base64")}`;
 
     await prisma.visitorBadge.create({
       data: {
         registrationId: id,
         badgeNumber,
-        qrData,
+        qrData: qrDataUrl,
         allowedZones,
         inductionId: induction.id,
       },
@@ -150,6 +161,21 @@ export async function PUT(
       include: { badge: true },
     });
 
+    // 8. Telegram push to host employee
+    if (visitor.host) {
+      const hostUser = await prisma.user.findFirst({
+        where: { employee: { id: visitor.host.id } },
+        select: { telegramChatId: true },
+      });
+      if (hostUser?.telegramChatId) {
+        const visitDateStr = visitor.visitDate.toLocaleDateString("vi-VN");
+        await sendTelegramMessage(
+          hostUser.telegramChatId,
+          `✅ <b>Khách vừa check-in</b>\n👤 ${visitor.visitorName}${visitor.visitorCompany ? ` (${visitor.visitorCompany})` : ""}\n📅 ${visitDateStr}\n🏷 Badge: ${badgeNumber}`
+        );
+      }
+    }
+
     return NextResponse.json({ data: updated });
   }
 
@@ -167,11 +193,36 @@ export async function PUT(
 
   // ── APPROVE ───────────────────────────────────────────────────────────
   if (action === "APPROVE") {
+    if (visitor.status !== "PENDING") {
+      return NextResponse.json({ error: { code: "ALREADY_PROCESSED" } }, { status: 409 });
+    }
     const updated = await prisma.visitorRequest.update({
       where: { id },
-      data: { status: "CHECKED_IN" }, // Approved = ready for check-in, keep PENDING until actual arrival
+      data: { status: "APPROVED" },
     });
-    // Notify security guard (placeholder — Telegram/notification in Sprint E/F)
+    // Notify host employee (in-app + Telegram)
+    const hostUser = visitor.host
+      ? await prisma.user.findFirst({ where: { employee: { id: visitor.host.id } }, select: { id: true, telegramChatId: true } })
+      : null;
+    if (hostUser) {
+      const visitDateStr = visitor.visitDate.toLocaleDateString("vi-VN");
+      await prisma.notification.create({
+        data: {
+          userId: hostUser.id,
+          title: "Khách được duyệt",
+          message: `Khách ${visitor.visitorName} (${visitor.visitorCompany ?? "—"}) đã được HC duyệt, dự kiến ngày ${visitDateStr}.`,
+          type: "APPROVED",
+          referenceType: "visitor",
+          referenceId: id,
+        },
+      });
+      if (hostUser.telegramChatId) {
+        await sendTelegramMessage(
+          hostUser.telegramChatId,
+          `🟢 <b>Khách của bạn đã được duyệt</b>\n👤 ${visitor.visitorName}${visitor.visitorCompany ? ` (${visitor.visitorCompany})` : ""}\n📅 Dự kiến: ${visitDateStr}\n📋 Mục đích: ${visitor.purpose}`
+        );
+      }
+    }
     return NextResponse.json({ data: updated });
   }
 

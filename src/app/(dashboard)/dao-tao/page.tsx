@@ -5,6 +5,8 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, BookOpen, Users, CheckSquare, AlertTriangle } from "lucide-react";
+import { FileUpload } from "@/components/shared/file-upload";
+import { BUCKETS } from "@/lib/minio-constants";
 
 type Department = { id: string; name: string };
 
@@ -121,7 +123,7 @@ export default function DaoTaoPage() {
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: "plans", label: "Kế hoạch đào tạo", icon: <BookOpen size={15} /> },
     { key: "attendance", label: "Điểm danh", icon: <CheckSquare size={15} /> },
-    { key: "certificates", label: "Cảnh báo chứng chỉ", icon: <AlertTriangle size={15} /> },
+    { key: "certificates", label: "Chứng chỉ", icon: <AlertTriangle size={15} /> },
   ];
 
   return (
@@ -203,9 +205,9 @@ export default function DaoTaoPage() {
         </div>
       )}
 
-      {/* Tab: Cảnh báo chứng chỉ hết hạn */}
+      {/* Tab: Chứng chỉ */}
       {activeTab === "certificates" && (
-        <CertificateAlerts />
+        <CertificateManager canManage={canManage} />
       )}
 
       {/* Modal: Tạo kế hoạch đào tạo */}
@@ -234,56 +236,230 @@ export default function DaoTaoPage() {
   );
 }
 
-// Certificate expiry alerts
-function CertificateAlerts() {
-  const [alerts, setAlerts] = useState<any[]>([]);
+type Certificate = {
+  id: string; employeeId: string; name: string; issuer: string;
+  issueDate: string; expiryDate: string | null; status: string; fileUrl: string | null;
+  employee: { id: string; code: string; fullName: string; department: { name: string } };
+};
+
+// Certificate CRUD manager
+function CertificateManager({ canManage }: { canManage: boolean }) {
+  const [certs, setCerts] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editCert, setEditCert] = useState<Certificate | null>(null);
+  const [filterStatus, setFilterStatus] = useState("");
+  const [employees, setEmployees] = useState<{ id: string; code: string; fullName: string }[]>([]);
+
+  function fetchCerts() {
+    setLoading(true);
+    const params = filterStatus ? `?status=${filterStatus}` : "";
+    fetch(`/api/v1/certificates${params}`)
+      .then((r) => r.json()).then((res) => setCerts(res.data || []))
+      .finally(() => setLoading(false));
+  }
 
   useEffect(() => {
-    setLoading(true);
-    fetch("/api/v1/alerts?type=certificate")
-      .then((r) => r.json()).then((res) => setAlerts(res.data || []))
-      .finally(() => setLoading(false));
-  }, []);
+    fetchCerts();
+    if (canManage) {
+      fetch("/api/v1/employees?limit=500")
+        .then((r) => r.json()).then((res) => setEmployees(res.data || []));
+    }
+  }, [filterStatus]);
 
-  if (loading) return (
-    <div className="rounded-xl border p-8 text-center text-[13px]" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>
-      Đang tải...
-    </div>
-  );
+  async function handleDelete(id: string) {
+    if (!confirm("Hủy hiệu lực chứng chỉ này?")) return;
+    await fetch(`/api/v1/certificates/${id}`, { method: "DELETE" });
+    fetchCerts();
+  }
+
+  const CERT_STATUS: Record<string, { label: string; color: string }> = {
+    VALID: { label: "Còn hiệu lực", color: "var(--ibs-success)" },
+    EXPIRING_SOON: { label: "Sắp hết hạn", color: "var(--ibs-warning)" },
+    EXPIRED: { label: "Đã hết hạn", color: "var(--ibs-danger)" },
+    REVOKED: { label: "Đã hủy", color: "#6b7280" },
+  };
 
   return (
-    <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-      <div className="px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
-        <div className="text-[14px] font-semibold">Cảnh báo chứng chỉ hết hạn</div>
+    <div>
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
+          className="rounded-lg px-3 py-1.5 text-[13px] border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+          <option value="">Tất cả trạng thái</option>
+          {Object.entries(CERT_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <button onClick={fetchCerts} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
+        {canManage && (
+          <button onClick={() => { setEditCert(null); setShowForm(true); }}
+            className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold ml-auto"
+            style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+            <Plus size={14} /> Thêm chứng chỉ
+          </button>
+        )}
       </div>
-      {alerts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-2" style={{ color: "var(--ibs-text-dim)" }}>
-          <AlertTriangle size={36} className="opacity-30" />
-          <div className="text-[13px]">Không có chứng chỉ nào sắp hết hạn</div>
-        </div>
-      ) : (
-        <div className="divide-y" style={{ borderColor: "var(--ibs-border)" }}>
-          {alerts.map((a: any) => (
-            <div key={a.id} className="flex items-center justify-between px-5 py-3">
-              <div>
-                <div className="text-[13px] font-semibold">{a.name}</div>
-                <div className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
-                  {a.employee?.fullName} · {a.employee?.department?.name}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[12px] font-semibold" style={{ color: a.status === "EXPIRED" ? "var(--ibs-danger)" : "var(--ibs-warning)" }}>
-                  {a.status === "EXPIRED" ? "Đã hết hạn" : "Sắp hết hạn"}
-                </div>
-                <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
-                  {a.expiryDate ? formatDate(a.expiryDate) : "—"}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+
+      <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        {loading ? (
+          <div className="py-12 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
+        ) : certs.length === 0 ? (
+          <div className="py-12 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có chứng chỉ nào</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
+                  <th className="text-left px-5 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>NHÂN VIÊN</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>CHỨNG CHỈ</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>ĐƠN VỊ CẤP</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>NGÀY CẤP</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>HẾT HẠN</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>TRẠNG THÁI</th>
+                  {canManage && <th className="px-5 py-3 w-24" />}
+                </tr>
+              </thead>
+              <tbody>
+                {certs.map((c) => {
+                  const st = CERT_STATUS[c.status] || { label: c.status, color: "#6b7280" };
+                  return (
+                    <tr key={c.id} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
+                      <td className="px-5 py-3">
+                        <div className="font-medium">{c.employee.fullName}</div>
+                        <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{c.employee.code} · {c.employee.department.name}</div>
+                      </td>
+                      <td className="px-4 py-3 font-medium">{c.name}</td>
+                      <td className="px-4 py-3" style={{ color: "var(--ibs-text-dim)" }}>{c.issuer}</td>
+                      <td className="px-4 py-3">{formatDate(c.issueDate)}</td>
+                      <td className="px-4 py-3">{c.expiryDate ? formatDate(c.expiryDate) : "Vĩnh viễn"}</td>
+                      <td className="px-4 py-3">
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg" style={{ background: `${st.color}20`, color: st.color }}>
+                          {st.label}
+                        </span>
+                      </td>
+                      {canManage && (
+                        <td className="px-5 py-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button onClick={() => { setEditCert(c); setShowForm(true); }} className="text-[12px]" style={{ color: "var(--ibs-accent)" }}>Sửa</button>
+                            <button onClick={() => handleDelete(c.id)} className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>Hủy</button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {showForm && canManage && (
+        <CertificateFormModal
+          cert={editCert}
+          employees={employees}
+          onClose={() => { setShowForm(false); setEditCert(null); }}
+          onSuccess={() => { setShowForm(false); setEditCert(null); fetchCerts(); }}
+        />
       )}
+    </div>
+  );
+}
+
+function CertificateFormModal({ cert, employees, onClose, onSuccess }: {
+  cert: Certificate | null;
+  employees: { id: string; code: string; fullName: string }[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [form, setForm] = useState({
+    employeeId: cert?.employeeId || "",
+    name: cert?.name || "",
+    issuer: cert?.issuer || "",
+    issueDate: cert?.issueDate ? cert.issueDate.slice(0, 10) : "",
+    expiryDate: cert?.expiryDate ? cert.expiryDate.slice(0, 10) : "",
+    status: cert?.status || "VALID",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault(); setSaving(true); setError("");
+    const payload: any = { ...form, expiryDate: form.expiryDate || null };
+    let res: Response;
+    if (cert) {
+      const { employeeId: _e, ...updatePayload } = payload;
+      res = await fetch(`/api/v1/certificates/${cert.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updatePayload),
+      });
+    } else {
+      res = await fetch("/api/v1/certificates", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+    }
+    setSaving(false);
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="rounded-2xl w-full max-w-md mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-5">
+          <div className="text-[15px] font-bold">{cert ? "Sửa chứng chỉ" : "Thêm chứng chỉ"}</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          {!cert && (
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Nhân viên *</label>
+              <select required value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+                <option value="">Chọn nhân viên</option>
+                {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.code} — {emp.fullName}</option>)}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Tên chứng chỉ *</label>
+            <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Đơn vị cấp *</label>
+            <input required value={form.issuer} onChange={(e) => setForm({ ...form, issuer: e.target.value })}
+              className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày cấp *</label>
+              <input required type="date" value={form.issueDate} onChange={(e) => setForm({ ...form, issueDate: e.target.value })}
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày hết hạn</label>
+              <input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })}
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
+          </div>
+          {cert && (
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Trạng thái</label>
+              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+                <option value="VALID">Còn hiệu lực</option>
+                <option value="EXPIRING_SOON">Sắp hết hạn</option>
+                <option value="EXPIRED">Đã hết hạn</option>
+              </select>
+            </div>
+          )}
+          {error && <div className="text-[12px] text-red-500">{error}</div>}
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: saving ? 0.6 : 1 }}>
+              {saving ? "Đang lưu..." : cert ? "Lưu" : "Thêm"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -296,7 +472,7 @@ function NewPlanModal({ departments, onClose, onSuccess }: {
 }) {
   const [form, setForm] = useState({
     title: "", type: "SAFETY", departmentId: "", scheduledDate: "",
-    trainer: "", maxParticipants: 30, description: "",
+    trainer: "", maxParticipants: 30, description: "", materialUrl: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -306,6 +482,7 @@ function NewPlanModal({ departments, onClose, onSuccess }: {
     setSaving(true);
     const body: any = { ...form, maxParticipants: Number(form.maxParticipants) };
     if (!body.departmentId) delete body.departmentId;
+    if (!body.materialUrl) delete body.materialUrl;
     const res = await fetch("/api/v1/training/plans", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
@@ -368,6 +545,18 @@ function NewPlanModal({ departments, onClose, onSuccess }: {
             <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Mô tả</label>
             <textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
               className="w-full rounded-lg px-3 py-2 text-[13px] border resize-none" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Tài liệu đào tạo</label>
+            <FileUpload
+              bucket={BUCKETS.HR_DOCUMENTS}
+              folder="training"
+              accept=".pdf,.ppt,.pptx,.doc,.docx"
+              label="Tải lên tài liệu / slides (PDF, PowerPoint, Word)"
+              currentUrl={form.materialUrl || undefined}
+              onUploaded={(result) => setForm({ ...form, materialUrl: result.url })}
+              onError={(msg) => setError(msg)}
+            />
           </div>
           {error && <div className="text-[12px] text-red-500">{error}</div>}
           <div className="flex gap-2 justify-end mt-2">
@@ -473,6 +662,7 @@ function PlanDetailModal({ plan, records, loading, canManage, onClose, onUpdateS
               <div className="text-[13px]">Chưa có người tham gia nào được ghi nhận</div>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
@@ -521,6 +711,7 @@ function PlanDetailModal({ plan, records, loading, canManage, onClose, onUpdateS
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 

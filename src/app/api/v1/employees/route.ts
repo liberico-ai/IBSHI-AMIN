@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 import { hashSync } from "bcryptjs";
 
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
   const userRole = (session.user as any).role;
-  if (!checkPermission(userRole, "HR_ADMIN")) {
+  if (!canDo(userRole, "employees", "readAll")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền tạo nhân viên" } }, { status: 403 });
   }
 
@@ -106,6 +106,15 @@ export async function POST(request: NextRequest) {
   }
 
   const data = parsed.data;
+
+  // Check idNumber uniqueness
+  const existingById = await prisma.employee.findFirst({ where: { idNumber: data.idNumber } });
+  if (existingById) {
+    return NextResponse.json(
+      { error: { code: "DUPLICATE", message: "Số CCCD/Passport đã tồn tại trong hệ thống" } },
+      { status: 409 }
+    );
+  }
 
   // Get last employee code
   const lastEmployee = await prisma.employee.findFirst({ orderBy: { code: "desc" } });

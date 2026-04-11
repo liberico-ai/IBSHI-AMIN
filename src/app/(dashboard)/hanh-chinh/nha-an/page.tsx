@@ -20,9 +20,19 @@ type MealFeedback = {
   employee: { code: string; fullName: string };
 };
 type FeedbackMeta = { total: number; avgRating: number | null; distribution: { star: number; count: number }[] };
+type WeeklyMenuItem = { id: string; weekNumber: number; year: number; dayOfWeek: number; mainDish: string; sideDish: string; soup: string; dessert: string | null };
+
+const DOW_LABELS = ["", "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6"];
+
+function getISOWeek(d: Date): number {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
 
 export default function NhaAnPage() {
-  const [tab, setTab] = useState<"registrations" | "feedback" | "cost">("registrations");
+  const [tab, setTab] = useState<"registrations" | "feedback" | "cost" | "menu">("registrations");
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [registrations, setRegistrations] = useState<MealReg[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -39,6 +49,39 @@ export default function NhaAnPage() {
   const [costData, setCostData] = useState<CostItem[]>([]);
   const [costMeta, setCostMeta] = useState<CostMeta | null>(null);
   const [costLoading, setCostLoading] = useState(false);
+  const [menuItems, setMenuItems] = useState<WeeklyMenuItem[]>([]);
+  const [menuWeek, setMenuWeek] = useState(getISOWeek(new Date()));
+  const [menuYear, setMenuYear] = useState(new Date().getFullYear());
+  const [menuLoading, setMenuLoading] = useState(false);
+  const [editMenu, setEditMenu] = useState<WeeklyMenuItem | null>(null);
+  const [menuForm, setMenuForm] = useState({ mainDish: "", sideDish: "", soup: "", dessert: "" });
+  const [menuDayOfWeek, setMenuDayOfWeek] = useState(1);
+  const [showMenuForm, setShowMenuForm] = useState(false);
+
+  function fetchMenu(wk?: number, yr?: number) {
+    const w = wk ?? menuWeek; const y = yr ?? menuYear;
+    setMenuLoading(true);
+    fetch(`/api/v1/meals/menu?week=${w}&year=${y}`)
+      .then((r) => r.json()).then((res) => setMenuItems(res.data || []))
+      .finally(() => setMenuLoading(false));
+  }
+
+  async function saveMenuItem() {
+    const payload = { weekNumber: menuWeek, year: menuYear, dayOfWeek: menuDayOfWeek, ...menuForm };
+    if (editMenu) {
+      await fetch(`/api/v1/meals/menu/${editMenu.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(menuForm) });
+    } else {
+      await fetch("/api/v1/meals/menu", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    }
+    setShowMenuForm(false); setEditMenu(null); setMenuForm({ mainDish: "", sideDish: "", soup: "", dessert: "" });
+    fetchMenu();
+  }
+
+  async function deleteMenuItem(id: string) {
+    if (!confirm("Xóa thực đơn này?")) return;
+    await fetch(`/api/v1/meals/menu/${id}`, { method: "DELETE" });
+    fetchMenu();
+  }
 
   function fetchRegs() {
     setLoading(true);
@@ -112,11 +155,11 @@ export default function NhaAnPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
-        {(["registrations", "feedback", "cost"] as const).map((t) => (
-          <button key={t} onClick={() => { setTab(t); if (t === "cost") fetchCostReport(); }}
+        {(["registrations", "feedback", "cost", "menu"] as const).map((t) => (
+          <button key={t} onClick={() => { setTab(t); if (t === "cost") fetchCostReport(); if (t === "menu") fetchMenu(); }}
             className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
             style={{ background: tab === t ? "var(--ibs-accent)" : "transparent", color: tab === t ? "#fff" : "var(--ibs-text-dim)" }}>
-            {t === "registrations" ? "Đăng ký suất ăn" : t === "feedback" ? "Khảo sát chất lượng" : "Chi phí"}
+            {t === "registrations" ? "Đăng ký suất ăn" : t === "feedback" ? "Khảo sát chất lượng" : t === "cost" ? "Chi phí" : "Thực đơn tuần"}
           </button>
         ))}
       </div>
@@ -147,6 +190,7 @@ export default function NhaAnPage() {
             <div className="px-5 py-3 border-b text-[14px] font-semibold" style={{ borderColor: "var(--ibs-border)" }}>
               Đăng ký suất ăn ngày {formatDate(selectedDate)}
             </div>
+            <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
@@ -183,6 +227,7 @@ export default function NhaAnPage() {
                 </tr>
               </tbody>
             </table>
+            </div>
             {registrations.some((r) => r.specialNote) && (
               <div className="px-5 py-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
                 <div className="text-[11px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>GHI CHÚ ĐẶC BIỆT</div>
@@ -314,6 +359,7 @@ export default function NhaAnPage() {
               </div>
 
               <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                <div className="overflow-x-auto">
                 <table className="w-full text-[13px]">
                   <thead>
                     <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
@@ -354,8 +400,158 @@ export default function NhaAnPage() {
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {tab === "menu" && (
+        <div>
+          {/* Week navigator */}
+          <div className="flex items-center gap-3 mb-5 flex-wrap">
+            <button
+              onClick={() => {
+                let w = menuWeek - 1; let y = menuYear;
+                if (w < 1) { y -= 1; w = getISOWeek(new Date(y, 11, 28)); }
+                setMenuWeek(w); setMenuYear(y); fetchMenu(w, y);
+              }}
+              className="px-3 py-1.5 rounded-lg border text-[13px]"
+              style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+              ← Tuần trước
+            </button>
+            <div className="text-[14px] font-semibold" style={{ color: "var(--ibs-text)" }}>
+              Tuần {menuWeek} — {menuYear}
+            </div>
+            <button
+              onClick={() => {
+                let w = menuWeek + 1; let y = menuYear;
+                const maxWeek = getISOWeek(new Date(y, 11, 28));
+                if (w > maxWeek) { y += 1; w = 1; }
+                setMenuWeek(w); setMenuYear(y); fetchMenu(w, y);
+              }}
+              className="px-3 py-1.5 rounded-lg border text-[13px]"
+              style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+              Tuần sau →
+            </button>
+            <button onClick={() => fetchMenu()} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
+          </div>
+
+          {menuLoading ? (
+            <div className="py-12 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
+          ) : (
+            <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
+                      <th className="text-left px-5 py-3 text-[11px] font-semibold w-28" style={{ color: "var(--ibs-text-dim)" }}>NGÀY</th>
+                      <th className="text-left px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>MÓN CHÍNH</th>
+                      <th className="text-left px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>MÓN PHỤ</th>
+                      <th className="text-left px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>CANH / SOUP</th>
+                      <th className="text-left px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>TRÁNG MIỆNG</th>
+                      {isHRAdmin && <th className="px-5 py-3 w-24" />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[1, 2, 3, 4, 5].map((dow) => {
+                      const item = menuItems.find((m) => m.dayOfWeek === dow);
+                      return (
+                        <tr key={dow} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
+                          <td className="px-5 py-3 font-semibold" style={{ color: "var(--ibs-accent)" }}>{DOW_LABELS[dow]}</td>
+                          {item ? (
+                            <>
+                              <td className="px-4 py-3">{item.mainDish}</td>
+                              <td className="px-4 py-3">{item.sideDish}</td>
+                              <td className="px-4 py-3">{item.soup}</td>
+                              <td className="px-4 py-3" style={{ color: "var(--ibs-text-dim)" }}>{item.dessert || "—"}</td>
+                              {isHRAdmin && (
+                                <td className="px-5 py-3 text-right">
+                                  <div className="flex items-center justify-end gap-3">
+                                    <button
+                                      onClick={() => {
+                                        setEditMenu(item);
+                                        setMenuForm({ mainDish: item.mainDish, sideDish: item.sideDish, soup: item.soup, dessert: item.dessert || "" });
+                                        setMenuDayOfWeek(dow);
+                                        setShowMenuForm(true);
+                                      }}
+                                      className="text-[12px]" style={{ color: "var(--ibs-accent)" }}>Sửa</button>
+                                    <button onClick={() => deleteMenuItem(item.id)} className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>Xóa</button>
+                                  </div>
+                                </td>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-4 py-3" style={{ color: "var(--ibs-text-dim)" }}>—</td>
+                              <td className="px-4 py-3" style={{ color: "var(--ibs-text-dim)" }}>—</td>
+                              <td className="px-4 py-3" style={{ color: "var(--ibs-text-dim)" }}>—</td>
+                              <td className="px-4 py-3" style={{ color: "var(--ibs-text-dim)" }}>—</td>
+                              {isHRAdmin && (
+                                <td className="px-5 py-3 text-right">
+                                  <button
+                                    onClick={() => {
+                                      setEditMenu(null);
+                                      setMenuForm({ mainDish: "", sideDish: "", soup: "", dessert: "" });
+                                      setMenuDayOfWeek(dow);
+                                      setShowMenuForm(true);
+                                    }}
+                                    className="text-[12px] flex items-center gap-1 ml-auto" style={{ color: "var(--ibs-accent)" }}>
+                                    <Plus size={12} /> Thêm
+                                  </button>
+                                </td>
+                              )}
+                            </>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Add/Edit form modal */}
+          {showMenuForm && isHRAdmin && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
+              <div className="rounded-2xl border p-6 w-full max-w-md" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-[15px] font-semibold">
+                    {editMenu ? "Sửa thực đơn" : "Thêm thực đơn"} — {DOW_LABELS[menuDayOfWeek]}
+                  </div>
+                  <button onClick={() => { setShowMenuForm(false); setEditMenu(null); }} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+                </div>
+                <div className="flex flex-col gap-3">
+                  {(["mainDish", "sideDish", "soup", "dessert"] as const).map((field) => (
+                    <div key={field}>
+                      <label className="block text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>
+                        {field === "mainDish" ? "Món chính *" : field === "sideDish" ? "Món phụ *" : field === "soup" ? "Canh / Soup *" : "Tráng miệng"}
+                      </label>
+                      <input
+                        value={menuForm[field]}
+                        onChange={(e) => setMenuForm((f) => ({ ...f, [field]: e.target.value }))}
+                        placeholder={field === "dessert" ? "Tuỳ chọn" : "Nhập tên món..."}
+                        className="w-full rounded-lg px-3 py-2 text-[13px] border"
+                        style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-3 mt-5 justify-end">
+                  <button onClick={() => { setShowMenuForm(false); setEditMenu(null); }}
+                    className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Hủy</button>
+                  <button
+                    onClick={saveMenuItem}
+                    disabled={!menuForm.mainDish || !menuForm.sideDish || !menuForm.soup}
+                    className="px-4 py-2 rounded-lg text-[13px] font-semibold"
+                    style={{ background: "var(--ibs-accent)", color: "#fff", opacity: (!menuForm.mainDish || !menuForm.sideDish || !menuForm.soup) ? 0.5 : 1 }}>
+                    {editMenu ? "Lưu thay đổi" : "Thêm thực đơn"}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}

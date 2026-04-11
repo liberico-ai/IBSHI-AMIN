@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { checkPermission } from "@/lib/permissions";
 import { z } from "zod";
+import { isInPast } from "@/lib/validation";
 
 const CreateLeaveSchema = z.object({
   leaveType: z.enum(["ANNUAL", "SICK", "PERSONAL", "WEDDING", "FUNERAL", "MATERNITY", "PATERNITY", "UNPAID"]),
@@ -68,6 +68,13 @@ export async function POST(request: NextRequest) {
   if (endDate < startDate) {
     return NextResponse.json(
       { error: { code: "VALIDATION_ERROR", message: "Ngày kết thúc phải sau ngày bắt đầu" } },
+      { status: 400 }
+    );
+  }
+
+  if (isInPast(startDate)) {
+    return NextResponse.json(
+      { error: { code: "VALIDATION_ERROR", message: "Ngày bắt đầu không được là ngày trong quá khứ" } },
       { status: 400 }
     );
   }

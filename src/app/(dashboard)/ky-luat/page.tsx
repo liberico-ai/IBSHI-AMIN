@@ -5,6 +5,8 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, FileText, AlertTriangle, Search } from "lucide-react";
+import { FileUpload } from "@/components/shared/file-upload";
+import { BUCKETS } from "@/lib/minio-constants";
 
 type Regulation = {
   id: string;
@@ -318,10 +320,16 @@ function NewRegulationModal({ onClose, onSuccess }: { onClose: () => void; onSuc
               className="w-full rounded-lg px-3 py-2 text-[13px] border resize-none" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
           </div>
           <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Link file đính kèm</label>
-            <input value={form.fileUrl} onChange={(e) => setForm({ ...form, fileUrl: e.target.value })}
-              className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
-              placeholder="https://..." />
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>File đính kèm</label>
+            <FileUpload
+              bucket={BUCKETS.HR_DOCUMENTS}
+              folder="regulations"
+              accept=".pdf,.doc,.docx,.xls,.xlsx"
+              label="Tải lên văn bản quy định (PDF, Word, Excel)"
+              currentUrl={form.fileUrl || undefined}
+              onUploaded={(result) => setForm({ ...form, fileUrl: result.url })}
+              onError={(msg) => setError(msg)}
+            />
           </div>
           {error && <div className="text-[12px] text-red-500">{error}</div>}
           <div className="flex gap-2 justify-end mt-2">

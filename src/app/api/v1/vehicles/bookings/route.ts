@@ -19,6 +19,8 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
+  const userRole = (session.user as any).role;
+  const userId = (session.user as any).id;
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status") || "";
   const vehicleId = searchParams.get("vehicleId") || "";
@@ -26,6 +28,15 @@ export async function GET(request: NextRequest) {
   const where: any = {};
   if (status) where.status = status;
   if (vehicleId) where.vehicleId = vehicleId;
+
+  // MANAGER sees only their department's bookings
+  if (userRole === "MANAGER") {
+    const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
+    if (emp) where.requester = { departmentId: emp.departmentId };
+  } else if (userRole === "EMPLOYEE" || userRole === "TEAM_LEAD") {
+    const emp = await prisma.employee.findFirst({ where: { userId }, select: { id: true } });
+    if (emp) where.requestedBy = emp.id;
+  }
 
   const data = await prisma.vehicleBooking.findMany({
     where,
