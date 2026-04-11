@@ -70,6 +70,9 @@ ARG BUILD_TIME=unknown
 ENV GIT_HASH=${GIT_HASH}
 ENV BUILD_TIME=${BUILD_TIME}
 
+# Runtime env — baked from repo .env (credentials already tracked in git)
+COPY --from=builder /app/.env ./.env
+
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 EXPOSE 3000
