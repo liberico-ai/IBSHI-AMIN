@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
     where,
     include: {
       employee: {
-        include: { department: true },
+        include: { department: true, position: true },
       },
     },
     orderBy: [{ employee: { code: "asc" } }, { date: "asc" }],

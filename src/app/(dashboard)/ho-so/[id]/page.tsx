@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -691,8 +691,8 @@ function InfoRow({ label, value, icon: Icon }: { label: string; value?: string |
   );
 }
 
-export default function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function EmployeeDetailPage({ params }: { params: { id: string } }) {
+  const { id } = params;
   const router = useRouter();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);

@@ -5,6 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, Download } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type PayrollPeriod = {
@@ -504,16 +505,16 @@ function PeriodDetailModal({
 export default function LuongPage() {
   const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState("");
+  const { canDo, hasRole } = usePermission();
   const [showCreate, setShowCreate] = useState(false);
   const [detailPeriod, setDetailPeriod] = useState<PeriodDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [calculatingId, setCalculatingId] = useState<string | null>(null);
   const [actioningId, setActioningId] = useState<string | null>(null);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM";
-  const isBOM = userRole === "BOM";
-  const isHRAdmin = userRole === "HR_ADMIN";
+  const canManage = canDo("payroll", "calculate");
+  const isBOM = hasRole("BOM");
+  const isHRAdmin = hasRole("HR_ADMIN");
 
   const fetchPeriods = useCallback(() => {
     setLoading(true);
@@ -524,9 +525,6 @@ export default function LuongPage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/v1/me")
-      .then((r) => r.json())
-      .then((res) => setUserRole(res.data?.role || ""));
     fetchPeriods();
   }, [fetchPeriods]);
 

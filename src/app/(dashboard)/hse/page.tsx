@@ -5,6 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, ShieldAlert, AlertTriangle } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 
@@ -108,7 +109,7 @@ type Department = { id: string; name: string; code: string };
 
 export default function HsePage() {
   const [activeTab, setActiveTab] = useState<Tab>("incidents");
-  const [userRole, setUserRole] = useState("");
+  const { canDo } = usePermission();
 
   const [incidents, setIncidents] = useState<HSEIncident[]>([]);
   const [loadingIncidents, setLoadingIncidents] = useState(true);
@@ -161,7 +162,6 @@ export default function HsePage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.data?.role || ""));
     fetch("/api/v1/employees?limit=300").then((r) => r.json()).then((res) => setEmployees(res.data || []));
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepartments(res.data || []));
     fetchIncidents();
@@ -170,7 +170,7 @@ export default function HsePage() {
     fetchBriefings();
   }, []);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM";
+  const canManage = canDo("hse", "create");
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "incidents", label: "Sự cố" },

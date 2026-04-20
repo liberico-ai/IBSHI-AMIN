@@ -9,7 +9,7 @@ const UpdateSchema = z.object({
   status: z.enum(["NEW","SCREENING","INTERVIEW","INTERVIEWED","OFFERED","ACCEPTED","REJECTED","WITHDRAWN"]).optional(),
   interviewDate: z.string().optional().nullable(),
   interviewNote: z.string().optional().nullable(),
-  interviewScore: z.number().int().min(1).max(10).optional().nullable(),
+  interviewScore: z.number().min(0).max(10).optional().nullable(),
 });
 
 export async function PUT(

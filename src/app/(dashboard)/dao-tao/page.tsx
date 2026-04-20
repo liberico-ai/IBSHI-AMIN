@@ -5,6 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, BookOpen, Users, CheckSquare, AlertTriangle } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 
@@ -58,7 +59,7 @@ export default function DaoTaoPage() {
   const [plans, setPlans] = useState<TrainingPlan[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState("");
+  const { canDo } = usePermission();
 
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<TrainingPlan | null>(null);
@@ -73,7 +74,6 @@ export default function DaoTaoPage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.data?.role || ""));
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepartments(res.data || []));
     fetchPlans();
   }, []);
@@ -95,7 +95,7 @@ export default function DaoTaoPage() {
     fetchPlans();
   }
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM";
+  const canManage = canDo("training", "create");
 
   const planColumns: Column<TrainingPlan>[] = [
     { key: "title", header: "Tên khóa đào tạo", render: (p) => <span className="font-semibold">{p.title}</span> },

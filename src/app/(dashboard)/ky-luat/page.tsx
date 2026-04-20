@@ -5,6 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, FileText, AlertTriangle, Search } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 
@@ -60,7 +61,7 @@ export default function KyLuatPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingRegs, setLoadingRegs] = useState(true);
   const [loadingActions, setLoadingActions] = useState(true);
-  const [userRole, setUserRole] = useState("");
+  const { canDo } = usePermission();
 
   const [showNewRegulation, setShowNewRegulation] = useState(false);
   const [showNewAction, setShowNewAction] = useState(false);
@@ -82,13 +83,12 @@ export default function KyLuatPage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.data?.role || ""));
     fetch("/api/v1/employees?limit=300").then((r) => r.json()).then((res) => setEmployees(res.data || []));
     fetchRegulations();
     fetchActions();
   }, []);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM";
+  const canManage = canDo("discipline", "create");
 
   const filteredRegs = regulations.filter((r) =>
     !searchReg ||

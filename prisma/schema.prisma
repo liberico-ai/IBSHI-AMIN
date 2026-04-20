@@ -177,6 +177,7 @@ enum DisciplinaryStatus {
 model User {
   id             String   @id @default(uuid())
   employeeCode   String   @unique
+  erpCode        String?  @unique // numeric ERP code (e.g. "190342") for attendance import
   email          String   @unique
   passwordHash   String
   role           UserRole @default(EMPLOYEE)
