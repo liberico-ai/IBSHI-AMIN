@@ -106,7 +106,7 @@ export default async function DashboardPage() {
   ]);
 
   const presentToday = presentTodayCount;
-  const presentRate = totalEmployees > 0 ? ((presentToday / totalEmployees) * 100).toFixed(1) : "0.0";
+  const presentRate = totalEmployees > 0 ? ((presentToday / totalEmployees) * 100).toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "0,0";
 
   // Attendance by department
   const departments = await prisma.department.findMany({

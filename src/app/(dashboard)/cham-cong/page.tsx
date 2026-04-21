@@ -7,6 +7,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Plus, Check, X, RefreshCw, CalendarDays, Clock, Download, Upload } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
+import { DateInput, TimeInput } from "@/components/shared/date-input";
 
 type LeaveRequest = {
   id: string; leaveType: string; startDate: string; endDate: string;
@@ -102,7 +103,7 @@ function OfficeAttendanceCard({
       }
       // Fallback: day d is at col[2+d] (code, name, dept, day1...)
       if (dayColMap.size === 0) for (let d = 1; d <= 31; d++) dayColMap.set(d, 2 + d);
-      console.log("[Import] dayColMap:", dayColMap.get(1), dayColMap.get(15), dayColMap.get(30), "(cols for day 1,15,30)");
+
 
       // Step 2: Find employee rows. Code = 4+ digit number in col[0] (or col[1] if col[0] is STT).
       // OT row may follow immediately. It is the OT row ONLY IF its code is empty OR matches this employee.
@@ -139,8 +140,6 @@ function OfficeAttendanceCard({
         });
       }
 
-      console.log("[Import] Parsed records:", records.length, records.slice(0, 3));
-
       if (records.length === 0) {
         setImportMsg({ ok: false, text: `Không tìm thấy dữ liệu hợp lệ. File có ${rows.length} dòng. Kiểm tra Console (F12) để xem cấu trúc.` });
         return;
@@ -152,7 +151,6 @@ function OfficeAttendanceCard({
         body: JSON.stringify({ month, year, records }),
       });
       const result = await res.json();
-      console.log("[Import] API response:", result);
       if (res.ok) {
         setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${result.skipped ? `. Bỏ qua ${result.skipped} mã NV không tìm thấy.` : "."}` });
         // Delay refresh so user sees the message
@@ -359,10 +357,10 @@ function AttendanceGridCard({
         if (found.size >= 20) { found.forEach((c, d) => dayColMap.set(d, c)); break; }
       }
       if (dayColMap.size === 0) for (let d = 1; d <= 31; d++) dayColMap.set(d, 2 + d);
-      console.log("[Import-Grid] dayColMap:", dayColMap.get(1), dayColMap.get(15), dayColMap.get(30));
+
 
       // Parse a cell that may be numeric hours OR a text attendance symbol (P, CT, NP, NK, ½ …)
-      function parseGridCell(raw: unknown): { wh: number; status?: string } {
+      const parseGridCell = (raw: unknown): { wh: number; status?: string } => {
         const s = String(raw ?? "").trim().toUpperCase();
         if (!s || s === "-" || s === "--") return { wh: 0 };
         const SYMBOLS: Record<string, { wh: number; status: string }> = {
@@ -381,7 +379,7 @@ function AttendanceGridCard({
         const num = parseFloat(s);
         if (!isNaN(num) && num > 0) return { wh: num };
         return { wh: 0 };
-      }
+      };
 
       // Step 2: Scan employee rows using day column map
       const skipRows = new Set<number>();
@@ -414,8 +412,6 @@ function AttendanceGridCard({
         });
       }
 
-      console.log("[Import-Grid] Parsed records:", records.length, records.slice(0, 2));
-
       if (records.length === 0) {
         setImportMsg({ ok: false, text: `Không tìm thấy dữ liệu hợp lệ. File có ${rows.length} dòng. Mở Console (F12) để xem cấu trúc.` });
         return;
@@ -427,7 +423,6 @@ function AttendanceGridCard({
         body: JSON.stringify({ month, year, records }),
       });
       const result = await res.json();
-      console.log("[Import-Grid] API response:", result);
       if (res.ok) {
         setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${result.skipped ? `. Bỏ qua ${result.skipped} mã NV không tìm thấy.` : "."}` });
         setTimeout(() => onRefresh(), 1500);
@@ -738,7 +733,7 @@ export default function AttendancePage() {
     { key: "dept", header: "Phòng ban", render: (r) => <span style={{ color: "var(--ibs-text-muted)" }}>{(r as unknown as OTRequest).employee?.department?.name}</span> },
     { key: "date", header: "Ngày OT", render: (r) => <span>{formatDate(new Date((r as unknown as OTRequest).date))}</span> },
     { key: "time", header: "Giờ", render: (r) => { const o = r as unknown as OTRequest; return <span>{o.startTime} – {o.endTime}</span>; } },
-    { key: "hours", header: "Số giờ", width: "70px", render: (r) => <span className="font-semibold" style={{ color: "var(--ibs-accent)" }}>{(r as unknown as OTRequest).hours.toFixed(1)}h</span> },
+    { key: "hours", header: "Số giờ", width: "70px", render: (r) => <span className="font-semibold" style={{ color: "var(--ibs-accent)" }}>{(r as unknown as OTRequest).hours.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h</span> },
     { key: "otRate", header: "Hệ số", width: "70px", render: (r) => <span>×{(r as unknown as OTRequest).otRate}</span> },
     { key: "status", header: "Trạng thái", render: (r) => <StatusBadge status={(r as unknown as OTRequest).status} /> },
     {
@@ -1012,12 +1007,12 @@ function LeaveRequestForm({ onClose, onSuccess }: { onClose: () => void; onSucce
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>Từ ngày</label>
-              <input type="date" required value={form.startDate} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+              <DateInput required value={form.startDate} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
                 className={inputClass} style={inputStyle} />
             </div>
             <div>
               <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>Đến ngày</label>
-              <input type="date" required value={form.endDate} onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+              <DateInput required value={form.endDate} onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
                 className={inputClass} style={inputStyle} />
             </div>
           </div>
@@ -1076,18 +1071,18 @@ function OTRequestForm({ onClose, onSuccess }: { onClose: () => void; onSuccess:
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>Ngày OT</label>
-            <input type="date" required value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+            <DateInput required value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
               className={inputClass} style={inputStyle} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>Giờ bắt đầu</label>
-              <input type="time" required value={form.startTime} onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
+              <TimeInput required value={form.startTime} onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
                 className={inputClass} style={inputStyle} />
             </div>
             <div>
               <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>Giờ kết thúc</label>
-              <input type="time" required value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
+              <TimeInput required value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
                 className={inputClass} style={inputStyle} />
             </div>
           </div>

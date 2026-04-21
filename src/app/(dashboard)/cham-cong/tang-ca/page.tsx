@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { ApprovalWorkflow } from "@/components/shared/approval-workflow";
 import { formatDate } from "@/lib/utils";
 import { Plus, X, Clock, Calendar } from "lucide-react";
+import { DateInput, TimeInput } from "@/components/shared/date-input";
 
 type OTRequest = {
   id: string;
@@ -105,7 +106,7 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
 
           <div>
             <label className={labelCls} style={labelStyle}>Ngày tăng ca *</label>
-            <input required type="date" value={form.date} onChange={(e) => handleChange("date", e.target.value)}
+            <DateInput required value={form.date} onChange={(e) => handleChange("date", e.target.value)}
               className={inputCls} style={inputStyle} />
             {form.date && (
               <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>
@@ -117,12 +118,12 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelCls} style={labelStyle}>Giờ bắt đầu *</label>
-              <input required type="time" value={form.startTime} onChange={(e) => handleChange("startTime", e.target.value)}
+              <TimeInput required value={form.startTime} onChange={(e) => handleChange("startTime", e.target.value)}
                 className={inputCls} style={inputStyle} />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>Giờ kết thúc *</label>
-              <input required type="time" value={form.endTime} onChange={(e) => handleChange("endTime", e.target.value)}
+              <TimeInput required value={form.endTime} onChange={(e) => handleChange("endTime", e.target.value)}
                 className={inputCls} style={inputStyle} />
             </div>
           </div>
@@ -131,7 +132,7 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
             <div className="px-3 py-2 rounded-lg flex items-center gap-2" style={{ background: "rgba(0,180,216,0.08)", border: "1px solid rgba(0,180,216,0.2)" }}>
               <Clock size={13} style={{ color: "var(--ibs-accent)" }} />
               <span className="text-[12px]">
-                Thời gian OT: <strong style={{ color: "var(--ibs-accent)" }}>{durationH.toFixed(1)} giờ</strong>
+                Thời gian OT: <strong style={{ color: "var(--ibs-accent)" }}>{durationH.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} giờ</strong>
               </span>
             </div>
           )}
@@ -217,7 +218,7 @@ export default function TangCaPage() {
         {[
           { label: "Chờ duyệt",   value: pendingCount,           color: "#f59e0b" },
           { label: "Đã duyệt",    value: approvedCount,          color: "#10b981" },
-          { label: "Tổng giờ OT", value: `${totalHours.toFixed(1)}h`, color: "var(--ibs-accent)" },
+          { label: "Tổng giờ OT", value: `${totalHours.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h`, color: "var(--ibs-accent)" },
           { label: "Tổng đề xuất",value: requests.length,        color: "var(--ibs-text)" },
         ].map((s) => (
           <div key={s.label} className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
@@ -283,7 +284,7 @@ export default function TangCaPage() {
                       <span className="flex items-center gap-1 text-[13px] font-semibold"
                         style={{ color: "var(--ibs-accent)" }}>
                         <Clock size={12} />
-                        {r.hours.toFixed(1)}h
+                        {r.hours.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h
                       </span>
                     </td>
                     <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>

@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, Trash2, CheckSquare, Square, Users } from "lucide-react";
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
+import { DateInput } from "@/components/shared/date-input";
 
 type CompanyEvent = {
   id: string; title: string; type: string; startDate: string; endDate: string;
@@ -363,12 +364,12 @@ function NewEventModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày bắt đầu *</label>
-              <input required type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+              <DateInput required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày kết thúc *</label>
-              <input required type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+              <DateInput required value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
           </div>

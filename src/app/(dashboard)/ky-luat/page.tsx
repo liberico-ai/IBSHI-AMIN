@@ -8,6 +8,7 @@ import { Plus, RefreshCw, X, FileText, AlertTriangle, Search } from "lucide-reac
 import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
+import { DateInput } from "@/components/shared/date-input";
 
 type Regulation = {
   id: string;
@@ -311,7 +312,7 @@ function NewRegulationModal({ onClose, onSuccess }: { onClose: () => void; onSuc
           </div>
           <div>
             <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày hiệu lực *</label>
-            <input required type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })}
+            <DateInput required value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })}
               className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
           </div>
           <div>
@@ -424,7 +425,7 @@ function NewActionModal({ employees, regulations, onClose, onSuccess }: {
             </div>
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày hiệu lực *</label>
-              <input required type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })}
+              <DateInput required value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
           </div>

@@ -6,6 +6,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, Check, ChevronRight, Users, ClipboardList, Calendar, UserCheck } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
+import { DateInput } from "@/components/shared/date-input";
 
 type Department = { id: string; code: string; name: string };
 
@@ -690,7 +691,7 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
               <div className="flex flex-col gap-3">
                 <div>
                   <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày phỏng vấn</label>
-                  <input type="date" value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)}
+                  <DateInput value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)}
                     className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
                 </div>
                 {(showEvaluation) && (
@@ -721,7 +722,7 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
                 <ChevronRight size={14} style={{ transform: showEvalTable ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
                 {showEvalTable ? "Ẩn bảng đánh giá" : "Mở bảng đánh giá tiêu chí phỏng vấn"}
                 {totalAll > 0 && <span className="ml-2 px-2 py-0.5 rounded-full text-[10px]" style={{ background: "rgba(0,180,216,0.15)", color: "var(--ibs-accent)" }}>
-                  {totalAll.toFixed(1)} / {EVAL_MAX_TOTAL} điểm
+                  {totalAll.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} / {EVAL_MAX_TOTAL} điểm
                 </span>}
               </button>
 
@@ -775,7 +776,7 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
                       <tr style={{ background: "rgba(16,185,129,0.06)", borderBottom: "1px solid rgba(51,65,85,0.4)" }}>
                         <td colSpan={2} className="px-3 py-2 font-bold border-r" style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-success)" }}>TỔNG (I)</td>
                         {SCORE_COLS.map(sc => <td key={sc.v} className="border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }} />)}
-                        <td className="px-2 py-2 text-center font-bold" style={{ color: "var(--ibs-success)" }}>{totalI.toFixed(1)}</td>
+                        <td className="px-2 py-2 text-center font-bold" style={{ color: "var(--ibs-success)" }}>{totalI.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
                       </tr>
 
                       {/* Part II header */}
@@ -812,14 +813,14 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
                       <tr style={{ background: "rgba(16,185,129,0.06)", borderBottom: "1px solid rgba(51,65,85,0.4)" }}>
                         <td colSpan={2} className="px-3 py-2 font-bold border-r" style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-success)" }}>TỔNG (II)</td>
                         {SCORE_COLS.map(sc => <td key={sc.v} className="border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }} />)}
-                        <td className="px-2 py-2 text-center font-bold" style={{ color: "var(--ibs-success)" }}>{totalII.toFixed(1)}</td>
+                        <td className="px-2 py-2 text-center font-bold" style={{ color: "var(--ibs-success)" }}>{totalII.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
                       </tr>
                       {/* Grand total */}
                       <tr style={{ background: "rgba(0,180,216,0.08)" }}>
                         <td colSpan={2} className="px-3 py-2.5 font-bold border-r" style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-accent)" }}>TỔNG (I + II)</td>
                         {SCORE_COLS.map(sc => <td key={sc.v} className="border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }} />)}
                         <td className="px-2 py-2.5 text-center font-bold text-[13px]" style={{ color: "var(--ibs-accent)" }}>
-                          {totalAll.toFixed(1)}
+                          {totalAll.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                           <span className="text-[10px] ml-1" style={{ color: "var(--ibs-text-dim)" }}>/{EVAL_MAX_TOTAL}</span>
                         </td>
                       </tr>

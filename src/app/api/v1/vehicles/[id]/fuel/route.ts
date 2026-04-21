@@ -11,6 +11,7 @@ const FuelSchema = z.object({
   cost: z.number().int().positive(),
   odometerKm: z.number().int().min(0),
   note: z.string().optional().nullable(),
+  invoiceUrl: z.string().optional().nullable(),
 });
 
 // GET /api/v1/vehicles/:id/fuel
@@ -64,6 +65,7 @@ export async function POST(
       cost: parsed.data.cost,
       odometerKm: parsed.data.odometerKm,
       note: parsed.data.note ?? null,
+      invoiceUrl: parsed.data.invoiceUrl ?? null,
     },
   });
 

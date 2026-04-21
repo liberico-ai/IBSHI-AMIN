@@ -78,6 +78,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "CONFLICT", message: "Xe đã được đặt trong khoảng thời gian này" } }, { status: 409 });
   }
 
+  // Check maintenance overlap
+  const maintenance = await prisma.maintenanceRecord.findFirst({
+    where: {
+      vehicleId: parsed.data.vehicleId,
+      startDate: { lte: endDate },
+      OR: [{ endDate: null }, { endDate: { gte: startDate } }],
+    },
+  });
+  if (maintenance) {
+    return NextResponse.json({
+      error: { code: "MAINTENANCE_CONFLICT", message: `Xe đang có lịch bảo trì từ ${maintenance.startDate.toISOString().slice(0, 10)}${maintenance.endDate ? " đến " + maintenance.endDate.toISOString().slice(0, 10) : ""}. Vui lòng chọn ngày khác hoặc xe khác.` },
+    }, { status: 409 });
+  }
+
   const booking = await prisma.vehicleBooking.create({
     data: { ...parsed.data, startDate, endDate, requestedBy: emp.id, status: "PENDING" },
     include: { vehicle: true, requester: { select: { id: true, fullName: true } } },

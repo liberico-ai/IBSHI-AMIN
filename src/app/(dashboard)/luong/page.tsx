@@ -411,7 +411,7 @@ function PeriodDetailModal({
                         className="px-3 py-2 border-b text-center"
                         style={{ borderColor: "rgba(51,65,85,0.3)" }}
                       >
-                        {r.otHours.toFixed(1)}
+                        {r.otHours.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                       </td>
                       <td
                         className="px-3 py-2 border-b text-right whitespace-nowrap"

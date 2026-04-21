@@ -7,6 +7,7 @@ import { formatDate, formatDateTime } from "@/lib/utils";
 import { Plus, RefreshCw, X, UserCheck, UserX, LogIn, LogOut } from "lucide-react";
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
+import { DateInput, TimeInput } from "@/components/shared/date-input";
 
 type Employee = { id: string; code: string; fullName: string; department: { name: string } };
 type VisitorRequest = {
@@ -149,7 +150,7 @@ export default function KhachPage() {
       <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <div className="flex items-center gap-3 px-5 py-4 border-b flex-wrap" style={{ borderColor: "var(--ibs-border)" }}>
           <div className="text-[14px] font-semibold">Danh sách khách</div>
-          <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)}
+          <DateInput value={filterDate} onChange={(e) => setFilterDate(e.target.value)}
             className="rounded-lg px-3 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
             className="rounded-lg px-3 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
@@ -174,13 +175,16 @@ export default function KhachPage() {
 }
 
 function NewVisitorModal({ employees, onClose, onSuccess }: { employees: Employee[]; onClose: () => void; onSuccess: () => void }) {
-  const [form, setForm] = useState({ visitorName: "", visitorCompany: "", visitorPhone: "", hostEmployeeId: "", visitDate: new Date().toISOString().slice(0, 16), purpose: "", notes: "" });
+  const _now = new Date();
+  const _pad = (n: number) => String(n).padStart(2, "0");
+  const [form, setForm] = useState({ visitorName: "", visitorCompany: "", visitorPhone: "", hostEmployeeId: "", visitDatePart: _now.toISOString().slice(0, 10), visitTimePart: `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`, purpose: "", notes: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setSaving(true);
-    const body: any = { ...form };
+    const { visitDatePart, visitTimePart, ...rest } = form;
+    const body: any = { ...rest, visitDate: `${visitDatePart}T${visitTimePart}` };
     if (!body.visitorCompany) delete body.visitorCompany;
     if (!body.notes) delete body.notes;
     const res = await fetch("/api/v1/visitors", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -207,8 +211,16 @@ function NewVisitorModal({ employees, onClose, onSuccess }: { employees: Employe
               {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.code}) — {emp.department.name}</option>)}
             </select></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Thời gian hẹn *</label>
-              <input required type="datetime-local" value={form.visitDate} onChange={(e) => setForm({ ...form, visitDate: e.target.value })} className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} /></div>
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày hẹn *</label>
+              <DateInput required value={form.visitDatePart} onChange={(e) => setForm({ ...form, visitDatePart: e.target.value })} className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Giờ hẹn *</label>
+              <TimeInput required value={form.visitTimePart} onChange={(e) => setForm({ ...form, visitTimePart: e.target.value })} className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div><label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Mục đích *</label>
               <select required value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })} className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
                 <option value="">-- Chọn --</option>

@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { ApprovalWorkflow } from "@/components/shared/approval-workflow";
 import { formatDate } from "@/lib/utils";
 import { Plus, X, Calendar, Clock, Download } from "lucide-react";
+import { DateInput } from "@/components/shared/date-input";
 
 type LeaveRequest = {
   id: string;
@@ -112,13 +113,13 @@ function NewLeaveDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelCls} style={labelStyle}>Ngày bắt đầu *</label>
-              <input required type="date" value={form.startDate}
+              <DateInput required value={form.startDate}
                 onChange={(e) => handleChange("startDate", e.target.value)}
                 className={inputCls} style={inputStyle} />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>Ngày kết thúc *</label>
-              <input required type="date" value={form.endDate} min={form.startDate}
+              <DateInput required value={form.endDate} min={form.startDate}
                 onChange={(e) => handleChange("endDate", e.target.value)}
                 className={inputCls} style={inputStyle} />
             </div>

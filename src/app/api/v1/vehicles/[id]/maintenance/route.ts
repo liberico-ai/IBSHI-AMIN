@@ -9,6 +9,8 @@ const MaintenanceSchema = z.object({
   type: z.string().min(1),
   description: z.string().min(1),
   cost: z.number().int().min(0),
+  location: z.string().optional().nullable(),
+  odometerKm: z.number().int().min(0).optional().nullable(),
   startDate: z.string(),
   endDate: z.string().optional().nullable(),
 });
@@ -65,6 +67,8 @@ export async function POST(
       type: parsed.data.type,
       description: parsed.data.description,
       cost: parsed.data.cost,
+      location: parsed.data.location ?? null,
+      odometerKm: parsed.data.odometerKm ?? null,
       startDate: new Date(parsed.data.startDate),
       endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
     },

@@ -664,7 +664,10 @@ enum VisitorPurpose {
 enum VehicleType {
   CAR
   VAN
+  PICKUP_TRUCK
   TRUCK
+  CONTAINER
+  FORKLIFT
   MOTORBIKE
 }
 
@@ -877,6 +880,7 @@ model Vehicle {
   driverName          String?       // Lái xe phụ trách
   status              VehicleStatus @default(AVAILABLE)
   nextMaintenanceDate DateTime?     // Ngày bảo dưỡng tiếp theo
+  currentMileage      Int           @default(0) // Số km hiện tại
   notes               String?
   isActive            Boolean       @default(true)
   createdAt           DateTime      @default(now())
@@ -1232,6 +1236,7 @@ model FuelLog {
   cost        Int      // VND
   odometerKm  Int
   note        String?
+  invoiceUrl  String?
   createdAt   DateTime @default(now())
 
   vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
@@ -1248,6 +1253,8 @@ model MaintenanceRecord {
   type        String    // "Thay dầu", "Thay lốp", "Sửa chữa lớn"
   description String
   cost        Int       // VND
+  location    String?
+  odometerKm  Int?
   startDate   DateTime
   endDate     DateTime?
   createdAt   DateTime  @default(now())
