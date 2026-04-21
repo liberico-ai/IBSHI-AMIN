@@ -577,11 +577,12 @@ export default function AttendancePage() {
   const [gridRefreshKey, setGridRefreshKey] = useState(0);
 
   useEffect(() => {
+    // Summary endpoint always returns "today" regardless of month/year — don't depend on them.
     setLoadingSummary(true);
     fetch("/api/v1/attendance?summary=true")
       .then((r) => r.json()).then((res) => setSummary(res.data || []))
       .finally(() => setLoadingSummary(false));
-  }, [month, year]);
+  }, []);
 
   useEffect(() => {
     setLoadingLeave(true);
