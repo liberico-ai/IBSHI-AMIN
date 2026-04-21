@@ -108,6 +108,8 @@ export const MODULE_PERMISSIONS = {
     approve2: "HR_ADMIN",
     reject: "MANAGER",
     readAll: "HR_ADMIN",
+    logFuel: "HR_ADMIN",
+    logMaintenance: "HR_ADMIN",
   },
   meals: {
     register: "MANAGER",    // register on behalf of dept (was HR_ADMIN, lowered)

@@ -92,25 +92,30 @@ export async function POST(request: NextRequest) {
     }, { status: 409 });
   }
 
-  const booking = await prisma.vehicleBooking.create({
-    data: { ...parsed.data, startDate, endDate, requestedBy: emp.id, status: "PENDING" },
-    include: { vehicle: true, requester: { select: { id: true, fullName: true } } },
-  });
+  // Fetch admin recipients outside the transaction to keep it short.
+  const admins = await prisma.user.findMany({ where: { role: { in: ["HR_ADMIN"] }, isActive: true }, select: { id: true } });
 
-  // Notify HR_ADMIN
-  const admins = await prisma.user.findMany({ where: { role: { in: ["HR_ADMIN"] }, isActive: true } });
-  await Promise.all(admins.map((u) =>
-    prisma.notification.create({
-      data: {
-        userId: u.id,
-        title: "Yêu cầu đặt xe",
-        message: `${emp.fullName} đặt xe đến ${parsed.data.destination} (${parsed.data.startDate} → ${parsed.data.endDate})`,
-        type: "APPROVAL_REQUIRED",
-        referenceType: "vehicle_booking",
-        referenceId: booking.id,
-      },
-    })
-  ));
+  const booking = await prisma.$transaction(async (tx) => {
+    const created = await tx.vehicleBooking.create({
+      data: { ...parsed.data, startDate, endDate, requestedBy: emp.id, status: "PENDING" },
+      include: { vehicle: true, requester: { select: { id: true, fullName: true } } },
+    });
+
+    if (admins.length > 0) {
+      await tx.notification.createMany({
+        data: admins.map((u) => ({
+          userId: u.id,
+          title: "Yêu cầu đặt xe",
+          message: `${emp.fullName} đặt xe đến ${parsed.data.destination} (${parsed.data.startDate} → ${parsed.data.endDate})`,
+          type: "APPROVAL_REQUIRED",
+          referenceType: "vehicle_booking",
+          referenceId: created.id,
+        })),
+      });
+    }
+
+    return created;
+  });
 
   return NextResponse.json({ data: booking }, { status: 201 });
 }
