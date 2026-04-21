@@ -5,6 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { Plus, RefreshCw, X, CheckCircle, ClipboardList } from "lucide-react";
 import Link from "next/link";
+import { DateInput } from "@/components/shared/date-input";
 
 type CleaningZone = { id: string; name: string; location: string; frequency: string; assignedTo?: string; isActive: boolean };
 type CleaningSchedule = {
@@ -161,7 +162,7 @@ export default function VeSinhPage() {
         <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
           <div className="flex items-center gap-3 px-5 py-4 border-b flex-wrap" style={{ borderColor: "var(--ibs-border)" }}>
             <div className="text-[14px] font-semibold">Lịch vệ sinh</div>
-            <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
+            <DateInput value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
               className="rounded-lg px-3 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             <button onClick={fetchSchedules} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
             {canManage && (
@@ -249,7 +250,7 @@ export default function VeSinhPage() {
         <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
           <div className="flex items-center gap-3 px-5 py-4 border-b flex-wrap" style={{ borderColor: "var(--ibs-border)" }}>
             <div className="text-[14px] font-semibold">Nhật ký kiểm tra vệ sinh</div>
-            <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
+            <DateInput value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
               className="rounded-lg px-3 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             <button onClick={fetchLogs} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
             {canManage && (
@@ -445,7 +446,7 @@ function NewLogModal({ zones, selectedDate, onClose, onSuccess }: { zones: Clean
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày</label>
-              <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
+              <DateInput value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
             <div>
@@ -550,7 +551,7 @@ function NewScheduleModal({ zones, selectedDate, onClose, onSuccess }: { zones: 
           </div>
           <div>
             <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày</label>
-            <input type="date" value={form.scheduledDate} onChange={(e) => setForm({ ...form, scheduledDate: e.target.value })}
+            <DateInput value={form.scheduledDate} onChange={(e) => setForm({ ...form, scheduledDate: e.target.value })}
               className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
           </div>
           <div className="flex gap-2 justify-end mt-2">

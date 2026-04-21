@@ -5,8 +5,10 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, ShieldAlert, AlertTriangle } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
+import { DateInput } from "@/components/shared/date-input";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -108,7 +110,7 @@ type Department = { id: string; name: string; code: string };
 
 export default function HsePage() {
   const [activeTab, setActiveTab] = useState<Tab>("incidents");
-  const [userRole, setUserRole] = useState("");
+  const { canDo } = usePermission();
 
   const [incidents, setIncidents] = useState<HSEIncident[]>([]);
   const [loadingIncidents, setLoadingIncidents] = useState(true);
@@ -161,7 +163,6 @@ export default function HsePage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.data?.role || ""));
     fetch("/api/v1/employees?limit=300").then((r) => r.json()).then((res) => setEmployees(res.data || []));
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepartments(res.data || []));
     fetchIncidents();
@@ -170,7 +171,7 @@ export default function HsePage() {
     fetchBriefings();
   }, []);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM";
+  const canManage = canDo("hse", "create");
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "incidents", label: "Sự cố" },
@@ -948,9 +949,8 @@ function ReportIncidentModal({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <FieldLabel>Ngày xảy ra *</FieldLabel>
-            <input
+            <DateInput
               required
-              type="date"
               value={form.incidentDate}
               onChange={(e) => setForm({ ...form, incidentDate: e.target.value })}
               className="w-full rounded-lg px-3 py-2 text-[13px] border"
@@ -1261,9 +1261,8 @@ function AddInductionModal({
           </div>
           <div>
             <FieldLabel>Ngày induction *</FieldLabel>
-            <input
+            <DateInput
               required
-              type="date"
               value={form.inductionDate}
               onChange={(e) => setForm({ ...form, inductionDate: e.target.value })}
               className="w-full rounded-lg px-3 py-2 text-[13px] border"
@@ -1300,8 +1299,7 @@ function AddInductionModal({
         </div>
         <div>
           <FieldLabel>Hạn induction tiếp theo</FieldLabel>
-          <input
-            type="date"
+          <DateInput
             value={form.nextDueDate}
             onChange={(e) => setForm({ ...form, nextDueDate: e.target.value })}
             className="w-full rounded-lg px-3 py-2 text-[13px] border"
@@ -1704,7 +1702,7 @@ function AddBriefingModal({ employees, departments, onClose, onSuccess }: {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày *</label>
-              <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
+              <DateInput required value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
             <div>

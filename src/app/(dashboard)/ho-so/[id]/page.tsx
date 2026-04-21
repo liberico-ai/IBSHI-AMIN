@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
+import { DateInput } from "@/components/shared/date-input";
 
 type Employee = {
   id: string;
@@ -231,9 +232,8 @@ function AddContractDialog({
               <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>
                 Ngày bắt đầu *
               </label>
-              <input
+              <DateInput
                 required
-                type="date"
                 value={form.startDate}
                 onChange={(e) => handleChange("startDate", e.target.value)}
                 className="w-full px-3 py-2 rounded-lg text-[13px] outline-none"
@@ -244,8 +244,7 @@ function AddContractDialog({
               <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>
                 Ngày kết thúc
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.endDate}
                 onChange={(e) => handleChange("endDate", e.target.value)}
                 className="w-full px-3 py-2 rounded-lg text-[13px] outline-none"
@@ -421,9 +420,8 @@ function AddCertificateDialog({
               <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>
                 Ngày cấp *
               </label>
-              <input
+              <DateInput
                 required
-                type="date"
                 value={form.issueDate}
                 onChange={(e) => handleChange("issueDate", e.target.value)}
                 className="w-full px-3 py-2 rounded-lg text-[13px] outline-none"
@@ -434,8 +432,7 @@ function AddCertificateDialog({
               <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>
                 Ngày hết hạn
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.expiryDate}
                 onChange={(e) => handleChange("expiryDate", e.target.value)}
                 className="w-full px-3 py-2 rounded-lg text-[13px] outline-none"
@@ -691,8 +688,8 @@ function InfoRow({ label, value, icon: Icon }: { label: string; value?: string |
   );
 }
 
-export default function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function EmployeeDetailPage({ params }: { params: { id: string } }) {
+  const { id } = params;
   const router = useRouter();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);

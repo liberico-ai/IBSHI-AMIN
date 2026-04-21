@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     // If MinIO is not available, return a placeholder URL (dev mode)
     if (error.code === "ECONNREFUSED" || error.message?.includes("connect")) {
       return NextResponse.json({
-        error: { code: "MINIO_UNAVAILABLE", message: "Máy chủ lưu trữ file chưa khởi động. Vui lòng chạy docker compose up." }
+        error: { code: "MINIO_UNAVAILABLE", message: `Máy chủ lưu trữ file (MinIO) chưa khởi động tại ${process.env.MINIO_ENDPOINT || "localhost"}:${process.env.MINIO_PORT || "9000"}. Vui lòng khởi động MinIO trước khi upload.` }
       }, { status: 503 });
     }
     return NextResponse.json({ error: { code: "UPLOAD_FAILED", message: "Upload thất bại" } }, { status: 500 });

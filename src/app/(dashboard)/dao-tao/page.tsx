@@ -5,8 +5,10 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, BookOpen, Users, CheckSquare, AlertTriangle } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
+import { DateInput } from "@/components/shared/date-input";
 
 type Department = { id: string; name: string };
 
@@ -58,7 +60,7 @@ export default function DaoTaoPage() {
   const [plans, setPlans] = useState<TrainingPlan[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState("");
+  const { canDo } = usePermission();
 
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<TrainingPlan | null>(null);
@@ -73,7 +75,6 @@ export default function DaoTaoPage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.data?.role || ""));
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepartments(res.data || []));
     fetchPlans();
   }, []);
@@ -95,7 +96,7 @@ export default function DaoTaoPage() {
     fetchPlans();
   }
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM";
+  const canManage = canDo("training", "create");
 
   const planColumns: Column<TrainingPlan>[] = [
     { key: "title", header: "Tên khóa đào tạo", render: (p) => <span className="font-semibold">{p.title}</span> },
@@ -431,12 +432,12 @@ function CertificateFormModal({ cert, employees, onClose, onSuccess }: {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày cấp *</label>
-              <input required type="date" value={form.issueDate} onChange={(e) => setForm({ ...form, issueDate: e.target.value })}
+              <DateInput required value={form.issueDate} onChange={(e) => setForm({ ...form, issueDate: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày hết hạn</label>
-              <input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })}
+              <DateInput value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
           </div>
@@ -527,7 +528,7 @@ function NewPlanModal({ departments, onClose, onSuccess }: {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày đào tạo *</label>
-              <input required type="date" value={form.scheduledDate} onChange={(e) => setForm({ ...form, scheduledDate: e.target.value })}
+              <DateInput required value={form.scheduledDate} onChange={(e) => setForm({ ...form, scheduledDate: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
             <div>

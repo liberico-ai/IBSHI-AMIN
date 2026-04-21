@@ -7,6 +7,8 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { getInitials } from "@/lib/utils";
 import { UserPlus, Eye, RefreshCw, X, Download } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
+import { DateInput } from "@/components/shared/date-input";
 
 type Employee = {
   id: string; code: string; fullName: string; gender: string; status: string;
@@ -25,6 +27,7 @@ const CONTRACT_TYPE_LABELS: Record<string, string> = {
 
 export default function EmployeesPage() {
   const router = useRouter();
+  const { canDo } = usePermission();
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -170,16 +173,20 @@ export default function EmployeesPage() {
           <RefreshCw size={13} /> Làm mới
         </button>
         <div className="ml-auto flex gap-2">
-          <button onClick={handleExport}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border transition-colors"
-            style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
-            <Download size={13} /> Export Excel
-          </button>
-          <button onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
-            style={{ background: "var(--ibs-accent)" }}>
-            <UserPlus size={14} /> Thêm nhân viên
-          </button>
+          {canDo("employees", "readAll") && (
+            <button onClick={handleExport}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border transition-colors"
+              style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
+              <Download size={13} /> Export Excel
+            </button>
+          )}
+          {canDo("employees", "create") && (
+            <button onClick={() => setShowCreate(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
+              style={{ background: "var(--ibs-accent)" }}>
+              <UserPlus size={14} /> Thêm nhân viên
+            </button>
+          )}
         </div>
       </div>
 
@@ -309,7 +316,7 @@ function CreateEmployeeDialog({ onClose, onSuccess }: {
             </div>
             <div>
               <label className={labelClass} style={labelStyle}>Ngày sinh *</label>
-              <input required type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)}
+              <DateInput required value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)}
                 className={inputClass} style={inputStyle} />
             </div>
             {/* ID + Phone */}
@@ -349,7 +356,7 @@ function CreateEmployeeDialog({ onClose, onSuccess }: {
             {/* Start date */}
             <div>
               <label className={labelClass} style={labelStyle}>Ngày vào làm *</label>
-              <input required type="date" value={form.startDate} onChange={(e) => set("startDate", e.target.value)}
+              <DateInput required value={form.startDate} onChange={(e) => set("startDate", e.target.value)}
                 className={inputClass} style={inputStyle} />
             </div>
             {/* Salary grade + coeff */}

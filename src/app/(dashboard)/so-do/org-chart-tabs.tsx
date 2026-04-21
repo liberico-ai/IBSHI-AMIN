@@ -276,7 +276,7 @@ type EmpRow = {
   id: string;
   employeeId: string;
   fullName: string;
-  position: string | null;
+  position: { name: string } | string | null;
   email: string | null;
   status: string;
 };
@@ -347,7 +347,9 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
                     style={{ borderColor: "rgba(51,65,85,0.4)" }}>
                     <td className="px-4 py-3 text-[12px] font-mono" style={{ color: "var(--ibs-accent)" }}>{emp.employeeId}</td>
                     <td className="px-4 py-3 text-[13px] font-medium">{emp.fullName}</td>
-                    <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>{emp.position ?? "—"}</td>
+                    <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>
+                      {emp.position == null ? "—" : (emp.position as any).name ?? (emp.position as string)}
+                    </td>
                     <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>{emp.email ?? "—"}</td>
                     <td className="px-4 py-3">
                       <span

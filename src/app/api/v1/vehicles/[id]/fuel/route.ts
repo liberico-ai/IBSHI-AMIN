@@ -11,6 +11,7 @@ const FuelSchema = z.object({
   cost: z.number().int().positive(),
   odometerKm: z.number().int().min(0),
   note: z.string().optional().nullable(),
+  invoiceUrl: z.string().optional().nullable(),
 });
 
 // GET /api/v1/vehicles/:id/fuel
@@ -42,7 +43,7 @@ export async function POST(
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "vehicleBookings", "approve2")) {
+  if (!canDo(userRole, "vehicleBookings", "logFuel")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -64,6 +65,7 @@ export async function POST(
       cost: parsed.data.cost,
       odometerKm: parsed.data.odometerKm,
       note: parsed.data.note ?? null,
+      invoiceUrl: parsed.data.invoiceUrl ?? null,
     },
   });
 

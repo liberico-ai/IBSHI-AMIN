@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, Star } from "lucide-react";
 import Link from "next/link";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { DateInput } from "@/components/shared/date-input";
 
 type CostItem = { departmentId: string; departmentName: string; lunchCount: number; dinnerCount: number; guestCount: number; totalMeals: number; totalCost: number; unitPrice: number };
 type CostMeta = { grandTotal: number; unitPrice: number; month: number; year: number; guestMeals?: number; guestMealCost?: number; feedback?: { avgRating: number | null; count: number } };
@@ -137,11 +138,11 @@ export default function NhaAnPage() {
       <div className="flex items-center gap-4 mb-4 flex-wrap">
         <div className="flex items-center gap-2">
           <label className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Ngày:</label>
-          <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
+          <DateInput value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
             className="rounded-lg px-3 py-1.5 text-[13px] border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
         </div>
         <button onClick={() => { fetchRegs(); fetchFeedbacks(); }} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
-        {tab === "registrations" && isHRAdmin && (
+        {tab === "registrations" && (
           <button onClick={() => setShowRegister(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold ml-auto" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
             <Plus size={14} /> Đăng ký suất ăn
           </button>
@@ -392,7 +393,7 @@ export default function NhaAnPage() {
                         <td className="px-3 py-2.5 text-right" style={{ color: "var(--ibs-accent)" }}>{row.lunchCount}</td>
                         <td className="px-3 py-2.5 text-right" style={{ color: "#8b5cf6" }}>{row.dinnerCount}</td>
                         <td className="px-3 py-2.5 text-right" style={{ color: "var(--ibs-warning)" }}>{row.guestCount}</td>
-                        <td className="px-4 py-2.5 text-right">{row.totalMeals.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right">{row.totalMeals.toLocaleString("vi-VN")}</td>
                         <td className="px-4 py-2.5 text-right" style={{ color: "var(--ibs-text-dim)" }}>{row.unitPrice.toLocaleString("vi-VN")}đ</td>
                         <td className="px-5 py-2.5 text-right font-semibold" style={{ color: "var(--ibs-accent)" }}>{row.totalCost.toLocaleString("vi-VN")}đ</td>
                       </tr>
@@ -400,7 +401,7 @@ export default function NhaAnPage() {
                     {costMeta && (costMeta.guestMeals ?? 0) > 0 && (
                       <tr className="border-b" style={{ borderColor: "var(--ibs-border)", background: "rgba(234,179,8,0.06)" }}>
                         <td className="px-5 py-2.5 font-medium" colSpan={4} style={{ color: "var(--ibs-warning)" }}>Khách / Đối tác (check-in)</td>
-                        <td className="px-4 py-2.5 text-right">{costMeta.guestMeals!.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right">{costMeta.guestMeals!.toLocaleString("vi-VN")}</td>
                         <td className="px-4 py-2.5 text-right" style={{ color: "var(--ibs-text-dim)" }}>{costMeta.unitPrice.toLocaleString("vi-VN")}đ</td>
                         <td className="px-5 py-2.5 text-right font-semibold" style={{ color: "var(--ibs-warning)" }}>{costMeta.guestMealCost!.toLocaleString("vi-VN")}đ</td>
                       </tr>
@@ -587,73 +588,90 @@ function RegisterMealModal({ departments, selectedDate, onClose, onSuccess }: {
   const [form, setForm] = useState({
     departmentId: "",
     date: selectedDate,
-    lunchCount: 0,
-    dinnerCount: 0,
-    guestCount: 0,
+    mealType: "LUNCH" as "LUNCH" | "DINNER",
+    personType: "EMPLOYEE" as "EMPLOYEE" | "GUEST",
+    quantity: "1",
     specialNote: "",
   });
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!form.departmentId) { setError("Vui lòng chọn phòng ban"); return; }
+    const qty = parseInt(form.quantity) || 0;
+    if (qty <= 0) { setError("Số lượng phải lớn hơn 0"); return; }
     setSaving(true);
-    await fetch("/api/v1/meals", {
+    const lunchCount  = form.mealType === "LUNCH"  && form.personType === "EMPLOYEE" ? qty : 0;
+    const dinnerCount = form.mealType === "DINNER" && form.personType === "EMPLOYEE" ? qty : 0;
+    const guestCount  = form.personType === "GUEST" ? qty : 0;
+    const res = await fetch("/api/v1/meals", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ...form,
+        departmentId: form.departmentId,
+        date: form.date,
+        lunchCount, dinnerCount, guestCount,
         specialNote: form.specialNote || null,
       }),
     });
     setSaving(false);
-    onSuccess();
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
   }
+
+  const ic = "w-full rounded-lg px-3 py-2 text-[13px] border";
+  const is = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const lc = "text-[12px] font-medium mb-1 block";
+  const ls = { color: "var(--ibs-text-dim)" };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="rounded-2xl w-full max-w-md mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-5">
-          <div className="text-[16px] font-bold">Đăng ký suất ăn theo phòng ban</div>
-          <button onClick={onClose}><X size={18} /></button>
+          <div className="text-[16px] font-bold">Đăng ký suất ăn</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Phòng ban *</label>
-            <select required value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })}
-              className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+            <label className={lc} style={ls}>Phòng ban *</label>
+            <select required value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} className={ic} style={is}>
               <option value="">Chọn phòng ban...</option>
               {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày</label>
-            <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
-              className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            <label className={lc} style={ls}>Ngày *</label>
+            <DateInput required value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={ic} style={is} />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Bữa trưa</label>
-              <input type="number" min={0} max={500} value={form.lunchCount} onChange={(e) => setForm({ ...form, lunchCount: parseInt(e.target.value) || 0 })}
-                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+              <label className={lc} style={ls}>Bữa ăn *</label>
+              <select value={form.mealType} onChange={(e) => setForm({ ...form, mealType: e.target.value as "LUNCH" | "DINNER" })} className={ic} style={is}>
+                <option value="LUNCH">Bữa trưa</option>
+                <option value="DINNER">Bữa tối (OT)</option>
+              </select>
             </div>
             <div>
-              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Bữa tối OT</label>
-              <input type="number" min={0} max={500} value={form.dinnerCount} onChange={(e) => setForm({ ...form, dinnerCount: parseInt(e.target.value) || 0 })}
-                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
-            </div>
-            <div>
-              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Suất khách</label>
-              <input type="number" min={0} max={500} value={form.guestCount} onChange={(e) => setForm({ ...form, guestCount: parseInt(e.target.value) || 0 })}
-                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+              <label className={lc} style={ls}>Đối tượng *</label>
+              <select value={form.personType} onChange={(e) => setForm({ ...form, personType: e.target.value as "EMPLOYEE" | "GUEST" })} className={ic} style={is}>
+                <option value="EMPLOYEE">Cán bộ nhân viên</option>
+                <option value="GUEST">Khách</option>
+              </select>
             </div>
           </div>
           <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ghi chú đặc biệt</label>
-            <input type="text" value={form.specialNote} onChange={(e) => setForm({ ...form, specialNote: e.target.value })}
-              placeholder="Ví dụ: suất chay, dị ứng..." className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            <label className={lc} style={ls}>Số lượng suất ăn *</label>
+            <input required type="number" min={1} max={500} value={form.quantity}
+              onChange={(e) => setForm({ ...form, quantity: e.target.value })} className={ic} style={is} />
           </div>
+          <div>
+            <label className={lc} style={ls}>Ghi chú đặc biệt</label>
+            <input type="text" value={form.specialNote} onChange={(e) => setForm({ ...form, specialNote: e.target.value })}
+              placeholder="Ví dụ: suất chay, dị ứng..." className={ic} style={is} />
+          </div>
+          {error && <div className="text-[12px] text-red-500">{error}</div>}
           <div className="flex gap-2 justify-end mt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
-            <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: saving ? 0.7 : 1 }}>
               {saving ? "Đang lưu..." : "Đăng ký"}
             </button>
           </div>

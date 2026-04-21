@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
-import { StatusBadge } from "@/components/shared/status-badge";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, Check, ChevronRight, Users, ClipboardList, Calendar, UserCheck } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
+import { DateInput } from "@/components/shared/date-input";
 
 type Department = { id: string; code: string; name: string };
 
@@ -67,12 +68,12 @@ export default function TuyenDungPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loadingReqs, setLoadingReqs] = useState(true);
   const [loadingCands, setLoadingCands] = useState(true);
-  const [userRole, setUserRole] = useState("");
+  const { canDo, hasRole } = usePermission();
 
   // Modals
   const [showNewRequest, setShowNewRequest] = useState(false);
   const [showNewCandidate, setShowNewCandidate] = useState(false);
-  const [showCandidateDetail, setShowCandidateDetail] = useState<Candidate | null>(null);
+  const [showCandidateDetail, setShowCandidateDetail] = useState<{ candidate: Candidate; withEval: boolean } | null>(null);
   const [rejectingReq, setRejectingReq] = useState<RecruitmentRequest | null>(null);
   const [createdEmployee, setCreatedEmployee] = useState<{ code: string; email: string; tempPassword: string } | null>(null);
 
@@ -90,7 +91,6 @@ export default function TuyenDungPage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.data?.role || ""));
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepartments(res.data || []));
     fetchRequests();
     fetchCandidates();
@@ -163,7 +163,7 @@ export default function TuyenDungPage() {
     { key: "createdAt", header: "Ngày tạo", render: (r) => formatDate(r.createdAt) },
     { key: "actions", header: "", render: (r) => (
       <div className="flex gap-2">
-        {r.status === "PENDING" && (userRole === "BOM") && (
+        {r.status === "PENDING" && hasRole("BOM") && (
           <>
             <button onClick={() => handleApproveRequest(r)} className="text-[11px] px-2 py-1 rounded-lg font-semibold" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}>
               Duyệt
@@ -173,7 +173,7 @@ export default function TuyenDungPage() {
             </button>
           </>
         )}
-        {r.status === "APPROVED" && (userRole === "HR_ADMIN" || userRole === "BOM") && (
+        {r.status === "APPROVED" && canDo("recruitment", "create") && (
           <button onClick={() => { setShowNewCandidate(true); }} className="text-[11px] px-2 py-1 rounded-lg" style={{ background: "rgba(0,180,216,0.1)", color: "var(--ibs-accent)" }}>
             + Ứng viên
           </button>
@@ -198,7 +198,7 @@ export default function TuyenDungPage() {
     { key: "referredBy", header: "Người giới thiệu", render: (c) => c.referredBy || "—" },
     { key: "createdAt", header: "Ngày nộp", render: (c) => formatDate(c.createdAt) },
     { key: "actions", header: "", render: (c) => (
-      <button onClick={() => setShowCandidateDetail(c)} className="text-[11px] px-2 py-1 rounded-lg" style={{ color: "var(--ibs-accent)" }}>
+      <button onClick={() => setShowCandidateDetail({ candidate: c, withEval: false })} className="text-[11px] px-2 py-1 rounded-lg" style={{ color: "var(--ibs-accent)" }}>
         Chi tiết <ChevronRight size={12} className="inline" />
       </button>
     )},
@@ -246,7 +246,7 @@ export default function TuyenDungPage() {
               <button onClick={fetchRequests} className="p-2 rounded-lg hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}>
                 <RefreshCw size={15} />
               </button>
-              {(userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM") && (
+              {canDo("recruitment", "read") && (
                 <button onClick={() => setShowNewRequest(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
                   <Plus size={14} /> Đề xuất mới
                 </button>
@@ -266,7 +266,7 @@ export default function TuyenDungPage() {
               <button onClick={fetchCandidates} className="p-2 rounded-lg hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}>
                 <RefreshCw size={15} />
               </button>
-              {(userRole === "HR_ADMIN" || userRole === "BOM") && (
+              {canDo("recruitment", "create") && (
                 <button onClick={() => setShowNewCandidate(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
                   <Plus size={14} /> Thêm ứng viên
                 </button>
@@ -303,7 +303,11 @@ export default function TuyenDungPage() {
               ...candidateColumns.slice(0, 4),
               { key: "interviewDate", header: "Ngày PV", render: (c) => c.interviewDate ? formatDate(c.interviewDate) : <span style={{ color: "var(--ibs-text-dim)" }}>Chưa hẹn</span> },
               { key: "interviewScore", header: "Điểm", render: (c) => c.interviewScore ? `${c.interviewScore}/10` : "—" },
-              candidateColumns[candidateColumns.length - 1],
+              { key: "actions", header: "", render: (c) => (
+                <button onClick={() => setShowCandidateDetail({ candidate: c, withEval: true })} className="text-[11px] px-2 py-1 rounded-lg" style={{ color: "var(--ibs-accent)" }}>
+                  Chi tiết <ChevronRight size={12} className="inline" />
+                </button>
+              )},
             ]}
             data={interviewCandidates}
             loading={loadingCands}
@@ -365,15 +369,21 @@ export default function TuyenDungPage() {
       {/* Modal: Chi tiết / cập nhật ứng viên */}
       {showCandidateDetail && (
         <CandidateDetailModal
-          candidate={showCandidateDetail}
-          canEdit={userRole === "HR_ADMIN" || userRole === "BOM"}
+          candidate={showCandidateDetail.candidate}
+          showEvaluation={showCandidateDetail.withEval}
+          canEdit={canDo("recruitment", "update")}
           onClose={() => setShowCandidateDetail(null)}
           onUpdateStatus={handleUpdateCandidateStatus}
           onSaveInterview={async (id, data) => {
+            const payload = { ...data };
+            if (data.interviewDate &&
+                !["INTERVIEW","INTERVIEWED","OFFERED","ACCEPTED","REJECTED","WITHDRAWN"].includes(showCandidateDetail.candidate.status)) {
+              payload.status = "INTERVIEW";
+            }
             await fetch(`/api/v1/recruitment/candidates/${id}`, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(data),
+              body: JSON.stringify(payload),
             });
             fetchCandidates();
             setShowCandidateDetail(null);
@@ -586,8 +596,30 @@ function NewCandidateModal({ requests, onClose, onSuccess }: {
   );
 }
 
-function CandidateDetailModal({ candidate, canEdit, onClose, onUpdateStatus, onSaveInterview }: {
+const EVAL_CRITERIA_I = [
+  { key: "c1", label: "Chuyên môn, hiểu biết về công việc ứng tuyển", coeff: 1.5 },
+  { key: "c2", label: "Quá trình kinh nghiệm phù hợp với công việc sắp tới (hỏi kỹ về kinh nghiệm, các tình huống)", coeff: 1.5 },
+  { key: "c3", label: "Kỹ năng trong công việc (kỹ năng cơ bản, kỹ năng chuyên môn)", coeff: 1.0 },
+  { key: "c4", label: "Hiểu biết về công ty và nhiệm vụ sắp tới, mức độ quan tâm tới vị trí ứng tuyển", coeff: 1.0 },
+  { key: "c5", label: "Khả năng nắm bắt, nhìn nhận vấn đề", coeff: 1.0 },
+  { key: "c6", label: "Khả năng ngoại ngữ", coeff: 1.0 },
+  { key: "c7", label: "Khả năng giao tiếp, truyền đạt thông tin", coeff: 1.0 },
+  { key: "c8", label: "Ngoại hình, tính cách, tinh thần cầu tiến", coeff: 1.0 },
+  { key: "c9", label: "Lợi thế đặc biệt khác", coeff: 1.0 },
+];
+const EVAL_CRITERIA_II = [
+  { key: "m1", label: "Kỹ năng quản lý thời gian, quản lý con người, làm việc nhóm và xử lý tình huống", coeff: 1.5 },
+  { key: "m2", label: "Khả năng điều hành, lập kế hoạch, tổ chức công việc và kiểm tra giám sát", coeff: 1.5 },
+  { key: "m3", label: "Kinh nghiệm quản lý trước đây (Quy mô QL, phạm vi QL…)", coeff: 1.5 },
+  { key: "m4", label: "Tinh thần chính trực, trách nhiệm, tác phong lãnh đạo hòa đồng – thu hút – đáng tôn trọng", coeff: 1.0 },
+];
+const EVAL_MAX_I = EVAL_CRITERIA_I.reduce((s, c) => s + c.coeff * 5, 0);
+const EVAL_MAX_TOTAL = EVAL_MAX_I + EVAL_CRITERIA_II.reduce((s, c) => s + c.coeff * 5, 0);
+const SCORE_COLS = [{ v: 1, label: "Yếu" }, { v: 2, label: "TB" }, { v: 3, label: "Khá" }, { v: 4, label: "Tốt" }, { v: 5, label: "XS" }];
+
+function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onClose, onUpdateStatus, onSaveInterview }: {
   candidate: Candidate;
+  showEvaluation?: boolean;
   canEdit: boolean;
   onClose: () => void;
   onUpdateStatus: (id: string, status: string) => void;
@@ -597,6 +629,18 @@ function CandidateDetailModal({ candidate, canEdit, onClose, onUpdateStatus, onS
   const [interviewNote, setInterviewNote] = useState(candidate.interviewNote || "");
   const [interviewScore, setInterviewScore] = useState(candidate.interviewScore?.toString() || "");
   const [saving, setSaving] = useState(false);
+  const [showEvalTable, setShowEvalTable] = useState(false);
+  const [evalScores, setEvalScores] = useState<Record<string, number>>({});
+
+  const totalI = EVAL_CRITERIA_I.reduce((s, c) => s + (evalScores[c.key] || 0) * c.coeff, 0);
+  const totalII = EVAL_CRITERIA_II.reduce((s, c) => s + (evalScores[c.key] || 0) * c.coeff, 0);
+  const totalAll = totalI + totalII;
+
+  useEffect(() => {
+    if (totalAll > 0) {
+      setInterviewScore(((totalAll / EVAL_MAX_TOTAL) * 10).toFixed(1));
+    }
+  }, [totalAll]);
 
   const nextStatuses: Record<string, string[]> = {
     NEW: ["SCREENING", "REJECTED"],
@@ -617,8 +661,8 @@ function CandidateDetailModal({ candidate, canEdit, onClose, onUpdateStatus, onS
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="rounded-2xl w-full max-w-lg mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className={`rounded-2xl w-full mx-4 p-6 flex flex-col max-h-[90vh] overflow-y-auto transition-all duration-200 ${showEvalTable ? "max-w-5xl" : "max-w-lg"}`} style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-5">
           <div>
             <div className="text-[16px] font-bold">{candidate.fullName}</div>
@@ -647,14 +691,20 @@ function CandidateDetailModal({ candidate, canEdit, onClose, onUpdateStatus, onS
               <div className="flex flex-col gap-3">
                 <div>
                   <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày phỏng vấn</label>
-                  <input type="date" value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)}
+                  <DateInput value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)}
                     className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
                 </div>
+                {(showEvaluation) && (
                 <div>
-                  <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Điểm đánh giá (1–10)</label>
-                  <input type="number" min={1} max={10} value={interviewScore} onChange={(e) => setInterviewScore(e.target.value)}
-                    className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+                  <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>
+                    Điểm đánh giá (1–10)
+                    <span className="ml-1.5 text-[10px]" style={{ color: "var(--ibs-text-dim)" }}>— tự tính từ bảng tiêu chí bên dưới</span>
+                  </label>
+                  <input type="number" readOnly value={interviewScore}
+                    className="w-full rounded-lg px-3 py-2 text-[13px] border"
+                    style={{ background: "rgba(51,65,85,0.3)", borderColor: "var(--ibs-border)", color: interviewScore ? "var(--ibs-accent)" : "var(--ibs-text-dim)", cursor: "default", fontWeight: interviewScore ? 600 : 400 }} />
                 </div>
+                )}
                 <div>
                   <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ghi chú phỏng vấn</label>
                   <textarea rows={2} value={interviewNote} onChange={(e) => setInterviewNote(e.target.value)}
@@ -662,6 +712,124 @@ function CandidateDetailModal({ candidate, canEdit, onClose, onUpdateStatus, onS
                 </div>
               </div>
             </div>
+
+            {/* Evaluation table — chỉ hiện khi ứng viên đang/đã phỏng vấn */}
+            {(showEvaluation) && (
+            <div className="border-t pt-4 mb-4" style={{ borderColor: "var(--ibs-border)" }}>
+              <button onClick={() => setShowEvalTable(v => !v)}
+                className="flex items-center gap-2 text-[12px] font-semibold mb-3"
+                style={{ color: "var(--ibs-accent)" }}>
+                <ChevronRight size={14} style={{ transform: showEvalTable ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+                {showEvalTable ? "Ẩn bảng đánh giá" : "Mở bảng đánh giá tiêu chí phỏng vấn"}
+                {totalAll > 0 && <span className="ml-2 px-2 py-0.5 rounded-full text-[10px]" style={{ background: "rgba(0,180,216,0.15)", color: "var(--ibs-accent)" }}>
+                  {totalAll.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} / {EVAL_MAX_TOTAL} điểm
+                </span>}
+              </button>
+
+              {showEvalTable && (
+                <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--ibs-border)" }}>
+                  <table className="w-full border-collapse text-[11px]">
+                    <thead>
+                      <tr style={{ background: "rgba(0,180,216,0.08)" }}>
+                        <th className="px-3 py-2 text-left font-semibold border-b border-r" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)", minWidth: "280px" }}>Tiêu chí</th>
+                        <th className="px-2 py-2 text-center font-semibold border-b border-r" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)", whiteSpace: "nowrap" }}>Hệ số</th>
+                        {SCORE_COLS.map(s => (
+                          <th key={s.v} className="px-2 py-2 text-center font-semibold border-b border-r" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)", minWidth: "52px" }}>
+                            {s.label}<br /><span style={{ color: "var(--ibs-accent)" }}>({s.v}đ)</span>
+                          </th>
+                        ))}
+                        <th className="px-2 py-2 text-center font-semibold border-b" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)", whiteSpace: "nowrap" }}>Tổng</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Part I header */}
+                      <tr style={{ background: "rgba(51,65,85,0.3)" }}>
+                        <td colSpan={7} className="px-3 py-1.5 font-semibold border-b" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)", fontSize: "10px", letterSpacing: "0.05em" }}>
+                          I. CÁC TIÊU CHÍ CHÍNH
+                        </td>
+                      </tr>
+                      {EVAL_CRITERIA_I.map((cr, idx) => {
+                        const s = evalScores[cr.key] || 0;
+                        const pts = +(s * cr.coeff).toFixed(2);
+                        return (
+                          <tr key={cr.key} style={{ borderBottom: "1px solid rgba(51,65,85,0.4)" }}>
+                            <td className="px-3 py-2 border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }}>
+                              <span style={{ color: "var(--ibs-text-dim)", marginRight: 4 }}>{idx + 1}.</span>
+                              {cr.label}
+                            </td>
+                            <td className="px-2 py-2 text-center border-r font-semibold" style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-accent)" }}>{cr.coeff}</td>
+                            {SCORE_COLS.map(sc => (
+                              <td key={sc.v} className="px-2 py-2 text-center border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }}>
+                                <input type="radio" name={cr.key} value={sc.v}
+                                  checked={evalScores[cr.key] === sc.v}
+                                  onChange={() => setEvalScores(prev => ({ ...prev, [cr.key]: sc.v }))}
+                                  style={{ accentColor: "var(--ibs-accent)", cursor: "pointer", width: 14, height: 14 }} />
+                              </td>
+                            ))}
+                            <td className="px-2 py-2 text-center font-semibold" style={{ color: pts > 0 ? "var(--ibs-success)" : "var(--ibs-text-dim)" }}>
+                              {pts > 0 ? pts : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {/* Part I total */}
+                      <tr style={{ background: "rgba(16,185,129,0.06)", borderBottom: "1px solid rgba(51,65,85,0.4)" }}>
+                        <td colSpan={2} className="px-3 py-2 font-bold border-r" style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-success)" }}>TỔNG (I)</td>
+                        {SCORE_COLS.map(sc => <td key={sc.v} className="border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }} />)}
+                        <td className="px-2 py-2 text-center font-bold" style={{ color: "var(--ibs-success)" }}>{totalI.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
+                      </tr>
+
+                      {/* Part II header */}
+                      <tr style={{ background: "rgba(51,65,85,0.3)" }}>
+                        <td colSpan={7} className="px-3 py-1.5 font-semibold border-b" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)", fontSize: "10px", letterSpacing: "0.05em" }}>
+                          II. CÁC TIÊU CHÍ CHO VỊ TRÍ QUẢN LÝ
+                        </td>
+                      </tr>
+                      {EVAL_CRITERIA_II.map((cr, idx) => {
+                        const s = evalScores[cr.key] || 0;
+                        const pts = +(s * cr.coeff).toFixed(2);
+                        return (
+                          <tr key={cr.key} style={{ borderBottom: "1px solid rgba(51,65,85,0.4)" }}>
+                            <td className="px-3 py-2 border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }}>
+                              <span style={{ color: "var(--ibs-text-dim)", marginRight: 4 }}>{idx + 1}.</span>
+                              {cr.label}
+                            </td>
+                            <td className="px-2 py-2 text-center border-r font-semibold" style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-accent)" }}>{cr.coeff}</td>
+                            {SCORE_COLS.map(sc => (
+                              <td key={sc.v} className="px-2 py-2 text-center border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }}>
+                                <input type="radio" name={cr.key} value={sc.v}
+                                  checked={evalScores[cr.key] === sc.v}
+                                  onChange={() => setEvalScores(prev => ({ ...prev, [cr.key]: sc.v }))}
+                                  style={{ accentColor: "var(--ibs-accent)", cursor: "pointer", width: 14, height: 14 }} />
+                              </td>
+                            ))}
+                            <td className="px-2 py-2 text-center font-semibold" style={{ color: pts > 0 ? "var(--ibs-success)" : "var(--ibs-text-dim)" }}>
+                              {pts > 0 ? pts : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {/* Part II total */}
+                      <tr style={{ background: "rgba(16,185,129,0.06)", borderBottom: "1px solid rgba(51,65,85,0.4)" }}>
+                        <td colSpan={2} className="px-3 py-2 font-bold border-r" style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-success)" }}>TỔNG (II)</td>
+                        {SCORE_COLS.map(sc => <td key={sc.v} className="border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }} />)}
+                        <td className="px-2 py-2 text-center font-bold" style={{ color: "var(--ibs-success)" }}>{totalII.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
+                      </tr>
+                      {/* Grand total */}
+                      <tr style={{ background: "rgba(0,180,216,0.08)" }}>
+                        <td colSpan={2} className="px-3 py-2.5 font-bold border-r" style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-accent)" }}>TỔNG (I + II)</td>
+                        {SCORE_COLS.map(sc => <td key={sc.v} className="border-r" style={{ borderColor: "rgba(51,65,85,0.4)" }} />)}
+                        <td className="px-2 py-2.5 text-center font-bold text-[13px]" style={{ color: "var(--ibs-accent)" }}>
+                          {totalAll.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                          <span className="text-[10px] ml-1" style={{ color: "var(--ibs-text-dim)" }}>/{EVAL_MAX_TOTAL}</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            )}
 
             {nextStatuses[candidate.status] && (
               <div className="border-t pt-4 mb-4" style={{ borderColor: "var(--ibs-border)" }}>

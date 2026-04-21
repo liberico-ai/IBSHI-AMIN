@@ -6,6 +6,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { ExportButton } from "@/components/shared/export-button";
 import { formatDate } from "@/lib/utils";
 import type ExcelJS from "exceljs";
+import { DateInput } from "@/components/shared/date-input";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type OverviewData = {
@@ -524,7 +525,7 @@ export default function BaoCaoPage() {
                 <label className="block text-[11px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>
                   Chọn ngày thứ 2 đầu tuần
                 </label>
-                <input type="date" value={weekStart} onChange={(e) => setWeekStart(e.target.value)}
+                <DateInput value={weekStart} onChange={(e) => setWeekStart(e.target.value)}
                   className={`w-full ${inputCls}`} style={inputStyle} />
               </div>
               <ExportButton

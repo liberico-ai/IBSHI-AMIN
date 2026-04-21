@@ -7,7 +7,7 @@ import { z } from "zod";
 const CreateSchema = z.object({
   licensePlate: z.string().min(5),
   model: z.string().min(2),
-  type: z.enum(["CAR", "VAN", "TRUCK", "MOTORBIKE"]),
+  type: z.enum(["CAR", "VAN", "TRUCK", "MOTORBIKE", "PICKUP_TRUCK", "CONTAINER", "FORKLIFT"]),
   seats: z.number().int().min(1).default(5),
   driverName: z.string().optional().nullable(),
   nextMaintenanceDate: z.string().optional().nullable(),

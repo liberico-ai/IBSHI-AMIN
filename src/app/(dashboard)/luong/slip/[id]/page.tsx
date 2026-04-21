@@ -156,7 +156,7 @@ export default function SalarySlipPage() {
                 slip.hazardAllowance > 0 && ["Phụ cấp độc hại", slip.hazardAllowance],
                 slip.responsibilityAllow > 0 && ["Phụ cấp trách nhiệm", slip.responsibilityAllow],
                 ["Phụ cấp ăn trưa", slip.mealAllowance],
-                slip.otPay > 0 && [`Tiền OT (${slip.otHours.toFixed(1)}h)`, slip.otPay],
+                slip.otPay > 0 && [`Tiền OT (${slip.otHours.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h)`, slip.otPay],
                 slip.otherIncome > 0 && ["Thu nhập khác", slip.otherIncome],
               ].filter(Boolean).map(([label, value]: any) => (
                 <tr key={label} className="border-b" style={{ borderColor: "rgba(51,65,85,0.3)" }}>

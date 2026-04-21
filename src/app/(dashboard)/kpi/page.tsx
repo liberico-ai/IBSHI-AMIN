@@ -51,7 +51,7 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
 // ─── Score cell with color ───────────────────────────────────────────────────────
 function ScoreCell({ value }: { value: number }) {
   const color = value >= 90 ? "#10b981" : value >= 80 ? "#f59e0b" : "#ef4444";
-  return <span style={{ color, fontWeight: 700 }}>{value.toFixed(1)}%</span>;
+  return <span style={{ color, fontWeight: 700 }}>{value.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</span>;
 }
 
 function TrendCell({ value }: { value: number }) {
@@ -61,7 +61,7 @@ function TrendCell({ value }: { value: number }) {
   return (
     <span className="flex items-center gap-1" style={{ color }}>
       <Icon size={12} />
-      {Math.abs(value).toFixed(1)}%
+      {Math.abs(value).toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
     </span>
   );
 }
@@ -272,7 +272,7 @@ export default function KPIPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-4 gap-4 mb-5">
         {[
-          { label: "KPI tổng TB", value: `${avgOverall.toFixed(1)}%`, color: avgOverall >= 90 ? "#10b981" : avgOverall >= 80 ? "#f59e0b" : "#ef4444" },
+          { label: "KPI tổng TB", value: `${avgOverall.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`, color: avgOverall >= 90 ? "#10b981" : avgOverall >= 80 ? "#f59e0b" : "#ef4444" },
           { label: "Phòng ban", value: scores.length, color: "var(--ibs-accent)" },
           { label: "≥90% (Tốt)", value: scores.filter((s) => s.overallScore >= 90).length, color: "#10b981" },
           { label: "<80% (Cần cải thiện)", value: scores.filter((s) => s.overallScore < 80).length, color: "#ef4444" },

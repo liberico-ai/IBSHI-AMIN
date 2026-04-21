@@ -5,8 +5,10 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
 import { Plus, RefreshCw, X, FileText, AlertTriangle, Search } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
+import { DateInput } from "@/components/shared/date-input";
 
 type Regulation = {
   id: string;
@@ -60,7 +62,7 @@ export default function KyLuatPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingRegs, setLoadingRegs] = useState(true);
   const [loadingActions, setLoadingActions] = useState(true);
-  const [userRole, setUserRole] = useState("");
+  const { canDo } = usePermission();
 
   const [showNewRegulation, setShowNewRegulation] = useState(false);
   const [showNewAction, setShowNewAction] = useState(false);
@@ -82,13 +84,12 @@ export default function KyLuatPage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.data?.role || ""));
     fetch("/api/v1/employees?limit=300").then((r) => r.json()).then((res) => setEmployees(res.data || []));
     fetchRegulations();
     fetchActions();
   }, []);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM";
+  const canManage = canDo("discipline", "create");
 
   const filteredRegs = regulations.filter((r) =>
     !searchReg ||
@@ -311,7 +312,7 @@ function NewRegulationModal({ onClose, onSuccess }: { onClose: () => void; onSuc
           </div>
           <div>
             <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày hiệu lực *</label>
-            <input required type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })}
+            <DateInput required value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })}
               className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
           </div>
           <div>
@@ -424,7 +425,7 @@ function NewActionModal({ employees, regulations, onClose, onSuccess }: {
             </div>
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày hiệu lực *</label>
-              <input required type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })}
+              <DateInput required value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
           </div>
