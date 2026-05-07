@@ -44,26 +44,54 @@ export const LEAVE_QUOTA = {
 } as const;
 
 export const INSURANCE_RATES = {
+  // Phần NLĐ đóng (tổng 10.5%) — chi tiết
   SOCIAL: 0.08,       // BHXH 8%
   HEALTH: 0.015,      // BHYT 1.5%
   UNEMPLOYMENT: 0.01, // BHTN 1%
+  // Tổng hợp theo spec IBSHI
+  EMPLOYEE_TOTAL: 0.105, // BHXH NLĐ tổng = 10.5% × Lương chính
+  EMPLOYER_TOTAL: 0.215, // BHXH cty đóng = 21.5% × Lương chính
 } as const;
 
 export const MEAL_UNIT_PRICE = 35000; // VND/suất
 
 export const SALARY_CONFIG = {
   STANDARD_WORK_DAYS: 26,
-  INSURANCE_SALARY_CAP: 36000000,   // 36M VND
-  PERSONAL_DEDUCTION: 11000000,     // 11M VND
-  DEPENDENT_DEDUCTION: 4400000,     // 4.4M VND
-  OT_RATE_NORMAL: 1.5,
-  OT_RATE_WEEKEND: 2.0,
-  OT_RATE_HOLIDAY: 3.0,
-  HAZARD_ALLOWANCE: 1200000,       // 1.2M/tháng
-  TEAM_LEAD_ALLOWANCE: 800000,     // 800K/tháng
-  MANAGER_ALLOWANCE: 1500000,      // 1.5M/tháng
-  MEAL_ALLOWANCE_PER_DAY: 35000,   // 35K/ngày (đồng bộ với MEAL_UNIT_PRICE)
+  INSURANCE_SALARY_CAP: 36000000,   // 36M VND — mức trần đóng BH
+  // ── Giảm trừ gia cảnh (Nghị quyết mới 2025) ──
+  PERSONAL_DEDUCTION: 15500000,     // Giảm trừ bản thân
+  DEPENDENT_DEDUCTION: 6200000,     // Giảm trừ / 1 người phụ thuộc
+  // ── Hệ số OT (6 loại theo spec IBSHI) ──
+  OT_RATE_WEEKDAY: 1.5,             // 5.1 ngày thường
+  OT_RATE_WEEKDAY_NIGHT: 2.0,       // 5.2 đêm ngày thường
+  OT_RATE_SUNDAY: 2.0,              // 5.3 chủ nhật
+  OT_RATE_SUNDAY_NIGHT: 2.7,        // 5.4 đêm chủ nhật
+  OT_RATE_HOLIDAY: 3.0,             // 5.5 ngày lễ
+  OT_RATE_HOLIDAY_NIGHT: 3.9,       // 5.6 đêm ngày lễ
+  // ── Phụ cấp cố định (theo vai trò/chức vụ) ──
+  HAZARD_ALLOWANCE: 1200000,
+  TEAM_LEAD_ALLOWANCE: 800000,
+  MANAGER_ALLOWANCE: 1500000,
+  MEAL_ALLOWANCE_PER_DAY: 35000,
+  // ── Ăn ca thêm giờ (theo spec) ──
+  OVERTIME_MEAL_2H: 15000,          // OT >= 2h: thêm 15K
+  OVERTIME_MEAL_4H: 20000,          // OT >= 4h: thêm 20K (thay thế 15K, không cộng dồn)
+  // ── Phụ cấp xăng nhà trọ (3.2) ──
+  FUEL_HOUSING_ALLOW: 200000,       // 200K/người/tháng cố định
+  FUEL_HOUSING_KM_THRESHOLD: 20,    // ≥ 20km HOẶC ngoại tỉnh
+  FUEL_HOUSING_DAYS_THRESHOLD: 14,  // VÀ ≥ 14 công
 } as const;
+
+// ──────────────────────────────────────────────────────────────────
+// Bảng thuế TNCN — 5 bậc lũy tiến (Luật thuế VN, áp dụng theo tháng)
+// ──────────────────────────────────────────────────────────────────
+export const TAX_BRACKETS = [
+  { upTo: 10_000_000,  rate: 0.05 },  // Bậc 1: ≤ 10M
+  { upTo: 30_000_000,  rate: 0.10 },  // Bậc 2: 10M < x ≤ 30M
+  { upTo: 60_000_000,  rate: 0.20 },  // Bậc 3: 30M < x ≤ 60M
+  { upTo: 100_000_000, rate: 0.30 },  // Bậc 4: 60M < x ≤ 100M
+  { upTo: Infinity,    rate: 0.35 },  // Bậc 5: > 100M
+] as const;
 
 // Navigation items for sidebar
 export const NAV_ITEMS = [
