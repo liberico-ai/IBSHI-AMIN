@@ -331,6 +331,23 @@ function AttendanceGridCard({
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
+  const dowOf = (d: number) => new Date(year, month - 1, d).getDay();
+  const isSun = (d: number) => dowOf(d) === 0;
+  const isSat = (d: number) => dowOf(d) === 6;
+
+  function getSummary(emp: GridEmployee) {
+    let regular = 0, ot = 0, sunday = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const rec = emp.days[d];
+      if (!rec) continue;
+      const wh = rec.workHours || 0;
+      const oh = rec.otHours || 0;
+      if (isSun(d)) { sunday += wh + oh; }
+      else { regular += wh; ot += oh; }
+    }
+    return { regular, ot, sunday, total: +(regular + ot + sunday).toFixed(1) };
+  }
+
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -478,68 +495,96 @@ function AttendanceGridCard({
             <thead>
               <tr>
                 <th className="sticky left-0 px-3 py-2 text-left font-semibold border-r border-b whitespace-nowrap"
-                  style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)", minWidth: "120px" }}>Họ tên</th>
-                <th className="px-2 py-2 font-semibold border-r border-b"
+                  style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)", minWidth: "140px" }}>Họ tên</th>
+                <th className="px-2 py-2 font-semibold border-r border-b whitespace-nowrap"
                   style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>PB</th>
                 {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
-                  const dow = new Date(year, month - 1, d).getDay();
-                  const isWeekend = dow === 0 || dow === 6;
+                  const sun = isSun(d), sat = isSat(d);
                   return (
-                    <th key={d} className="w-8 py-2 font-semibold border-r border-b text-center"
-                      style={{ borderColor: "var(--ibs-border)", color: isWeekend ? "var(--ibs-warning)" : "var(--ibs-text-dim)" }}>
+                    <th key={d} className="w-7 py-2 font-semibold border-r border-b text-center"
+                      style={{ borderColor: "var(--ibs-border)", color: sun ? "var(--ibs-danger)" : sat ? "var(--ibs-warning)" : "var(--ibs-text-dim)" }}>
                       {d}
                     </th>
                   );
                 })}
-                <th className="px-2 py-2 font-semibold border-b"
-                  style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Tổng</th>
+                <th className="px-2 py-2 font-semibold border-r border-b whitespace-nowrap text-center"
+                  style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-success)" }}>Công TH</th>
+                <th className="px-2 py-2 font-semibold border-r border-b whitespace-nowrap text-center"
+                  style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-warning)" }}>Thêm giờ</th>
+                <th className="px-2 py-2 font-semibold border-r border-b whitespace-nowrap text-center"
+                  style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-danger)" }}>Công CN</th>
+                <th className="px-2 py-2 font-semibold border-b whitespace-nowrap text-center"
+                  style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-accent)" }}>Tổng</th>
               </tr>
             </thead>
             <tbody>
               {employees.length === 0 && (
                 <tr>
-                  <td colSpan={2 + daysInMonth + 1} className="py-10 text-center border-b"
+                  <td colSpan={2 + daysInMonth + 4} className="py-10 text-center border-b"
                     style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-text-dim)" }}>
                     Chưa có dữ liệu — nhập dữ liệu để hiển thị
                   </td>
                 </tr>
               )}
               {employees.map((emp) => {
-                let totalWork = 0;
+                const s = getSummary(emp);
+                const BD = "rgba(51,65,85,0.4)";
                 return (
-                  <tr key={emp.code}>
-                    <td className="sticky left-0 px-3 py-1.5 border-r border-b whitespace-nowrap"
-                      style={{ background: "var(--ibs-bg-card)", borderColor: "rgba(51,65,85,0.4)" }}>
-                      <span className="font-medium">{emp.fullName}</span>
-                      <span className="ml-1 text-[10px]" style={{ color: "var(--ibs-text-dim)" }}>({emp.code})</span>
-                    </td>
-                    <td className="px-2 py-1.5 border-r border-b text-center"
-                      style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-text-dim)" }}>
-                      {emp.dept?.replace("P. ", "")}
-                    </td>
-                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
-                      const rec = emp.days[d];
-                      const sym = rec ? ATTENDANCE_SYMBOL[rec.status] : null;
-                      if (rec?.status === "PRESENT" || rec?.status === "LATE") totalWork++;
-                      if (rec?.status === "HALF_DAY") totalWork += 0.5;
-                      const dow = new Date(year, month - 1, d).getDay();
-                      const isWeekend = dow === 0 || dow === 6;
-                      return (
-                        <td key={d} className="w-8 py-1.5 border-r border-b text-center font-semibold"
-                          style={{ borderColor: "rgba(51,65,85,0.4)", background: isWeekend ? "rgba(245,158,11,0.04)" : undefined }}>
-                          {sym ? (
-                            <span style={{ color: sym.color, fontSize: "10px" }}>{sym.symbol}</span>
-                          ) : (
-                            <span style={{ color: "rgba(51,65,85,0.5)" }}>·</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="px-2 py-1.5 border-b text-center font-semibold"
-                      style={{ borderColor: "rgba(51,65,85,0.4)", color: "var(--ibs-accent)" }}>
-                      {totalWork}
-                    </td>
-                  </tr>
+                  <Fragment key={emp.code}>
+                    {/* Main row: status / workHours */}
+                    <tr>
+                      <td className="sticky left-0 px-3 py-1.5 border-r border-b whitespace-nowrap"
+                        style={{ background: "var(--ibs-bg-card)", borderColor: BD }}>
+                        <span className="font-medium">{emp.fullName}</span>
+                        <span className="ml-1 text-[10px]" style={{ color: "var(--ibs-text-dim)" }}>({emp.code})</span>
+                      </td>
+                      <td className="px-2 py-1.5 border-r border-b text-center"
+                        style={{ borderColor: BD, color: "var(--ibs-text-dim)" }}>
+                        {emp.dept?.replace("P. ", "")}
+                      </td>
+                      {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+                        const rec = emp.days[d];
+                        const sym = rec ? ATTENDANCE_SYMBOL[rec.status] : null;
+                        const wh = rec?.workHours;
+                        const sun = isSun(d), sat = isSat(d);
+                        return (
+                          <td key={d} className="w-7 py-1.5 border-r border-b text-center font-semibold"
+                            style={{ borderColor: BD, background: sun ? "rgba(239,68,68,0.05)" : sat ? "rgba(245,158,11,0.04)" : undefined }}>
+                            {sym ? (
+                              <span style={{ color: sym.color, fontSize: "10px" }}>{sym.symbol}</span>
+                            ) : wh && wh > 0 ? (
+                              <span className="font-semibold" style={{ color: sun ? "var(--ibs-danger)" : "var(--ibs-success)", fontSize: "10px" }}>{wh}</span>
+                            ) : (
+                              <span style={{ color: "rgba(51,65,85,0.5)", fontSize: "9px" }}>·</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-1.5 border-r border-b text-center font-semibold" style={{ borderColor: BD, color: "var(--ibs-success)" }}>{s.regular || "—"}</td>
+                      <td className="px-2 py-1.5 border-r border-b text-center" style={{ borderColor: BD, color: "var(--ibs-warning)" }}>{s.ot || "—"}</td>
+                      <td className="px-2 py-1.5 border-r border-b text-center" style={{ borderColor: BD, color: "var(--ibs-danger)" }}>{s.sunday || "—"}</td>
+                      <td className="px-2 py-1.5 border-b text-center font-bold" style={{ borderColor: BD, color: "var(--ibs-accent)" }}>{s.total || "—"}</td>
+                    </tr>
+                    {/* Sub row: Thêm giờ */}
+                    <tr style={{ opacity: 0.65 }}>
+                      <td className="sticky left-0 px-3 py-0.5 border-r border-b" style={{ background: "var(--ibs-bg-card)", borderColor: BD }}>
+                        <span className="text-[10px] italic" style={{ color: "var(--ibs-text-dim)" }}>Thêm giờ</span>
+                      </td>
+                      <td className="border-r border-b" style={{ borderColor: BD }}></td>
+                      {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+                        const oh = emp.days[d]?.otHours;
+                        return (
+                          <td key={d} className="w-7 py-0.5 border-r border-b text-center" style={{ borderColor: BD }}>
+                            {oh && oh > 0 ? <span className="font-semibold" style={{ color: "var(--ibs-warning)", fontSize: "10px" }}>{oh}</span> : null}
+                          </td>
+                        );
+                      })}
+                      <td className="border-r border-b" style={{ borderColor: BD }}></td>
+                      <td className="px-2 py-0.5 border-r border-b text-center" style={{ borderColor: BD, color: "var(--ibs-warning)", fontSize: "10px" }}>{s.ot > 0 ? s.ot : ""}</td>
+                      <td className="border-r border-b" style={{ borderColor: BD }}></td>
+                      <td className="border-b" style={{ borderColor: BD }}></td>
+                    </tr>
+                  </Fragment>
                 );
               })}
             </tbody>
