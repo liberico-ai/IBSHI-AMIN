@@ -242,11 +242,21 @@ export async function calculatePayrollForPeriod(periodId: string) {
     });
   }
 
+  // ── Debug log: AttendanceRecord OT vs OTRequest ──
+  const otFromAttendance = attendanceData.filter((a) => a.otHours > 0).length;
+  const otFromRequest = otData.length;
+  const totalOtNvs = Object.keys(otMap).length;
+  const totalOtHours = Object.values(otMap).reduce((s, o) => s + o.weekday + o.sunday + o.holiday, 0);
+
   // Log breakdown để HR biết NV nào có HĐ vs thiếu HĐ
   console.warn(`[Payroll ${period.month}/${period.year}] ════════════════════════════════════════`);
   console.warn(`  Tổng NV có chấm công: ${employees.length}`);
   console.warn(`  ✅ Có HĐ active hoặc salaryGrade: ${withContractEmployees.length}`);
   console.warn(`  ❌ Thiếu HĐ — lương = 0: ${missingContractEmployees.length}`);
+  console.warn(`  ── OT data ──`);
+  console.warn(`     AttendanceRecord rows có otHours>0: ${otFromAttendance}`);
+  console.warn(`     OTRequest đã APPROVED: ${otFromRequest}`);
+  console.warn(`     Tổng NV có OT: ${totalOtNvs}, tổng giờ OT: ${totalOtHours}`);
   if (withContractEmployees.length > 0) {
     console.warn(`  ── Có HĐ ──`);
     withContractEmployees.slice(0, 10).forEach((e) => {
