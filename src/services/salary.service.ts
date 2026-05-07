@@ -138,14 +138,22 @@ export async function calculatePayrollForPeriod(periodId: string) {
     deductions: number; netSalary: number;
   }[] = [];
 
+  const missingContractEmployees: { code: string; fullName: string }[] = [];
+
   for (const emp of employees) {
     const contract = emp.contracts[0];
-    if (!contract) continue;
 
-    // Lương cơ bản (2.1) — ưu tiên salaryGrade × coefficient nếu có
-    const baseSalary = emp.salaryGrade && emp.salaryCoefficient
-      ? Math.round(emp.salaryGrade * emp.salaryCoefficient * SALARY_BASE_UNIT)
-      : contract.baseSalary;
+    // Lương cơ bản (2.1) — ưu tiên salaryGrade × coefficient → contract → 0 (default)
+    let baseSalary = 0;
+    if (emp.salaryGrade && emp.salaryCoefficient) {
+      baseSalary = Math.round(emp.salaryGrade * emp.salaryCoefficient * SALARY_BASE_UNIT);
+    } else if (contract) {
+      baseSalary = contract.baseSalary;
+    } else {
+      // Không có HĐ active và cũng không có salaryGrade → vẫn tạo record
+      // để HR thấy NV nào cần bổ sung HĐ. baseSalary = 0 → lương = 0.
+      missingContractEmployees.push({ code: emp.code, fullName: emp.fullName });
+    }
 
     const workDaysHC = workDaysMap[emp.id] || 0;
     const ot = otMap[emp.id] || { weekday: 0, sunday: 0, holiday: 0 };
@@ -215,6 +223,14 @@ export async function calculatePayrollForPeriod(periodId: string) {
       deductions: out.lateDeduction,                       // ((2)/26 × 7.2)
       netSalary: out.netSalary,                            // mục 19
     });
+  }
+
+  // Log danh sách NV thiếu HĐ (để HR biết cần bổ sung)
+  if (missingContractEmployees.length > 0) {
+    console.warn(
+      `[Payroll ${period.month}/${period.year}] ${missingContractEmployees.length} NV thiếu HĐ active hoặc salaryGrade — lương = 0:`,
+      missingContractEmployees.map((e) => `${e.code} (${e.fullName})`).join(", ")
+    );
   }
 
   // Atomic write: xoá cũ → ghi mới → mark PROCESSING
