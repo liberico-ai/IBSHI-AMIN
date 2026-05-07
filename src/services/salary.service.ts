@@ -34,20 +34,37 @@ export async function calculatePayrollForPeriod(periodId: string) {
   const startDate = new Date(period.year, period.month - 1, 1);
   const endDate = new Date(period.year, period.month, 0, 23, 59, 59);
 
-  // Lấy NV active hoặc đang thử việc
+  // M3: Bảng chấm công đã import (vân tay khối gián tiếp + khuôn mặt khối trực tiếp)
+  const attendanceData = await prisma.attendanceRecord.findMany({
+    where: { date: { gte: startDate, lte: endDate } },
+    select: { employeeId: true, status: true },
+  });
+
+  // CHỈ tính lương cho NV CÓ DỮ LIỆU CHẤM CÔNG trong tháng
+  // (theo spec: "hiển thị bảng lương của tất cả NV có chấm công đã import vào M3")
+  const employeeIdsWithAttendance = Array.from(
+    new Set(attendanceData.map((a) => a.employeeId))
+  );
+
+  if (employeeIdsWithAttendance.length === 0) {
+    throw Object.assign(
+      new Error(
+        "Chưa có dữ liệu chấm công cho tháng này. Vui lòng import bảng công ở module M3 - Chấm công trước khi tính lương."
+      ),
+      { code: "NO_ATTENDANCE_DATA" }
+    );
+  }
+
   const employees = await prisma.employee.findMany({
-    where: { status: { in: ["ACTIVE", "PROBATION"] } },
+    where: {
+      id: { in: employeeIdsWithAttendance },
+      status: { in: ["ACTIVE", "PROBATION"] },
+    },
     include: {
       contracts: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 1 },
       user: { select: { role: true } },
       team: { select: { id: true } },
     },
-  });
-
-  // M3: Bảng chấm công đã import (vân tay khối gián tiếp + khuôn mặt khối trực tiếp)
-  const attendanceData = await prisma.attendanceRecord.findMany({
-    where: { date: { gte: startDate, lte: endDate } },
-    select: { employeeId: true, status: true },
   });
 
   // M3: OT đã được duyệt
