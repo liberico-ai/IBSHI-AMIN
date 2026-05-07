@@ -1326,3 +1326,330 @@ model AuditChecklist {
 
   @@index([eventId])
 }
+
+// ==================================================================
+// SKELETON MODELS — pending data input from business owner
+// (Placeholders. Fields will be expanded when data is provided.)
+// ==================================================================
+
+// ===== M3 — Phiếu kê khai tổ trưởng + Đối soát + Giải trình =====
+
+model Project {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  client    String?
+  status    String   @default("ACTIVE")
+  startDate DateTime?
+  endDate   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dailyReports DailyTeamReport[]
+}
+
+model WorkCode {
+  id        String         @id @default(uuid())
+  code      String         @unique
+  name      String
+  types     WorkTypeCode[]
+  createdAt DateTime       @default(now())
+}
+
+model WorkTypeCode {
+  id          String   @id @default(uuid())
+  workCodeId  String
+  workCode    WorkCode @relation(fields: [workCodeId], references: [id], onDelete: Cascade)
+  code        String
+  description String
+
+  @@unique([workCodeId, code])
+}
+
+model DailyTeamReport {
+  id          String    @id @default(uuid())
+  date        DateTime
+  teamId      String
+  foremanId   String
+  status      String    @default("DRAFT")
+  submittedAt DateTime?
+  approvedAt  DateTime?
+  approvedBy  String?
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  entries DailyTeamEntry[]
+  issues  DailyTeamIssue[]
+
+  @@index([teamId, date])
+}
+
+model DailyTeamEntry {
+  id              String          @id @default(uuid())
+  reportId        String
+  report          DailyTeamReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  employeeId      String
+  projectCode     String?
+  regularHours    Float           @default(0)
+  isSundayWork    Boolean         @default(false)
+  otHours         Float           @default(0)
+  isReinforcement Boolean         @default(false)
+  workCode        String?
+  workTypeCode    String?
+  description     String?
+  isAbsent        Boolean         @default(false)
+  note            String?
+
+  @@index([reportId])
+  @@index([employeeId])
+}
+
+model DailyTeamIssue {
+  id            String          @id @default(uuid())
+  reportId      String
+  report        DailyTeamReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  type          String
+  description   String
+  affectedHours Float
+  note          String?
+}
+
+model AttendanceCorrection {
+  id            String    @id @default(uuid())
+  employeeId    String
+  date          DateTime
+  errorType     String
+  reason        String
+  attachmentUrl String?
+  status        String    @default("PENDING")
+  approverId    String?
+  approvedAt    DateTime?
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  @@index([employeeId, date])
+}
+
+// ===== M4 — Onboarding + Offer Letter + Đánh giá thử việc =====
+
+model OfferLetter {
+  id          String    @id @default(uuid())
+  candidateId String
+  position    String
+  startDate   DateTime
+  baseSalary  Decimal
+  allowances  Json?
+  body        String?
+  status      String    @default("DRAFT")
+  sentAt      DateTime?
+  acceptedAt  DateTime?
+  expiresAt   DateTime?
+  createdBy   String
+  createdAt   DateTime  @default(now())
+}
+
+model OnboardingChecklist {
+  id          String    @id @default(uuid())
+  employeeId  String    @unique
+  status      String    @default("IN_PROGRESS")
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  items ChecklistItem[]
+}
+
+model ChecklistItem {
+  id            String              @id @default(uuid())
+  checklistId   String
+  checklist     OnboardingChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  itemKey       String
+  title         String
+  isCompleted   Boolean             @default(false)
+  completedAt   DateTime?
+  attachmentUrl String?
+  note          String?
+  sortOrder     Int                 @default(0)
+
+  @@unique([checklistId, itemKey])
+}
+
+model ProbationEvaluation {
+  id                 String    @id @default(uuid())
+  employeeId         String
+  evaluatedBy        String
+  evaluationDate     DateTime  @default(now())
+  scores             Json
+  totalScore         Float
+  recommendedTier    String
+  comments           String?
+  status             String    @default("PENDING")
+  directorApprovedBy String?
+  directorApprovedAt DateTime?
+  hrSignedBy         String?
+  hrSignedAt         DateTime?
+  contractType       String?
+  createdAt          DateTime  @default(now())
+}
+
+// ===== M10 — 5 mảng mới =====
+
+model MeetingRoom {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  capacity  Int
+  location  String?
+  equipment Json?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  bookings RoomBooking[]
+}
+
+model RoomBooking {
+  id              String      @id @default(uuid())
+  roomId          String
+  room            MeetingRoom @relation(fields: [roomId], references: [id])
+  bookedBy        String
+  startTime       DateTime
+  endTime         DateTime
+  purpose         String
+  attendees       Int?
+  equipmentNeeded Json?
+  status          String      @default("CONFIRMED")
+  notes           String?
+  createdAt       DateTime    @default(now())
+
+  @@index([roomId, startTime])
+}
+
+model RepairRequest {
+  id             String    @id @default(uuid())
+  requestedBy    String
+  facilityType   String
+  location       String
+  description    String
+  priority       String    @default("MEDIUM")
+  attachmentUrls Json?
+  status         String    @default("NEW")
+  assignedTo     String?
+  cost           Decimal?
+  invoiceUrl     String?
+  createdAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  @@index([status])
+  @@index([priority])
+}
+
+model OfficeSupplyItem {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  unit      String
+  unitPrice Decimal?
+  category  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model PurchaseRequest {
+  id           String    @id @default(uuid())
+  prCode       String    @unique
+  requestMonth String
+  status       String    @default("DRAFT")
+  totalAmount  Decimal?
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  approvedBy   String?
+  approvedAt   DateTime?
+
+  items    PurchaseRequestItem[]
+  receipts StockReceipt[]
+}
+
+model PurchaseRequestItem {
+  id        String          @id @default(uuid())
+  prId      String
+  pr        PurchaseRequest @relation(fields: [prId], references: [id], onDelete: Cascade)
+  itemCode  String
+  qty       Int
+  unitPrice Decimal?
+  note      String?
+
+  @@index([prId])
+}
+
+model StockReceipt {
+  id         String          @id @default(uuid())
+  prId       String
+  pr         PurchaseRequest @relation(fields: [prId], references: [id])
+  receivedBy String
+  receivedAt DateTime        @default(now())
+  notes      String?
+  invoiceUrl String?
+
+  issuances Issuance[]
+}
+
+model Issuance {
+  id           String       @id @default(uuid())
+  receiptId    String
+  receipt      StockReceipt @relation(fields: [receiptId], references: [id])
+  issuedTo     String
+  itemCode     String
+  qty          Int
+  issuedBy     String
+  issuedAt     DateTime     @default(now())
+  signatureUrl String?
+}
+
+model IncomingDocument {
+  id          String    @id @default(uuid())
+  docNumber   String?
+  docDate     DateTime?
+  fromEntity  String?
+  subject     String?
+  scanFileUrl String
+  ocrJson     Json?
+  routedTo    String?
+  status      String    @default("RECEIVED")
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([status])
+  @@index([routedTo])
+}
+
+model DocumentTemplate {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  htmlBody  String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  documents OutgoingDocument[]
+}
+
+model OutgoingDocument {
+  id         String            @id @default(uuid())
+  docNumber  String            @unique
+  docDate    DateTime          @default(now())
+  templateId String?
+  template   DocumentTemplate? @relation(fields: [templateId], references: [id])
+  subject    String
+  body       String
+  toEntity   String?
+  signedBy   String?
+  status     String            @default("DRAFT")
+  pdfUrl     String?
+  scanUrl    String?
+  createdBy  String
+  createdAt  DateTime          @default(now())
+
+  @@index([status])
+  @@index([docDate])
+}
