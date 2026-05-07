@@ -37,7 +37,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // M3: Bảng chấm công đã import (vân tay khối gián tiếp + khuôn mặt khối trực tiếp)
   const attendanceData = await prisma.attendanceRecord.findMany({
     where: { date: { gte: startDate, lte: endDate } },
-    select: { employeeId: true, status: true },
+    select: { employeeId: true, status: true, otHours: true, date: true },
   });
 
   // CHỈ tính lương cho NV CÓ DỮ LIỆU CHẤM CÔNG trong tháng
@@ -99,8 +99,22 @@ export async function calculatePayrollForPeriod(periodId: string) {
     else if (a.status === "HALF_DAY") workDaysMap[a.employeeId] += 0.5;
   }
 
-  // 5 — Phân loại OT theo otRate (1.5 → weekday, 2.0 → sunday, 3.0 → holiday)
+  // 5 — Phân loại OT — gộp 2 nguồn:
+  //   (a) AttendanceRecord.otHours (từ import M3 — phân loại theo thứ trong tuần)
+  //   (b) OTRequest đã APPROVED (đơn OT cá nhân — phân loại theo otRate)
   const otMap: Record<string, { weekday: number; sunday: number; holiday: number }> = {};
+
+  // (a) Từ AttendanceRecord — date.getDay() === 0 → CN, else → ngày thường
+  // (Không phân biệt ngày Lễ ở phase này — sẽ làm Phase 2 với holiday calendar)
+  for (const a of attendanceData) {
+    if (!a.otHours || a.otHours <= 0) continue;
+    if (!otMap[a.employeeId]) otMap[a.employeeId] = { weekday: 0, sunday: 0, holiday: 0 };
+    const dow = new Date(a.date).getDay();
+    if (dow === 0) otMap[a.employeeId].sunday += a.otHours;       // Chủ nhật
+    else otMap[a.employeeId].weekday += a.otHours;                 // Ngày thường (T2-T7)
+  }
+
+  // (b) Từ OTRequest — bù thêm nếu có (vd OT ngày Lễ chỉ track ở đây)
   for (const o of otData) {
     if (!otMap[o.employeeId]) otMap[o.employeeId] = { weekday: 0, sunday: 0, holiday: 0 };
     if (o.otRate >= 3.0) otMap[o.employeeId].holiday += o.hours;
