@@ -1,40 +1,30 @@
 import prisma from "@/lib/prisma";
+import { calculateSalary, type SalaryInput } from "@/lib/salary-calc";
+import { SALARY_CONFIG, INSURANCE_RATES } from "@/lib/constants";
 
-// ─── Constants ─────────────────────────────────────────────────────────────
+// ─── Constants (legacy lookup theo role/team — có thể override ở UI) ──────────
 
-const BHXH_RATE = parseFloat(process.env.BHXH_RATE || "0.08");
-const BHYT_RATE = parseFloat(process.env.BHYT_RATE || "0.015");
-const BHTN_RATE = parseFloat(process.env.BHTN_RATE || "0.01");
-const STANDARD_DAYS = parseInt(process.env.STANDARD_DAYS || "26", 10);
-const BHXH_SALARY_CAP = 36_000_000;
-const PERSONAL_DEDUCTION = 11_000_000;
-const DEPENDENT_DEDUCTION = 4_400_000;
-const MEAL_UNIT_PRICE = parseInt(process.env.MEAL_UNIT_PRICE || "35000", 10);
-const SALARY_BASE_UNIT = 730_000;
+const SALARY_BASE_UNIT = 730_000; // Mức lương cơ sở để tính từ salaryGrade × salaryCoefficient
 
 const RESPONSIBILITY_ALLOWANCE: Record<string, number> = {
-  TEAM_LEAD: 800_000,
-  MANAGER: 1_500_000,
-  HR_ADMIN: 1_500_000,
-  BOM: 1_500_000,
+  TEAM_LEAD: SALARY_CONFIG.TEAM_LEAD_ALLOWANCE,
+  MANAGER: SALARY_CONFIG.MANAGER_ALLOWANCE,
+  HR_ADMIN: SALARY_CONFIG.MANAGER_ALLOWANCE,
+  BOM: SALARY_CONFIG.MANAGER_ALLOWANCE,
   EMPLOYEE: 0,
 };
-const HAZARD_ALLOWANCE = 1_200_000;
 
-// ─── TNCN lũy tiến VN (tháng) ──────────────────────────────────────────────
+// ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
 
-export function calcTNCN(taxable: number): number {
-  if (taxable <= 0) return 0;
-  if (taxable <= 5_000_000) return Math.round(taxable * 0.05);
-  if (taxable <= 10_000_000) return Math.round(250_000 + (taxable - 5_000_000) * 0.10);
-  if (taxable <= 18_000_000) return Math.round(750_000 + (taxable - 10_000_000) * 0.15);
-  if (taxable <= 32_000_000) return Math.round(1_950_000 + (taxable - 18_000_000) * 0.20);
-  if (taxable <= 52_000_000) return Math.round(4_750_000 + (taxable - 32_000_000) * 0.25);
-  if (taxable <= 80_000_000) return Math.round(9_750_000 + (taxable - 52_000_000) * 0.30);
-  return Math.round(18_150_000 + (taxable - 80_000_000) * 0.35);
-}
+export { calcTNCN } from "@/lib/salary-calc";
 
-// ─── Core calculation ───────────────────────────────────────────────────────
+// ─── Core calculation ──────────────────────────────────────────────────────
+// Pipeline:
+//   M3 (AttendanceRecord + LeaveRequest + OTRequest) ──┐
+//   M1 (Contract.baseSalary)                            ├─► calculateSalary()
+//   PieceRateRecord (lương khoán theo tổ × DA)         ─┘     (lib/salary-calc.ts)
+//                                                              ↓
+//                                                       PayrollRecord rows
 
 export async function calculatePayrollForPeriod(periodId: string) {
   const period = await prisma.payrollPeriod.findUnique({ where: { id: periodId } });
@@ -44,6 +34,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
   const startDate = new Date(period.year, period.month - 1, 1);
   const endDate = new Date(period.year, period.month, 0, 23, 59, 59);
 
+  // Lấy NV active hoặc đang thử việc
   const employees = await prisma.employee.findMany({
     where: { status: { in: ["ACTIVE", "PROBATION"] } },
     include: {
@@ -53,38 +44,65 @@ export async function calculatePayrollForPeriod(periodId: string) {
     },
   });
 
+  // M3: Bảng chấm công đã import (vân tay khối gián tiếp + khuôn mặt khối trực tiếp)
   const attendanceData = await prisma.attendanceRecord.findMany({
     where: { date: { gte: startDate, lte: endDate } },
     select: { employeeId: true, status: true },
   });
 
+  // M3: OT đã được duyệt
   const otData = await prisma.oTRequest.findMany({
     where: { date: { gte: startDate, lte: endDate }, status: "APPROVED" },
     select: { employeeId: true, hours: true, otRate: true },
   });
 
+  // M3: Nghỉ phép đã duyệt — phân loại có lương vs không lương
+  const leaveData = await prisma.leaveRequest.findMany({
+    where: {
+      status: "APPROVED",
+      startDate: { lte: endDate },
+      endDate: { gte: startDate },
+    },
+    select: { employeeId: true, leaveType: true, totalDays: true },
+  });
+
+  // Lương khoán (M7 piece-rate) theo tổ × tháng (Phase 2 sẽ mở rộng theo công đoạn)
   const pieceRateData = await prisma.pieceRateRecord.findMany({
     where: { month: period.month, year: period.year },
     include: { members: { select: { id: true } } },
   });
 
-  // Build lookup maps
-  const attendanceMap: Record<string, { days: number }> = {};
+  // ── Build lookup maps ──
+
+  // 4 — workDaysHC (tính từ AttendanceRecord, các status PRESENT/LATE/CT đều +1, HALF_DAY +0.5)
+  const workDaysMap: Record<string, number> = {};
   for (const a of attendanceData) {
-    if (!attendanceMap[a.employeeId]) attendanceMap[a.employeeId] = { days: 0 };
-    if (["PRESENT", "LATE", "BUSINESS_TRIP"].includes(a.status)) {
-      attendanceMap[a.employeeId].days += 1;
-    } else if (a.status === "HALF_DAY") {
-      attendanceMap[a.employeeId].days += 0.5;
+    if (!workDaysMap[a.employeeId]) workDaysMap[a.employeeId] = 0;
+    if (["PRESENT", "LATE", "BUSINESS_TRIP"].includes(a.status)) workDaysMap[a.employeeId] += 1;
+    else if (a.status === "HALF_DAY") workDaysMap[a.employeeId] += 0.5;
+  }
+
+  // 5 — Phân loại OT theo otRate (1.5 → weekday, 2.0 → sunday, 3.0 → holiday)
+  const otMap: Record<string, { weekday: number; sunday: number; holiday: number }> = {};
+  for (const o of otData) {
+    if (!otMap[o.employeeId]) otMap[o.employeeId] = { weekday: 0, sunday: 0, holiday: 0 };
+    if (o.otRate >= 3.0) otMap[o.employeeId].holiday += o.hours;
+    else if (o.otRate >= 2.0) otMap[o.employeeId].sunday += o.hours;
+    else otMap[o.employeeId].weekday += o.hours;
+  }
+
+  // 6 — Công chế độ (phép/lễ/TNLĐ) | 7.1 — Nghỉ không lương
+  const policyMap: Record<string, number> = {};
+  const unpaidMap: Record<string, number> = {};
+  for (const l of leaveData) {
+    if (l.leaveType === "UNPAID") {
+      unpaidMap[l.employeeId] = (unpaidMap[l.employeeId] || 0) + l.totalDays;
+    } else {
+      policyMap[l.employeeId] = (policyMap[l.employeeId] || 0) + l.totalDays;
     }
   }
 
-  const otMap: Record<string, { hours: number; otRate: number }[]> = {};
-  for (const o of otData) {
-    if (!otMap[o.employeeId]) otMap[o.employeeId] = [];
-    otMap[o.employeeId].push({ hours: o.hours, otRate: o.otRate });
-  }
-
+  // 10 — Lương khoán: chia đều theo memberCount (Phase 2 sẽ chia theo công đi làm)
   const pieceRateMap: Record<string, number> = {};
   for (const pr of pieceRateData) {
     const perMember = pr.memberCount > 0 ? Math.round(pr.totalAmount / pr.memberCount) : 0;
@@ -93,7 +111,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
     }
   }
 
-  // Compute records in-memory (outside transaction — read-only)
+  // ── Tính lương cho từng NV (dùng calculateSalary từ lib/salary-calc.ts) ──
+
   const records: {
     periodId: string; employeeId: string; standardDays: number; workDays: number;
     otHours: number; baseSalary: number; pieceRateSalary: number; hazardAllowance: number;
@@ -101,69 +120,87 @@ export async function calculatePayrollForPeriod(periodId: string) {
     grossSalary: number; bhxh: number; bhyt: number; bhtn: number; tncn: number;
     deductions: number; netSalary: number;
   }[] = [];
+
   for (const emp of employees) {
     const contract = emp.contracts[0];
     if (!contract) continue;
 
+    // Lương cơ bản (2.1) — ưu tiên salaryGrade × coefficient nếu có
     const baseSalary = emp.salaryGrade && emp.salaryCoefficient
       ? Math.round(emp.salaryGrade * emp.salaryCoefficient * SALARY_BASE_UNIT)
       : contract.baseSalary;
 
-    const workDays = (attendanceMap[emp.id] || { days: 0 }).days;
-
-    // Các khoản thu
-    const workedPay = Math.round(baseSalary * (workDays / STANDARD_DAYS));
+    const workDaysHC = workDaysMap[emp.id] || 0;
+    const ot = otMap[emp.id] || { weekday: 0, sunday: 0, holiday: 0 };
+    const workDaysPolicy = policyMap[emp.id] || 0;
+    const workDaysUnpaid = unpaidMap[emp.id] || 0;
     const pieceRateSalary = pieceRateMap[emp.id] || 0;
-    const hazardAllowance = emp.teamId ? HAZARD_ALLOWANCE : 0;
-    const responsibilityAllow = RESPONSIBILITY_ALLOWANCE[emp.user.role] || 0;
-    const mealAllowance = Math.round(workDays * MEAL_UNIT_PRICE);
 
-    const hourlyRate = baseSalary / (STANDARD_DAYS * 8);
-    const otHours = (otMap[emp.id] || []).reduce((s, o) => s + o.hours, 0);
-    const otPay = Math.round(
-      (otMap[emp.id] || []).reduce((sum, o) => sum + o.hours * hourlyRate * o.otRate, 0)
-    );
+    // Build SalaryInput theo spec IBSHI
+    const input: SalaryInput = {
+      // Hợp đồng (Phase 1: phụ cấp 2.2 chưa có data → default 0, HR override sau)
+      baseSalary,
+      phoneAllowance: 0,
+      fuelAllowance: 0,
+      housingAllowance: 0,
+      kpiAllowance: 0,
+      // Bổ sung (3.1 theo role; 3.2 chưa có data distance/province)
+      responsibilityAllowance: RESPONSIBILITY_ALLOWANCE[emp.user.role] || 0,
+      distanceToOfficeKm: 0,
+      isOutOfProvince: false,
+      dependentsCount: emp.dependents || 0,
+      // Số công (từ M3)
+      workDaysHC,
+      otHoursWeekday: ot.weekday,
+      otHoursWeekdayNight: 0,         // chưa tách ngày/đêm — Phase 2
+      otHoursSunday: ot.sunday,
+      otHoursSundayNight: 0,
+      otHoursHoliday: ot.holiday,
+      otHoursHolidayNight: 0,
+      workDaysPolicy,
+      workDaysUnpaid,
+      workDaysLate: 0,                 // chưa có cột đi muộn — Phase 2
+      // Lương khoán
+      pieceRateSalary,
+      companyServesMealOnSunday: false,
+    };
 
-    const grossSalary = workedPay + pieceRateSalary + hazardAllowance
-      + responsibilityAllow + mealAllowance + otPay;
+    const out = calculateSalary(input);
 
-    // Bảo hiểm (tính trên baseSalary, capped tại 36M)
-    const bhxhBase = Math.min(baseSalary, BHXH_SALARY_CAP);
-    const bhxh = Math.round(bhxhBase * BHXH_RATE);
-    const bhyt = Math.round(bhxhBase * BHYT_RATE);
-    const bhtn = Math.round(bhxhBase * BHTN_RATE);
-
-    // Thuế TNCN
-    const dependentDeduction = (emp.dependents || 0) * DEPENDENT_DEDUCTION;
-    const taxableIncome = grossSalary - bhxh - bhyt - bhtn - PERSONAL_DEDUCTION - dependentDeduction;
-    const tncn = calcTNCN(taxableIncome);
-
-    const netSalary = grossSalary - bhxh - bhyt - bhtn - tncn;
+    // Map output → existing PayrollRecord schema
+    // Note: schema chưa có đủ fields theo spec mới. Phase 2 sẽ migrate.
+    // Tạm map các trường chính:
+    //   mealAllowance → ăn ca OT (mục 12)
+    //   otherIncome   → PC xăng nhà trọ (mục 3.2)
+    //   deductions    → đi muộn (mục 7.2)
+    //   bhxh/bhyt/bhtn → split 8% / 1.5% / 1% (tổng 10.5% theo spec)
+    const bhxhBase = Math.min(baseSalary, SALARY_CONFIG.INSURANCE_SALARY_CAP);
+    const totalOtHours = ot.weekday + ot.sunday + ot.holiday;
 
     records.push({
       periodId,
       employeeId: emp.id,
-      standardDays: STANDARD_DAYS,
-      workDays,
-      otHours,
+      standardDays: SALARY_CONFIG.STANDARD_WORK_DAYS,
+      workDays: workDaysHC,
+      otHours: totalOtHours,
       baseSalary,
-      pieceRateSalary,
-      hazardAllowance,
-      responsibilityAllow,
-      mealAllowance,
-      otherIncome: 0,
-      otPay,
-      grossSalary,
-      bhxh,
-      bhyt,
-      bhtn,
-      tncn,
-      deductions: 0,
-      netSalary,
+      pieceRateSalary: out.pieceRateSalary,
+      hazardAllowance: 0,                                  // Phase 2: theo điều kiện công ty
+      responsibilityAllow: input.responsibilityAllowance,
+      mealAllowance: out.overtimeMealAllow,                // mục 12
+      otherIncome: out.fuelHousingAllow,                   // mục 3.2
+      otPay: out.salaryOT,                                 // mục 9
+      grossSalary: out.grossSalary,                        // B2
+      bhxh: Math.round(bhxhBase * INSURANCE_RATES.SOCIAL),       // 8%
+      bhyt: Math.round(bhxhBase * INSURANCE_RATES.HEALTH),       // 1.5%
+      bhtn: Math.round(bhxhBase * INSURANCE_RATES.UNEMPLOYMENT), // 1%
+      tncn: out.tncn,                                       // mục 18
+      deductions: out.lateDeduction,                       // ((2)/26 × 7.2)
+      netSalary: out.netSalary,                            // mục 19
     });
   }
 
-  // Atomic write: delete old → insert new → mark PROCESSING
+  // Atomic write: xoá cũ → ghi mới → mark PROCESSING
   await prisma.$transaction(async (tx) => {
     await tx.payrollRecord.deleteMany({ where: { periodId } });
     await tx.payrollRecord.createMany({ data: records });
