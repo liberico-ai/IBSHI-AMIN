@@ -139,6 +139,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
   }[] = [];
 
   const missingContractEmployees: { code: string; fullName: string }[] = [];
+  const withContractEmployees: { code: string; fullName: string; baseSalary: number }[] = [];
 
   for (const emp of employees) {
     const contract = emp.contracts[0];
@@ -147,8 +148,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
     let baseSalary = 0;
     if (emp.salaryGrade && emp.salaryCoefficient) {
       baseSalary = Math.round(emp.salaryGrade * emp.salaryCoefficient * SALARY_BASE_UNIT);
+      withContractEmployees.push({ code: emp.code, fullName: emp.fullName, baseSalary });
     } else if (contract) {
       baseSalary = contract.baseSalary;
+      withContractEmployees.push({ code: emp.code, fullName: emp.fullName, baseSalary });
     } else {
       // Không có HĐ active và cũng không có salaryGrade → vẫn tạo record
       // để HR thấy NV nào cần bổ sung HĐ. baseSalary = 0 → lương = 0.
@@ -225,13 +228,26 @@ export async function calculatePayrollForPeriod(periodId: string) {
     });
   }
 
-  // Log danh sách NV thiếu HĐ (để HR biết cần bổ sung)
-  if (missingContractEmployees.length > 0) {
-    console.warn(
-      `[Payroll ${period.month}/${period.year}] ${missingContractEmployees.length} NV thiếu HĐ active hoặc salaryGrade — lương = 0:`,
-      missingContractEmployees.map((e) => `${e.code} (${e.fullName})`).join(", ")
-    );
+  // Log breakdown để HR biết NV nào có HĐ vs thiếu HĐ
+  console.warn(`[Payroll ${period.month}/${period.year}] ════════════════════════════════════════`);
+  console.warn(`  Tổng NV có chấm công: ${employees.length}`);
+  console.warn(`  ✅ Có HĐ active hoặc salaryGrade: ${withContractEmployees.length}`);
+  console.warn(`  ❌ Thiếu HĐ — lương = 0: ${missingContractEmployees.length}`);
+  if (withContractEmployees.length > 0) {
+    console.warn(`  ── Có HĐ ──`);
+    withContractEmployees.slice(0, 10).forEach((e) => {
+      console.warn(`    ${e.code} ${e.fullName} — baseSalary: ${e.baseSalary.toLocaleString("vi-VN")}đ`);
+    });
+    if (withContractEmployees.length > 10) console.warn(`    ... và ${withContractEmployees.length - 10} NV khác`);
   }
+  if (missingContractEmployees.length > 0) {
+    console.warn(`  ── Thiếu HĐ ──`);
+    missingContractEmployees.slice(0, 10).forEach((e) => {
+      console.warn(`    ${e.code} ${e.fullName}`);
+    });
+    if (missingContractEmployees.length > 10) console.warn(`    ... và ${missingContractEmployees.length - 10} NV khác`);
+  }
+  console.warn(`══════════════════════════════════════════════════════════════════════`);
 
   // Atomic write: xoá cũ → ghi mới → mark PROCESSING
   await prisma.$transaction(async (tx) => {
