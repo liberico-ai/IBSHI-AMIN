@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
     }
 
     const missingCodes = codes.filter((c) => !codeToId.has(c));
+    const skippedRecords = records.filter((r) => !codeToId.has(r.employeeCode)).length;
 
     const createdBy = (session.user as any).id;
     let created = 0;
@@ -72,7 +73,10 @@ export async function POST(request: NextRequest) {
           if (!employeeId) return;
 
           const date = new Date(r.date);
-          const status = r.status ?? (r.workHours >= 8 ? "PRESENT" : r.workHours >= 4 ? "HALF_DAY" : "PRESENT");
+          // If caller didn't supply a status, derive from workHours.
+          // <4h with no explicit status is ambiguous (could be partial half-day, could be absent);
+          // default to HALF_DAY rather than PRESENT so it doesn't silently overstate attendance.
+          const status = r.status ?? (r.workHours >= 8 ? "PRESENT" : r.workHours > 0 ? "HALF_DAY" : "ABSENT_UNAPPROVED");
 
           await prisma.attendanceRecord.upsert({
             where: { employeeId_date: { employeeId, date } },
@@ -86,7 +90,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       created,
-      skipped: missingCodes.length,
+      skipped: skippedRecords,
       missingCodes: missingCodes.length > 0 ? missingCodes : undefined,
     });
   } catch (err) {

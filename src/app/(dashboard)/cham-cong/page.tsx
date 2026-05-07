@@ -152,7 +152,7 @@ function OfficeAttendanceCard({
       });
       const result = await res.json();
       if (res.ok) {
-        setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${result.skipped ? `. Bỏ qua ${result.skipped} mã NV không tìm thấy.` : "."}` });
+        setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${result.skipped ? `. Bỏ qua ${result.skipped} bản ghi (${result.missingCodes?.length ?? 0} mã NV không tìm thấy).` : "."}` });
         // Delay refresh so user sees the message
         setTimeout(() => onRefresh(), 1500);
       } else {
@@ -424,7 +424,7 @@ function AttendanceGridCard({
       });
       const result = await res.json();
       if (res.ok) {
-        setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${result.skipped ? `. Bỏ qua ${result.skipped} mã NV không tìm thấy.` : "."}` });
+        setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${result.skipped ? `. Bỏ qua ${result.skipped} bản ghi (${result.missingCodes?.length ?? 0} mã NV không tìm thấy).` : "."}` });
         setTimeout(() => onRefresh(), 1500);
       } else {
         setImportMsg({ ok: false, text: result.error?.message || "Có lỗi xảy ra" });
@@ -577,11 +577,12 @@ export default function AttendancePage() {
   const [gridRefreshKey, setGridRefreshKey] = useState(0);
 
   useEffect(() => {
+    // Summary endpoint always returns "today" regardless of month/year — don't depend on them.
     setLoadingSummary(true);
     fetch("/api/v1/attendance?summary=true")
       .then((r) => r.json()).then((res) => setSummary(res.data || []))
       .finally(() => setLoadingSummary(false));
-  }, [month, year]);
+  }, []);
 
   useEffect(() => {
     setLoadingLeave(true);

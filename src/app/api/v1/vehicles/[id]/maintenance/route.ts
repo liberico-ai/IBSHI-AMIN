@@ -46,7 +46,7 @@ export async function POST(
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "vehicleBookings", "approve2")) {
+  if (!canDo(userRole, "vehicleBookings", "logMaintenance")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
