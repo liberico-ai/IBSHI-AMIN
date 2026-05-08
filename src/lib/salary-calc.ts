@@ -101,8 +101,13 @@ export function calcTNCN(taxableMonthly: number): number {
 }
 
 // ============================================================================
-// HELPER — Phụ cấp ăn ca thêm giờ
-// Spec: OT >= 2h → +15K; OT >= 4h → +20K (thay thế, không cộng dồn)
+// HELPER — Phụ cấp ăn ca thêm giờ (CỘNG DỒN theo giờ)
+// Spec IBSHI:
+//   - 2 giờ đầu: 15.000đ/giờ
+//   - Từ giờ thứ 3 trở đi: 20.000đ/giờ
+//   Vd: OT 5h = 2×15K + 3×20K = 30K + 60K = 90K
+//       OT 2h = 2×15K + 0      = 30K
+//       OT 4h = 2×15K + 2×20K  = 70K
 // Loại trừ: nếu cty nấu ăn vào CN → bỏ phần OT-CN khỏi tính ăn ca
 // ============================================================================
 export function calcOvertimeMealAllow(
@@ -111,15 +116,16 @@ export function calcOvertimeMealAllow(
   otHoursHoliday: number,
   companyServesMealOnSunday: boolean,
 ): number {
-  // Tổng giờ OT trong ngày (theo spec — gộp giờ ngày + đêm thì tốt nhưng spec gộp đơn giản)
   let totalOtForMeal = otHoursWeekday + otHoursHoliday;
   if (!companyServesMealOnSunday) {
     totalOtForMeal += otHoursSunday;
   }
 
-  if (totalOtForMeal >= 4) return SALARY_CONFIG.OVERTIME_MEAL_4H;
-  if (totalOtForMeal >= 2) return SALARY_CONFIG.OVERTIME_MEAL_2H;
-  return 0;
+  if (totalOtForMeal <= 0) return 0;
+
+  const firstTier = Math.min(totalOtForMeal, 2);                         // 2 giờ đầu
+  const secondTier = Math.max(0, totalOtForMeal - 2);                    // từ giờ 3 trở đi
+  return Math.round(firstTier * SALARY_CONFIG.OVERTIME_MEAL_2H + secondTier * SALARY_CONFIG.OVERTIME_MEAL_4H);
 }
 
 // ============================================================================

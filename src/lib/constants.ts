@@ -73,9 +73,10 @@ export const SALARY_CONFIG = {
   TEAM_LEAD_ALLOWANCE: 800000,
   MANAGER_ALLOWANCE: 1500000,
   MEAL_ALLOWANCE_PER_DAY: 35000,
-  // ── Ăn ca thêm giờ (theo spec) ──
-  OVERTIME_MEAL_2H: 15000,          // OT >= 2h: thêm 15K
-  OVERTIME_MEAL_4H: 20000,          // OT >= 4h: thêm 20K (thay thế 15K, không cộng dồn)
+  // ── Ăn ca thêm giờ (CỘNG DỒN theo giờ) ──
+  OVERTIME_MEAL_2H: 15000,          // 2 giờ đầu: 15K/giờ
+  OVERTIME_MEAL_4H: 20000,          // Từ giờ thứ 3 trở đi: 20K/giờ
+  // Vd: OT 5h = 2×15K + 3×20K = 90K
   // ── Phụ cấp xăng nhà trọ (3.2) ──
   FUEL_HOUSING_ALLOW: 200000,       // 200K/người/tháng cố định
   FUEL_HOUSING_KM_THRESHOLD: 20,    // ≥ 20km HOẶC ngoại tỉnh
