@@ -37,7 +37,7 @@ export default function EmployeesPage() {
 
   function fetchEmployees() {
     setLoading(true);
-    fetch("/api/v1/employees?limit=200")
+    fetch("/api/v1/employees?limit=500")
       .then((r) => r.json())
       .then((res) => { setAllEmployees(res.data || []); setTotal(res.total || 0); })
       .finally(() => setLoading(false));

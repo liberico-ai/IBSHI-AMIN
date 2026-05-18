@@ -73,10 +73,10 @@ export async function POST(request: NextRequest) {
           if (!employeeId) return;
 
           const date = new Date(r.date);
-          // If caller didn't supply a status, derive from workHours.
-          // <4h with no explicit status is ambiguous (could be partial half-day, could be absent);
-          // default to HALF_DAY rather than PRESENT so it doesn't silently overstate attendance.
-          const status = r.status ?? (r.workHours >= 8 ? "PRESENT" : r.workHours > 0 ? "HALF_DAY" : "ABSENT_UNAPPROVED");
+          // Derive status from workHours nếu caller không truyền.
+          // Ngưỡng 7h: file công thường ghi 7.5–7.95h cho ngày làm đủ (do giờ vào/ra)
+          // → coi >= 7h là PRESENT (cả ngày). < 7 nhưng > 0 = HALF_DAY. 0 = vắng không phép.
+          const status = r.status ?? (r.workHours >= 7 ? "PRESENT" : r.workHours > 0 ? "HALF_DAY" : "ABSENT_UNAPPROVED");
 
           await prisma.attendanceRecord.upsert({
             where: { employeeId_date: { employeeId, date } },

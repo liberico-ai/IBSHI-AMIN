@@ -16,9 +16,9 @@ export interface SalaryInput {
   kpiAllowance: number;
   // 3. Bổ sung
   responsibilityAllowance: number; // 3.1
-  // Cho 3.2 — Phụ cấp xăng nhà trọ
-  distanceToOfficeKm: number;      // Số km từ nhà
-  isOutOfProvince: boolean;        // Ngoại tỉnh
+  // Cho 3.2 — Phụ cấp xăng nhà trọ: NV thuộc diện ≥20km/ngoại tỉnh.
+  // 200K được cấp nếu fuelHousingEligible = true VÀ workDaysHC ≥ 14.
+  fuelHousingEligible: boolean;
   // Người phụ thuộc (cho TNCN)
   dependentsCount: number;
 
@@ -130,20 +130,14 @@ export function calcOvertimeMealAllow(
 
 // ============================================================================
 // HELPER — Phụ cấp xăng nhà trọ (3.2)
-// 200K cố định / NV / tháng nếu (≥20km HOẶC ngoại tỉnh) VÀ ≥14 ngày công
+// 200K cố định / NV / tháng nếu NV thuộc diện (fuelHousingEligible) VÀ ≥14 ngày công
 // ============================================================================
 export function calcFuelHousingAllow(input: {
-  distanceToOfficeKm: number;
-  isOutOfProvince: boolean;
+  fuelHousingEligible: boolean;
   workDaysHC: number;
 }): number {
-  const farEnough =
-    input.distanceToOfficeKm >= SALARY_CONFIG.FUEL_HOUSING_KM_THRESHOLD ||
-    input.isOutOfProvince;
-  const enoughDays =
-    input.workDaysHC >= SALARY_CONFIG.FUEL_HOUSING_DAYS_THRESHOLD;
-
-  return farEnough && enoughDays ? SALARY_CONFIG.FUEL_HOUSING_ALLOW : 0;
+  const enoughDays = input.workDaysHC >= SALARY_CONFIG.FUEL_HOUSING_DAYS_THRESHOLD;
+  return input.fuelHousingEligible && enoughDays ? SALARY_CONFIG.FUEL_HOUSING_ALLOW : 0;
 }
 
 // ============================================================================

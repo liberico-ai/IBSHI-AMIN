@@ -89,13 +89,24 @@ export async function calculatePayrollForPeriod(periodId: string) {
     include: { members: { select: { id: true } } },
   });
 
+  // KPI/PC trách nhiệm override theo kỳ — biến động theo tháng nên không thể fix cứng ở Contract.
+  // Lookup ưu tiên theo (employeeId, month, year). Fallback về Contract.allowances nếu không có.
+  const kpiOverrides = await prisma.payrollKpiOverride.findMany({
+    where: { month: period.month, year: period.year },
+    select: { employeeId: true, kpi: true, responsibility: true },
+  });
+  const kpiOverrideMap = new Map(kpiOverrides.map((o) => [o.employeeId, o]));
+
   // ── Build lookup maps ──
 
-  // 4 — workDaysHC (tính từ AttendanceRecord, các status PRESENT/LATE/CT đều +1, HALF_DAY +0.5)
+  // 4 — workDaysHC (= "Tổng cộng ngày công thanh toán lương" trong file khách):
+  //   PRESENT / LATE / BUSINESS_TRIP / ABSENT_APPROVED (= AL phép có lương) → +1
+  //   HALF_DAY (làm nửa ngày HOẶC AL/2 nửa ngày phép) → +0.5
+  //   ABSENT_UNAPPROVED / UL không count
   const workDaysMap: Record<string, number> = {};
   for (const a of attendanceData) {
     if (!workDaysMap[a.employeeId]) workDaysMap[a.employeeId] = 0;
-    if (["PRESENT", "LATE", "BUSINESS_TRIP"].includes(a.status)) workDaysMap[a.employeeId] += 1;
+    if (["PRESENT", "LATE", "BUSINESS_TRIP", "ABSENT_APPROVED"].includes(a.status)) workDaysMap[a.employeeId] += 1;
     else if (a.status === "HALF_DAY") workDaysMap[a.employeeId] += 0.5;
   }
 
@@ -158,13 +169,14 @@ export async function calculatePayrollForPeriod(periodId: string) {
   for (const emp of employees) {
     const contract = emp.contracts[0];
 
-    // Lương cơ bản (2.1) — ưu tiên salaryGrade × coefficient → contract → 0 (default)
+    // Lương cơ bản (2.1) — ưu tiên Contract.baseSalary (đồng bộ từ file lương khách = master).
+    // Fallback: salaryGrade × coefficient (legacy) khi không có HĐ ACTIVE.
     let baseSalary = 0;
-    if (emp.salaryGrade && emp.salaryCoefficient) {
-      baseSalary = Math.round(emp.salaryGrade * emp.salaryCoefficient * SALARY_BASE_UNIT);
-      withContractEmployees.push({ code: emp.code, fullName: emp.fullName, baseSalary });
-    } else if (contract) {
+    if (contract && contract.baseSalary > 0) {
       baseSalary = contract.baseSalary;
+      withContractEmployees.push({ code: emp.code, fullName: emp.fullName, baseSalary });
+    } else if (emp.salaryGrade && emp.salaryCoefficient) {
+      baseSalary = Math.round(emp.salaryGrade * emp.salaryCoefficient * SALARY_BASE_UNIT);
       withContractEmployees.push({ code: emp.code, fullName: emp.fullName, baseSalary });
     } else {
       // Không có HĐ active và cũng không có salaryGrade → vẫn tạo record
@@ -178,18 +190,32 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const workDaysUnpaid = unpaidMap[emp.id] || 0;
     const pieceRateSalary = pieceRateMap[emp.id] || 0;
 
+    // Phụ cấp HĐ (2.2) + PC trách nhiệm (3.1) — lấy từ Contract.allowances (import từ Bảng lương)
+    const allw = (contract?.allowances as Record<string, number> | null) || {};
+    const phoneAllowance = allw.phone || 0;
+    const fuelAllowance = allw.fuel || 0;
+    const housingAllowance = allw.housing || 0;
+    // KPI/PC trách nhiệm: ưu tiên PayrollKpiOverride cho kỳ này (biến động theo tháng),
+    // fallback về Contract.allowances, cuối cùng fallback theo role cho PC trách nhiệm.
+    const override = kpiOverrideMap.get(emp.id);
+    const kpiAllowance = override?.kpi ?? allw.kpi ?? 0;
+    const responsibilityAllowance =
+      override?.responsibility ??
+      (allw.responsibility != null
+        ? allw.responsibility
+        : RESPONSIBILITY_ALLOWANCE[emp.user.role] || 0);
+
     // Build SalaryInput theo spec IBSHI
     const input: SalaryInput = {
-      // Hợp đồng (Phase 1: phụ cấp 2.2 chưa có data → default 0, HR override sau)
+      // Hợp đồng — phụ cấp 2.2 từ Contract.allowances
       baseSalary,
-      phoneAllowance: 0,
-      fuelAllowance: 0,
-      housingAllowance: 0,
-      kpiAllowance: 0,
-      // Bổ sung (3.1 theo role; 3.2 chưa có data distance/province)
-      responsibilityAllowance: RESPONSIBILITY_ALLOWANCE[emp.user.role] || 0,
-      distanceToOfficeKm: 0,
-      isOutOfProvince: false,
+      phoneAllowance,
+      fuelAllowance,
+      housingAllowance,
+      kpiAllowance,
+      // Bổ sung — 3.1 PC trách nhiệm; 3.2 PC xăng nhà trọ (200K nếu eligible + ≥14 công)
+      responsibilityAllowance,
+      fuelHousingEligible: emp.fuelHousingEligible || false,
       dependentsCount: emp.dependents || 0,
       // Số công (từ M3)
       workDaysHC,

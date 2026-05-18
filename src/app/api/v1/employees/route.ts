@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get("page") || "1");
-  const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100);
+  const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 1000);
   const search = searchParams.get("search") || "";
   const departmentId = searchParams.get("departmentId") || "";
   const status = searchParams.get("status") || "";

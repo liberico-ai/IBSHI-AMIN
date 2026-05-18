@@ -21,6 +21,7 @@ interface DataTableProps<T extends Record<string, unknown>> {
   searchKeys?: string[];
   loading?: boolean;
   emptyText?: string;
+  onRowClick?: (row: T) => void;
 }
 
 export function DataTable<T extends Record<string, unknown>>({
@@ -33,6 +34,7 @@ export function DataTable<T extends Record<string, unknown>>({
   searchKeys,
   loading = false,
   emptyText,
+  onRowClick,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -175,9 +177,10 @@ export function DataTable<T extends Record<string, unknown>>({
                 <tr
                   key={i}
                   className="transition-colors"
-                  style={{ borderBottom: "1px solid rgba(51,65,85,0.5)" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(46,117,182,0.04)")}
+                  style={{ borderBottom: "1px solid rgba(51,65,85,0.5)", cursor: onRowClick ? "pointer" : undefined }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(46,117,182,0.06)")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
                 >
                   {columns.map((col) => (
                     <td key={col.key} className="px-4 py-3 text-[13px]">

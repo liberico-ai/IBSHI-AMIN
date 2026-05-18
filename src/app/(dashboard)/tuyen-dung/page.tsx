@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate } from "@/lib/utils";
-import { Plus, RefreshCw, X, Check, ChevronRight, Users, ClipboardList, Calendar, UserCheck } from "lucide-react";
+import { Plus, RefreshCw, X, Check, ChevronRight, Users, ClipboardList } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { DateInput } from "@/components/shared/date-input";
 
@@ -59,7 +59,7 @@ const CANDIDATE_STATUS_COLORS: Record<string, string> = {
   REJECTED: "#ef4444", WITHDRAWN: "#6b7280",
 };
 
-type Tab = "requests" | "pipeline" | "interview" | "onboarding";
+type Tab = "requests" | "pipeline";
 
 export default function TuyenDungPage() {
   const [activeTab, setActiveTab] = useState<Tab>("requests");
@@ -73,7 +73,7 @@ export default function TuyenDungPage() {
   // Modals
   const [showNewRequest, setShowNewRequest] = useState(false);
   const [showNewCandidate, setShowNewCandidate] = useState(false);
-  const [showCandidateDetail, setShowCandidateDetail] = useState<{ candidate: Candidate; withEval: boolean } | null>(null);
+  const [showCandidateDetail, setShowCandidateDetail] = useState<{ candidate: Candidate } | null>(null);
   const [rejectingReq, setRejectingReq] = useState<RecruitmentRequest | null>(null);
   const [createdEmployee, setCreatedEmployee] = useState<{ code: string; email: string; tempPassword: string } | null>(null);
 
@@ -95,15 +95,6 @@ export default function TuyenDungPage() {
     fetchRequests();
     fetchCandidates();
   }, []);
-
-  const interviewCandidates = useMemo(
-    () => candidates.filter((c) => c.status === "INTERVIEW" || c.status === "INTERVIEWED"),
-    [candidates]
-  );
-  const acceptedCandidates = useMemo(
-    () => candidates.filter((c) => c.status === "ACCEPTED"),
-    [candidates]
-  );
 
   async function handleApproveRequest(req: RecruitmentRequest) {
     await fetch(`/api/v1/recruitment/requests/${req.id}`, {
@@ -132,17 +123,22 @@ export default function TuyenDungPage() {
     });
     const data = await res.json();
     fetchCandidates();
-    setShowCandidateDetail(null);
-    if (status === "ACCEPTED" && data.createdEmployee) {
-      setCreatedEmployee(data.createdEmployee);
+    // Cập nhật modal in-place (không đóng) để user thấy stage mới + làm tiếp
+    setShowCandidateDetail((prev) =>
+      prev && prev.candidate.id === id
+        ? { ...prev, candidate: { ...prev.candidate, status } }
+        : prev
+    );
+    // Trường hợp ACCEPTED (chỉ còn từ đường candidates PUT cũ — UI mới đã bỏ): hiện popup credentials + đóng modal
+    if (status === "ACCEPTED" && data.data?.createdEmployee) {
+      setCreatedEmployee(data.data.createdEmployee);
+      setShowCandidateDetail(null);
     }
   }
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { key: "requests", label: "Đề xuất tuyển", icon: <ClipboardList size={15} />, count: requests.filter(r => r.status === "PENDING").length },
     { key: "pipeline", label: "Pipeline ứng viên", icon: <Users size={15} />, count: candidates.filter(c => !["ACCEPTED","REJECTED","WITHDRAWN"].includes(c.status)).length },
-    { key: "interview", label: "Lịch phỏng vấn", icon: <Calendar size={15} />, count: interviewCandidates.length },
-    { key: "onboarding", label: "Onboarding", icon: <UserCheck size={15} />, count: acceptedCandidates.length },
   ];
 
   const requestColumns: Column<RecruitmentRequest>[] = [
@@ -196,12 +192,9 @@ export default function TuyenDungPage() {
       </span>
     )},
     { key: "referredBy", header: "Người giới thiệu", render: (c) => c.referredBy || "—" },
+    { key: "interviewDate", header: "Ngày PV", render: (c) => c.interviewDate ? formatDate(c.interviewDate) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span> },
+    { key: "interviewScore", header: "Điểm PV", render: (c) => c.interviewScore ? <span style={{ color: "var(--ibs-accent)", fontWeight: 600 }}>{c.interviewScore}/10</span> : <span style={{ color: "var(--ibs-text-dim)" }}>—</span> },
     { key: "createdAt", header: "Ngày nộp", render: (c) => formatDate(c.createdAt) },
-    { key: "actions", header: "", render: (c) => (
-      <button onClick={() => setShowCandidateDetail({ candidate: c, withEval: false })} className="text-[11px] px-2 py-1 rounded-lg" style={{ color: "var(--ibs-accent)" }}>
-        Chi tiết <ChevronRight size={12} className="inline" />
-      </button>
-    )},
   ];
 
   return (
@@ -287,64 +280,7 @@ export default function TuyenDungPage() {
             })}
           </div>
 
-          <DataTable columns={candidateColumns} data={candidates.filter(c => !["ACCEPTED","REJECTED","WITHDRAWN"].includes(c.status))} loading={loadingCands} emptyText="Chưa có ứng viên" />
-        </div>
-      )}
-
-      {/* Tab: Lịch phỏng vấn */}
-      {activeTab === "interview" && (
-        <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-          <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
-            <div className="text-[14px] font-semibold">Lịch phỏng vấn</div>
-            <button onClick={fetchCandidates} className="p-2 rounded-lg hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
-          </div>
-          <DataTable
-            columns={[
-              ...candidateColumns.slice(0, 4),
-              { key: "interviewDate", header: "Ngày PV", render: (c) => c.interviewDate ? formatDate(c.interviewDate) : <span style={{ color: "var(--ibs-text-dim)" }}>Chưa hẹn</span> },
-              { key: "interviewScore", header: "Điểm", render: (c) => c.interviewScore ? `${c.interviewScore}/10` : "—" },
-              { key: "actions", header: "", render: (c) => (
-                <button onClick={() => setShowCandidateDetail({ candidate: c, withEval: true })} className="text-[11px] px-2 py-1 rounded-lg" style={{ color: "var(--ibs-accent)" }}>
-                  Chi tiết <ChevronRight size={12} className="inline" />
-                </button>
-              )},
-            ]}
-            data={interviewCandidates}
-            loading={loadingCands}
-            emptyText="Không có ứng viên đang trong vòng phỏng vấn"
-          />
-        </div>
-      )}
-
-      {/* Tab: Onboarding */}
-      {activeTab === "onboarding" && (
-        <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-          <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
-            <div className="text-[14px] font-semibold">Onboarding — Ứng viên đã nhận việc</div>
-            <button onClick={fetchCandidates} className="p-2 rounded-lg hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
-          </div>
-          {acceptedCandidates.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-2" style={{ color: "var(--ibs-text-dim)" }}>
-              <UserCheck size={40} className="opacity-30" />
-              <div className="text-[13px]">Chưa có ứng viên nào được nhận việc</div>
-            </div>
-          ) : (
-            <div className="p-5 grid gap-3">
-              {acceptedCandidates.map((c) => (
-                <div key={c.id} className="flex items-center justify-between p-4 rounded-xl border" style={{ borderColor: "var(--ibs-border)" }}>
-                  <div>
-                    <div className="text-[14px] font-semibold">{c.fullName}</div>
-                    <div className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
-                      {c.recruitment.positionName} · {c.recruitment.department.name} · {c.phone}
-                    </div>
-                  </div>
-                  <div className="text-[11px] font-semibold px-3 py-1 rounded-lg" style={{ background: "rgba(34,197,94,0.12)", color: "var(--ibs-success)" }}>
-                    Đã nhận việc
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <DataTable columns={candidateColumns} data={candidates.filter(c => !["ACCEPTED","REJECTED","WITHDRAWN"].includes(c.status))} loading={loadingCands} emptyText="Chưa có ứng viên" onRowClick={(c) => setShowCandidateDetail({ candidate: c })} />
         </div>
       )}
 
@@ -370,15 +306,20 @@ export default function TuyenDungPage() {
       {showCandidateDetail && (
         <CandidateDetailModal
           candidate={showCandidateDetail.candidate}
-          showEvaluation={showCandidateDetail.withEval}
+          showEvaluation={true}
           canEdit={canDo("recruitment", "update")}
           onClose={() => setShowCandidateDetail(null)}
           onUpdateStatus={handleUpdateCandidateStatus}
           onSaveInterview={async (id, data) => {
-            const payload = { ...data };
-            if (data.interviewDate &&
-                !["INTERVIEW","INTERVIEWED","OFFERED","ACCEPTED","REJECTED","WITHDRAWN"].includes(showCandidateDetail.candidate.status)) {
+            const payload: Record<string, unknown> = { ...data };
+            const cs = showCandidateDetail.candidate.status;
+            // SCREENING + có ngày PV → INTERVIEW (hẹn lịch PV)
+            if (data.interviewDate && cs === "SCREENING") {
               payload.status = "INTERVIEW";
+            }
+            // INTERVIEW → INTERVIEWED (đánh dấu Đã PV)
+            if (cs === "INTERVIEW") {
+              payload.status = "INTERVIEWED";
             }
             await fetch(`/api/v1/recruitment/candidates/${id}`, {
               method: "PUT",
@@ -386,7 +327,12 @@ export default function TuyenDungPage() {
               body: JSON.stringify(payload),
             });
             fetchCandidates();
-            setShowCandidateDetail(null);
+            // Cập nhật modal in-place — KHÔNG đóng, để user thấy stage mới
+            setShowCandidateDetail((prev) =>
+              prev && prev.candidate.id === id
+                ? { ...prev, candidate: { ...prev.candidate, ...payload } as Candidate }
+                : prev
+            );
           }}
         />
       )}
@@ -642,13 +588,13 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
     }
   }, [totalAll]);
 
-  const nextStatuses: Record<string, string[]> = {
-    NEW: ["SCREENING", "REJECTED"],
-    SCREENING: ["INTERVIEW", "REJECTED"],
-    INTERVIEW: ["INTERVIEWED", "REJECTED", "WITHDRAWN"],
-    INTERVIEWED: ["OFFERED", "REJECTED"],
-    OFFERED: ["ACCEPTED", "REJECTED", "WITHDRAWN"],
-  };
+  // Workflow chuẩn (stage-aware):
+  //  - NEW → SCREENING: nút "→ Sàng lọc UV này" (không cần form)
+  //  - SCREENING → INTERVIEW: form Ngày PV bắt buộc + nút "Lưu & Hẹn phỏng vấn"
+  //  - INTERVIEW → INTERVIEWED: form Bộ tiêu chí + nút "Lưu & Đánh dấu Đã PV"
+  //  - INTERVIEWED+: chỉ banner CTA "→ Sang tab Thư mời"
+  //  - OFFERED → ACCEPTED/DECLINED: tự động ở Tab 2 mark-result
+  // Negative actions (Loại / Rút lui): hiện theo stage ở action bar dưới cùng.
 
   async function handleSave() {
     setSaving(true);
@@ -686,15 +632,21 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
 
         {canEdit && (
           <>
+            {/* Form chỉ hiện khi cần — SCREENING (hẹn PV) hoặc INTERVIEW (đánh giá) */}
+            {(candidate.status === "SCREENING" || candidate.status === "INTERVIEW") && (
             <div className="border-t pt-4 mb-4" style={{ borderColor: "var(--ibs-border)" }}>
-              <div className="text-[12px] font-semibold mb-3" style={{ color: "var(--ibs-text-dim)" }}>Thông tin phỏng vấn</div>
+              <div className="text-[12px] font-semibold mb-3" style={{ color: "var(--ibs-text-dim)" }}>
+                {candidate.status === "SCREENING" ? "Hẹn lịch phỏng vấn" : "Thông tin phỏng vấn"}
+              </div>
               <div className="flex flex-col gap-3">
                 <div>
-                  <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày phỏng vấn</label>
+                  <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>
+                    Ngày phỏng vấn {candidate.status === "SCREENING" && <span style={{ color: "var(--ibs-danger)" }}>*</span>}
+                  </label>
                   <DateInput value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)}
                     className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
                 </div>
-                {(showEvaluation) && (
+                {candidate.status === "INTERVIEW" && (
                 <div>
                   <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>
                     Điểm đánh giá (1–10)
@@ -706,15 +658,30 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
                 </div>
                 )}
                 <div>
-                  <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ghi chú phỏng vấn</label>
+                  <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ghi chú</label>
                   <textarea rows={2} value={interviewNote} onChange={(e) => setInterviewNote(e.target.value)}
                     className="w-full rounded-lg px-3 py-2 text-[13px] border resize-none" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
                 </div>
               </div>
             </div>
+            )}
 
-            {/* Evaluation table — chỉ hiện khi ứng viên đang/đã phỏng vấn */}
-            {(showEvaluation) && (
+            {/* Banner cho stage hậu PV — INTERVIEWED / OFFERED */}
+            {["INTERVIEWED", "OFFERED"].includes(candidate.status) && (
+              <div className="border-t pt-4 mb-4" style={{ borderColor: "var(--ibs-border)" }}>
+                <div className="p-3 rounded-lg text-[12px]" style={{ background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.3)", color: "var(--ibs-text)" }}>
+                  <div className="font-semibold mb-1" style={{ color: "var(--ibs-success)" }}>
+                    {candidate.status === "INTERVIEWED" ? "✓ Đã phỏng vấn xong" : "✓ Đã gửi thư mời (OFFERED)"}
+                  </div>
+                  <div style={{ color: "var(--ibs-text-dim)" }}>
+                    Sang tab <strong style={{ color: "var(--ibs-accent)" }}>Thư mời (Offer)</strong> để {candidate.status === "INTERVIEWED" ? "soạn thư mời nhận việc cho UV này" : "theo dõi/đánh dấu phản hồi UV"}.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Evaluation table — chỉ hiện khi ứng viên đang phỏng vấn (INTERVIEW) */}
+            {(candidate.status === "INTERVIEW") && (
             <div className="border-t pt-4 mb-4" style={{ borderColor: "var(--ibs-border)" }}>
               <button onClick={() => setShowEvalTable(v => !v)}
                 className="flex items-center gap-2 text-[12px] font-semibold mb-3"
@@ -831,26 +798,64 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
             </div>
             )}
 
-            {nextStatuses[candidate.status] && (
-              <div className="border-t pt-4 mb-4" style={{ borderColor: "var(--ibs-border)" }}>
-                <div className="text-[12px] font-semibold mb-3" style={{ color: "var(--ibs-text-dim)" }}>Chuyển trạng thái</div>
-                <div className="flex flex-wrap gap-2">
-                  {nextStatuses[candidate.status].map((s) => (
-                    <button key={s} onClick={() => onUpdateStatus(candidate.id, s)}
+            {/* Stage-aware action bar: nút phụ (đỏ) bên trái, primary (chính) bên phải */}
+            <div className="flex items-center justify-between gap-2 pt-3 border-t flex-wrap" style={{ borderColor: "var(--ibs-border)" }}>
+              {/* Nút phụ — Loại / Rút lui (theo stage) */}
+              <div className="flex gap-2 flex-wrap">
+                {["NEW", "SCREENING"].includes(candidate.status) && (
+                  <button type="button" onClick={() => onUpdateStatus(candidate.id, "REJECTED")}
+                    className="text-[12px] px-3 py-1.5 rounded-lg font-semibold"
+                    style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
+                    → Loại UV
+                  </button>
+                )}
+                {candidate.status === "INTERVIEW" && (
+                  <>
+                    <button type="button" onClick={() => onUpdateStatus(candidate.id, "REJECTED")}
                       className="text-[12px] px-3 py-1.5 rounded-lg font-semibold"
-                      style={{ background: `${CANDIDATE_STATUS_COLORS[s]}20`, color: CANDIDATE_STATUS_COLORS[s] }}>
-                      → {CANDIDATE_STATUS_LABELS[s]}
+                      style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
+                      → Loại
                     </button>
-                  ))}
-                </div>
+                    <button type="button" onClick={() => onUpdateStatus(candidate.id, "WITHDRAWN")}
+                      className="text-[12px] px-3 py-1.5 rounded-lg font-semibold"
+                      style={{ background: "rgba(107,114,128,0.18)", color: "var(--ibs-text-dim)" }}>
+                      → UV rút lui
+                    </button>
+                  </>
+                )}
               </div>
-            )}
 
-            <div className="flex gap-2 justify-end">
-              <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Đóng</button>
-              <button onClick={handleSave} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
-                {saving ? "Đang lưu..." : "Lưu"}
-              </button>
+              {/* Nút chính — Đóng + 1 nút action duy nhất theo stage */}
+              <div className="flex gap-2">
+                <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Đóng</button>
+
+                {candidate.status === "NEW" && (
+                  <button type="button" onClick={() => onUpdateStatus(candidate.id, "SCREENING")}
+                    className="px-4 py-2 rounded-lg text-[13px] font-semibold"
+                    style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+                    → Sàng lọc UV này
+                  </button>
+                )}
+
+                {candidate.status === "SCREENING" && (
+                  <button type="button" onClick={handleSave} disabled={saving || !interviewDate}
+                    title={!interviewDate ? "Vui lòng chọn Ngày phỏng vấn trước" : ""}
+                    className="px-4 py-2 rounded-lg text-[13px] font-semibold"
+                    style={{ background: "var(--ibs-accent)", color: "#fff", opacity: saving || !interviewDate ? 0.5 : 1 }}>
+                    {saving ? "Đang lưu..." : "Lưu & Hẹn phỏng vấn"}
+                  </button>
+                )}
+
+                {candidate.status === "INTERVIEW" && (
+                  <button type="button" onClick={handleSave} disabled={saving}
+                    className="px-4 py-2 rounded-lg text-[13px] font-semibold"
+                    style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+                    {saving ? "Đang lưu..." : "Lưu & Đánh dấu Đã PV"}
+                  </button>
+                )}
+
+                {/* INTERVIEWED/OFFERED: không có primary action — user phải sang tab Thư mời */}
+              </div>
             </div>
           </>
         )}
