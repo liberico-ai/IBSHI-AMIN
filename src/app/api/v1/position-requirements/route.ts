@@ -16,6 +16,11 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
+  const userRole = (session.user as { role: string }).role;
+  if (!canDo(userRole, "recruitment", "read")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  }
+
   const { searchParams } = new URL(request.url);
   const positionId = searchParams.get("positionId") || undefined;
 

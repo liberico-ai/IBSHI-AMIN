@@ -16,6 +16,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const { id: employeeId } = await params;
+  const userRole = (session.user as { role: string }).role;
+  const userId = (session.user as { id: string }).id;
+
+  // PII (tên + ngày sinh + MST người phụ thuộc): chỉ chính chủ hoặc HR_ADMIN+ xem được.
+  if (!canDo(userRole, "employees", "readAll")) {
+    const target = await prisma.employee.findUnique({ where: { id: employeeId }, select: { userId: true } });
+    if (!target || target.userId !== userId) {
+      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+    }
+  }
+
   const data = await prisma.dependent.findMany({
     where: { employeeId },
     orderBy: { createdAt: "asc" },

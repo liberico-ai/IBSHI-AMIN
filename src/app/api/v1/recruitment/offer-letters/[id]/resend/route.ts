@@ -27,6 +27,14 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   if (!offer.pdfUrl) {
     return NextResponse.json({ error: { code: "NO_PDF", message: "PDF chưa được render — hãy reject + duyệt lại" } }, { status: 400 });
   }
+  // Throttle: chặn resend liên tục trong vòng 5 phút để tránh spam ứng viên
+  // (FE double-click, bug loop, hoặc bị abuse khi credential HR bị lộ).
+  if (offer.sentAt && Date.now() - offer.sentAt.getTime() < 5 * 60 * 1000) {
+    const waitSec = Math.ceil((5 * 60 * 1000 - (Date.now() - offer.sentAt.getTime())) / 1000);
+    return NextResponse.json({
+      error: { code: "RATE_LIMITED", message: `Vừa gửi cách đây ít phút. Vui lòng chờ ${waitSec}s.` },
+    }, { status: 429 });
+  }
 
   // Fetch PDF từ MinIO URL
   const r = await fetch(offer.pdfUrl);

@@ -24,7 +24,7 @@ function fmtDate(d: Date): string {
 export interface OfferLetterPdfData {
   letterNumber: string;
   candidateFullName: string;
-  candidateGender: "Anh" | "Chị";
+  candidateGender: "Anh" | "Chị" | "Anh/Chị";
   position: string;
   departmentName: string;
   workLocation: string;

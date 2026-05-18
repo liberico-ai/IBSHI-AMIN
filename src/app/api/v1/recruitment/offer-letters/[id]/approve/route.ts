@@ -43,7 +43,9 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   const pdfBuf = await renderOfferLetterPdf({
     letterNumber: offer.letterNumber,
     candidateFullName: offer.candidate.fullName,
-    candidateGender: "Anh", // TODO: lấy từ candidate giới tính nếu có
+    // Candidate schema chưa có gender → fallback "Anh/Chị" (formal neutral).
+    // Khi cần đúng kính ngữ: thêm OfferLetter.gender + form select cho HR.
+    candidateGender: "Anh/Chị",
     position: offer.position,
     departmentName: offer.departmentName || "",
     workLocation: offer.workLocation,
