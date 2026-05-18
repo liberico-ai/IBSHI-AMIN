@@ -2,7 +2,7 @@
 const nextConfig = {
   output: "standalone",
   experimental: {
-    serverComponentsExternalPackages: ["minio", "@prisma/client", "prisma", "exceljs"],
+    serverComponentsExternalPackages: ["minio", "@prisma/client", "prisma", "exceljs", "pdfkit", "nodemailer"],
   },
 };
 

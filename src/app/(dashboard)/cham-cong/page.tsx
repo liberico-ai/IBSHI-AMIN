@@ -89,9 +89,9 @@ function OfficeAttendanceCard({
       type Rec = { employeeCode: string; date: string; workHours: number; otHours: number };
       const records: Rec[] = [];
 
-      // Step 1: Find the header row containing day numbers (1..31).
-      // This tells us EXACTLY which column index = which day, regardless of template format.
+      // Step 1: Find the header row mapping day → column index.
       const dayColMap = new Map<number, number>(); // day (1-31) → column index
+      // 1a) Row chứa số ngày 1-31 trực tiếp
       for (let i = 0; i < Math.min(rows.length, 15); i++) {
         const r = rows[i] as unknown[];
         const found = new Map<number, number>();
@@ -101,38 +101,79 @@ function OfficeAttendanceCard({
         }
         if (found.size >= 20) { found.forEach((c, d) => dayColMap.set(d, c)); break; }
       }
-      // Fallback: day d is at col[2+d] (code, name, dept, day1...)
+      // 1b) Row chứa Excel date serial (vd 46113 = ngày trong tháng) → convert sang day
+      if (dayColMap.size === 0) {
+        for (let i = 0; i < Math.min(rows.length, 15); i++) {
+          const r = rows[i] as unknown[];
+          const found = new Map<number, number>();
+          for (let c = 0; c < r.length; c++) {
+            const v = Number(r[c]);
+            if (Number.isFinite(v) && v >= 40000 && v <= 60000) {
+              const dt = new Date(Math.round((v - 25569) * 86400 * 1000));
+              if (dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1) {
+                found.set(dt.getUTCDate(), c);
+              }
+            }
+          }
+          if (found.size >= 20) { found.forEach((c, d) => dayColMap.set(d, c)); break; }
+        }
+      }
+      // 1c) Fallback: day d ở col[2+d] (code, name, dept, day1...)
       if (dayColMap.size === 0) for (let d = 1; d <= 31; d++) dayColMap.set(d, 2 + d);
 
 
-      // Step 2: Find employee rows. Code = 4+ digit number in col[0] (or col[1] if col[0] is STT).
-      // OT row may follow immediately. It is the OT row ONLY IF its code is empty OR matches this employee.
-      // If the next row belongs to a DIFFERENT employee, do NOT use it as OT and do NOT skip it.
-      const skipRows = new Set<number>();
-      for (let i = 0; i < rows.length; i++) {
-        if (skipRows.has(i)) continue;
-        const r1 = rows[i] as unknown[];
-        const c0 = String(r1?.[0] ?? "").trim();
-        const c1 = String(r1?.[1] ?? "").trim();
-        let code: string;
-        if (/^\d{4,}$/.test(c0) && c1) {
-          code = c0;
-        } else if (/^\d{1,3}$/.test(c0) && /^\d{4,}$/.test(c1) && String(r1?.[2] ?? "").trim()) {
-          code = c1;
-        } else {
-          continue;
-        }
+      // Step 2: Each employee occupies a BLOCK of consecutive rows:
+      //   - work row (first): cột ngày = giờ công hành chính
+      //   - OT row (tuỳ chọn): cột ngày = giờ tăng ca
+      //   - dòng trống đệm (tuỳ chọn): cột ngày để trống
+      // Một dòng bắt đầu NV MỚI chỉ khi khớp pattern mã NV bên dưới; mọi dòng khác
+      // được coi là dòng nối tiếp của NV hiện tại (gián tiếp có 3 dòng/NV, trực tiếp 2 dòng/NV).
+      const codeOfRow = (r: unknown[] | undefined): string | null => {
+        const c0 = String(r?.[0] ?? "").trim();
+        const c1 = String(r?.[1] ?? "").trim();
+        const c2 = String(r?.[2] ?? "").trim();
+        if (/^\d{4,}$/.test(c0) && c1) return c0;                        // col0 = mã NV (trực tiếp)
+        if (/^\d{1,3}$/.test(c0) && /^\d{4,}$/.test(c1) && c2) return c1; // col0 = STT, col1 = mã NV
+        if (!c0 && /^\d{4,}$/.test(c1) && c2) return c1;                 // col0 trống, col1 = mã NV (gián tiếp VP)
+        return null;
+      };
 
-        const r2 = rows[i + 1] as any[] | undefined;
-        const r2c0 = String(r2?.[0] ?? "").trim();
-        const r2c1 = String(r2?.[1] ?? "").trim();
-        // r2 is this employee's OT row if: col[0] empty, OR col[0/1] matches same code
-        const r2IsOTRow = !r2c0 || r2c0 === code || r2c1 === code;
-        if (r2IsOTRow) skipRows.add(i + 1); // prevent re-processing as employee row
+      for (let i = 0; i < rows.length; i++) {
+        const code = codeOfRow(rows[i] as unknown[]);
+        if (!code) continue;
+        const workRow = rows[i] as unknown[];
+
+        // Gom các dòng nối tiếp (OT / trống / note) cho tới dòng NV kế tiếp.
+        // OT row = ưu tiên dòng có nhãn "Thêm giờ" ở col 40 (tránh nhầm dòng note chứa "0.5AL"/"L"/"UL").
+        // Fallback: dòng đầu tiên có dữ liệu số > 0 ở day-col.
+        let otRow: unknown[] | undefined;
+        const blockRows: unknown[][] = [];
+        let j = i + 1;
+        for (; j < rows.length; j++) {
+          const nextCode = codeOfRow(rows[j] as unknown[]);
+          if (nextCode && nextCode !== code) break; // KHÁC NV → dừng. Cùng mã hoặc không có mã → dòng nối tiếp.
+          blockRows.push(rows[j] as unknown[]);
+        }
+        // 1) Tìm theo nhãn "Thêm giờ"/"Thêm gi" trong col 40
+        for (const cand of blockRows) {
+          const label = String((cand as any)?.[40] ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+          if (label.includes("them gi")) { otRow = cand; break; }
+        }
+        // 2) Fallback: dòng đầu tiên có day-col data số > 0
+        if (!otRow) {
+          for (const cand of blockRows) {
+            let hasData = false;
+            dayColMap.forEach((colIdx) => { if ((parseFloat(String((cand as any)?.[colIdx] ?? "")) || 0) > 0) hasData = true; });
+            if (hasData) { otRow = cand; break; }
+          }
+        }
+        i = j - 1; // bỏ qua cả block; i++ của vòng lặp sẽ nhảy tới NV kế tiếp
 
         dayColMap.forEach((colIdx, d) => {
-          const wh = parseFloat(String(r1?.[colIdx] ?? "")) || 0;
-          const oh = r2IsOTRow ? (parseFloat(String(r2?.[colIdx] ?? "")) || 0) : 0;
+          const wh = parseFloat(String(workRow?.[colIdx] ?? "")) || 0;
+          // OT chỉ chấp nhận chuỗi số thuần (tránh "0.5UL" / "0.5AL" — đây là mã nghỉ, không phải OT).
+          const otStr = String(otRow?.[colIdx] ?? "").trim();
+          const oh = otRow && /^-?\d+(\.\d+)?$/.test(otStr) ? parseFloat(otStr) : 0;
           if (wh === 0 && oh === 0) return;
           const dt = new Date(year, month - 1, d);
           if (dt.getMonth() !== month - 1) return;
@@ -364,6 +405,7 @@ function AttendanceGridCard({
 
       // Step 1: Find day header row → map day number to column index
       const dayColMap = new Map<number, number>();
+      // 1a) Row chứa số ngày 1-31
       for (let i = 0; i < Math.min(rows.length, 15); i++) {
         const r = rows[i] as unknown[];
         const found = new Map<number, number>();
@@ -373,6 +415,24 @@ function AttendanceGridCard({
         }
         if (found.size >= 20) { found.forEach((c, d) => dayColMap.set(d, c)); break; }
       }
+      // 1b) Row chứa Excel date serial → convert sang day
+      if (dayColMap.size === 0) {
+        for (let i = 0; i < Math.min(rows.length, 15); i++) {
+          const r = rows[i] as unknown[];
+          const found = new Map<number, number>();
+          for (let c = 0; c < r.length; c++) {
+            const v = Number(r[c]);
+            if (Number.isFinite(v) && v >= 40000 && v <= 60000) {
+              const dt = new Date(Math.round((v - 25569) * 86400 * 1000));
+              if (dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1) {
+                found.set(dt.getUTCDate(), c);
+              }
+            }
+          }
+          if (found.size >= 20) { found.forEach((c, d) => dayColMap.set(d, c)); break; }
+        }
+      }
+      // 1c) Fallback
       if (dayColMap.size === 0) for (let d = 1; d <= 31; d++) dayColMap.set(d, 2 + d);
 
 
@@ -398,30 +458,46 @@ function AttendanceGridCard({
         return { wh: 0 };
       };
 
-      // Step 2: Scan employee rows using day column map
-      const skipRows = new Set<number>();
+      // Step 2: Mỗi NV chiếm một BLOCK nhiều dòng (dòng công + dòng OT + dòng trống đệm).
+      // Một dòng bắt đầu NV MỚI chỉ khi khớp pattern mã NV; mọi dòng khác là dòng nối tiếp.
+      const codeOfRow = (r: unknown[] | undefined): string | null => {
+        const c0 = String(r?.[0] ?? "").trim();
+        const c1 = String(r?.[1] ?? "").trim();
+        const c2 = String(r?.[2] ?? "").trim();
+        if (/^\d{4,}$/.test(c0) && c1) return c0;                        // col0 = mã NV (trực tiếp)
+        if (/^\d{1,3}$/.test(c0) && /^\d{4,}$/.test(c1) && c2) return c1; // col0 = STT, col1 = mã NV
+        if (!c0 && /^\d{4,}$/.test(c1) && c2) return c1;                 // col0 trống, col1 = mã NV (gián tiếp VP)
+        return null;
+      };
+
       for (let i = 0; i < rows.length; i++) {
-        if (skipRows.has(i)) continue;
-        const r1 = rows[i] as unknown[];
-        const c0 = String(r1?.[0] ?? "").trim();
-        const c1 = String(r1?.[1] ?? "").trim();
-        let code: string;
-        if (/^\d{4,}$/.test(c0) && c1) {
-          code = c0;
-        } else if (/^\d{1,3}$/.test(c0) && /^\d{4,}$/.test(c1) && String(r1?.[2] ?? "").trim()) {
-          code = c1;
-        } else {
-          continue;
+        const code = codeOfRow(rows[i] as unknown[]);
+        if (!code) continue;
+        const workRow = rows[i] as unknown[];
+
+        // Gom các dòng nối tiếp (OT / trống) cho tới dòng NV kế tiếp.
+        let otRow: unknown[] | undefined;
+        let j = i + 1;
+        for (; j < rows.length; j++) {
+          const nextCode = codeOfRow(rows[j] as unknown[]);
+          if (nextCode && nextCode !== code) break; // KHÁC NV → dừng. Cùng mã hoặc không có mã → dòng nối tiếp (OT/trống/note).
+          if (!otRow) {
+            const cand = rows[j] as unknown[];
+            let hasData = false;
+            dayColMap.forEach((colIdx) => {
+              const s = String(cand?.[colIdx] ?? "").trim();
+              if (/^-?\d+(\.\d+)?$/.test(s) && parseFloat(s) > 0) hasData = true;
+            });
+            if (hasData) otRow = cand;
+          }
         }
-        const r2 = rows[i + 1] as any[] | undefined;
-        const r2c0 = String(r2?.[0] ?? "").trim();
-        const r2c1 = String(r2?.[1] ?? "").trim();
-        const r2IsOTRow = !r2c0 || r2c0 === code || r2c1 === code;
-        if (r2IsOTRow) skipRows.add(i + 1);
+        i = j - 1; // bỏ qua cả block
 
         dayColMap.forEach((colIdx, d) => {
-          const { wh, status } = parseGridCell(r1?.[colIdx]);
-          const oh = r2IsOTRow ? (parseFloat(String(r2?.[colIdx] ?? "")) || 0) : 0;
+          const { wh, status } = parseGridCell(workRow?.[colIdx]);
+          // OT chỉ chấp nhận chuỗi số thuần (tránh "0.5UL" / "0.5AL" — đây là mã nghỉ, không phải OT).
+          const otStr = String(otRow?.[colIdx] ?? "").trim();
+          const oh = otRow && /^-?\d+(\.\d+)?$/.test(otStr) ? parseFloat(otStr) : 0;
           if (wh === 0 && oh === 0 && !status) return;
           const dt = new Date(year, month - 1, d);
           if (dt.getMonth() !== month - 1) return;

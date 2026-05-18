@@ -24,10 +24,11 @@ export async function GET(
       position: true,
       team: true,
       user: { select: { email: true, isActive: true } },
-      contracts: { orderBy: { createdAt: "desc" } },
+      contracts: { orderBy: { startDate: "desc" } },
       certificates: { orderBy: { expiryDate: "asc" } },
       workHistory: { orderBy: { effectiveDate: "desc" } },
       leaveBalances: { where: { year: new Date().getFullYear() } },
+      dependentsList: { orderBy: { createdAt: "asc" } },
     },
   });
 

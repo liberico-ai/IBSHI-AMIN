@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { Lock, Eye, EyeOff, ShieldAlert } from "lucide-react";
 
 export default function ChangePasswordPage() {
-  const router = useRouter();
   const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -45,8 +44,8 @@ export default function ChangePasswordPage() {
         return;
       }
       setSuccess(true);
-      // Reload session by navigating to home — next-auth will re-fetch the session
-      setTimeout(() => router.push("/"), 1500);
+      // Sign out + redirect to login để issue JWT mới (JWT cũ vẫn còn forcePasswordChange=true)
+      setTimeout(() => signOut({ callbackUrl: "/login" }), 1500);
     } catch {
       setError("Lỗi kết nối");
     } finally {
@@ -103,7 +102,7 @@ export default function ChangePasswordPage() {
               className="text-[13px] px-3 py-2.5 rounded-xl"
               style={{ background: "rgba(16,185,129,0.12)", color: "#6ee7b7" }}
             >
-              Đổi mật khẩu thành công! Đang chuyển hướng...
+              Đổi mật khẩu thành công! Đang đăng xuất + chuyển về trang đăng nhập...
             </div>
           )}
 

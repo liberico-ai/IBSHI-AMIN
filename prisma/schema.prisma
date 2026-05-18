@@ -234,9 +234,10 @@ model Position {
   level        PositionLevel
   departmentId String?
 
-  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  employees  Employee[]
-  createdAt  DateTime    @default(now())
+  department   Department?           @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  employees    Employee[]
+  requirements PositionRequirement[]
+  createdAt    DateTime              @default(now())
 }
 
 model ProductionTeam {
@@ -283,6 +284,7 @@ model Employee {
   emergencyContact    String?
   emergencyPhone      String?
   dependents          Int            @default(0)
+  fuelHousingEligible Boolean        @default(false) // Diện nhận PC xăng nhà trọ 200K (≥20km / ngoại tỉnh)
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
 
@@ -300,6 +302,7 @@ model Employee {
   trainingRecords     TrainingRecord[]
   disciplinaryActions DisciplinaryAction[]
   payrollRecords      PayrollRecord[]
+  kpiOverrides        PayrollKpiOverride[]
   hseIncidents        HSEIncident[]        @relation("reporter")
   hseInductions       HSEInduction[]
   ppeIssuances        PPEIssuance[]
@@ -314,6 +317,9 @@ model Employee {
   cleaningIssues      CleaningIssue[]
   safetyBriefings     SafetyBriefing[]
   eventEnrollments    EventAttendee[]
+  onboardingChecklist OnboardingChecklist?
+  probationEvaluations ProbationEvaluation[]
+  dependentsList      Dependent[]
 
   @@index([departmentId])
   @@index([code])
@@ -324,14 +330,33 @@ model Contract {
   employeeId     String
   contractNumber String
   contractType   ContractType
+  position       String? // Snapshot vị trí khi ký HĐ
   startDate      DateTime
   endDate        DateTime? // null = indefinite
-  baseSalary     Int // VND
+  baseSalary     Int // VND — Lương cơ bản (Mức lương chính)
+  insuranceSalary Int? // Mức lương đóng BHXH (có thể khác baseSalary)
+  allowances     Json? // {phone, fuel, housing, kpi, ...}
   status         ContractStatus @default(ACTIVE)
   fileUrl        String?
+  expiringAlertSentAt DateTime? // null = chưa gửi alert hết hạn
   createdAt      DateTime       @default(now())
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+}
+
+model Dependent {
+  id           String    @id @default(uuid())
+  employeeId   String
+  fullName     String
+  relationship String    // "Con", "Bố", "Mẹ", "Vợ", "Chồng", "Khác"
+  dateOfBirth  DateTime?
+  taxCode      String?   // MST người phụ thuộc
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
 }
@@ -523,7 +548,8 @@ model Candidate {
   interviewScore  Int? // 1-10
   createdAt       DateTime        @default(now())
 
-  recruitment RecruitmentRequest @relation(fields: [recruitmentId], references: [id], onDelete: Cascade)
+  recruitment  RecruitmentRequest @relation(fields: [recruitmentId], references: [id], onDelete: Cascade)
+  offerLetters OfferLetter[]
 
   @@index([recruitmentId])
   @@index([status])
@@ -768,6 +794,26 @@ model PayrollRecord {
 
   @@unique([periodId, employeeId])
   @@index([employeeId])
+}
+
+// KPI / phụ cấp override theo từng kỳ lương (month, year).
+// Khi tính lương kỳ X, ưu tiên giá trị ở đây thay vì Contract.allowances.kpi
+// (vì KPI/phụ cấp có thể biến động theo tháng — kỳ trước ≠ kỳ sau).
+model PayrollKpiOverride {
+  id             String   @id @default(uuid())
+  employeeId     String
+  month          Int
+  year           Int
+  kpi            Int      @default(0)
+  responsibility Int      @default(0)
+  source         String?  // ghi nguồn: "import-file-luong-T3-2026" v.v. để truy vết
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, month, year])
+  @@index([month, year])
 }
 
 model PieceRateRecord {
@@ -1435,29 +1481,74 @@ model AttendanceCorrection {
 // ===== M4 — Onboarding + Offer Letter + Đánh giá thử việc =====
 
 model OfferLetter {
-  id          String    @id @default(uuid())
-  candidateId String
-  position    String
-  startDate   DateTime
-  baseSalary  Decimal
-  allowances  Json?
-  body        String?
-  status      String    @default("DRAFT")
-  sentAt      DateTime?
-  acceptedAt  DateTime?
-  expiresAt   DateTime?
-  createdBy   String
-  createdAt   DateTime  @default(now())
+  id                  String    @id @default(uuid())
+  candidateId         String
+  letterNumber        String    @unique // VD: "703/2026/TM-IBSHI" — auto sinh khi gửi
+  position            String
+  departmentName      String?
+  workLocation        String    @default("Km 6 Quốc lộ 5, Phường Hồng Bàng, Thành phố Hải Phòng, Việt Nam")
+  officialSalary      Decimal   // Lương chính thức sau thử việc
+  probationarySalary  Decimal   // Lương thử việc (thường = 85% lương chính)
+  probationDays       Int       @default(60)
+  startDate           DateTime
+  probationEndDate    DateTime  // = startDate + probationDays
+  benefits            String?
+  body                String?   // Nội dung tự do (HR có thể chỉnh)
+  status              String    @default("DRAFT") // DRAFT | PENDING_HR_MGR | APPROVED | REJECTED | SENT | ACCEPTED | DECLINED | EXPIRED
+  // ── Workflow approval ──
+  submittedAt         DateTime?
+  approvedBy          String?   // FK Employee
+  approvedAt          DateTime?
+  rejectedBy          String?
+  rejectedAt          DateTime?
+  rejectComments      String?
+  // ── Sending + tracking ──
+  sentAt              DateTime?
+  sentToEmail         String?
+  pdfUrl              String?
+  expiresAt           DateTime? // = sentAt + 7 days
+  acceptedAt          DateTime?
+  declinedAt          DateTime?
+  candidateNote       String?
+  // ── Audit ──
+  createdBy           String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+  @@index([status])
 }
 
 model OnboardingChecklist {
-  id          String    @id @default(uuid())
-  employeeId  String    @unique
-  status      String    @default("IN_PROGRESS")
-  startedAt   DateTime  @default(now())
-  completedAt DateTime?
+  id               String    @id @default(uuid())
+  employeeId       String    @unique
+  status           String    @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | EXTENDED
+  startedAt        DateTime  @default(now())
+  dueDate          DateTime?
+  completedAt      DateTime?
+  isExtended       Boolean   @default(false)
+  extendedUntil    DateTime?
+  extensionReason  String?
+  extensionDocUrl  String?
+  extensionGrantedAt DateTime?
 
-  items ChecklistItem[]
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  items    ChecklistItem[]
+}
+
+model PositionRequirement {
+  id          String   @id @default(uuid())
+  positionId  String
+  position    Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  name        String   // VD: "Chứng chỉ hàn AWS", "Bằng đại học", "GPLX hạng C"
+  description String?
+  isRequired  Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([positionId])
 }
 
 model ChecklistItem {
@@ -1476,21 +1567,33 @@ model ChecklistItem {
 }
 
 model ProbationEvaluation {
-  id                 String    @id @default(uuid())
-  employeeId         String
-  evaluatedBy        String
-  evaluationDate     DateTime  @default(now())
-  scores             Json
-  totalScore         Float
-  recommendedTier    String
-  comments           String?
-  status             String    @default("PENDING")
-  directorApprovedBy String?
-  directorApprovedAt DateTime?
-  hrSignedBy         String?
-  hrSignedAt         DateTime?
-  contractType       String?
-  createdAt          DateTime  @default(now())
+  id                  String    @id @default(uuid())
+  employeeId          String
+  evaluatedBy         String
+  evaluationDate      DateTime  @default(now())
+  scores              Json      // { criteriaKey: "SATISFACTORY"|"NEEDS_IMPROVEMENT"|"UNACCEPTABLE"|"NA", q9YesNo: bool, q10YesNo: bool }
+  totalScore          Float     // thang 10
+  recommendedTier     String    // "INDEFINITE" | "DEFINITE_24M" | "DEFINITE_12M" | "FAIL"
+  selectedTier        String?   // tier TP chốt (có thể override suggest)
+  comments            String?
+  status              String    @default("PENDING_DIRECTOR") // DRAFT | PENDING_DIRECTOR | APPROVED | REJECTED | SIGNED | FAILED
+  directorApprovedBy  String?
+  directorApprovedAt  DateTime?
+  directorRejectedAt  DateTime?
+  directorComments    String?
+  hrSignedBy          String?
+  hrSignedAt          DateTime?
+  signedContractUrl   String?   // file scan HĐ NV đã ký
+  signedContractId    String?   // FK tới Contract record được auto tạo
+  contractStartDate   DateTime?
+  contractEndDate     DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([status])
 }
 
 // ===== M10 — 5 mảng mới =====

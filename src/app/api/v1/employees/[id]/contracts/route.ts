@@ -7,9 +7,12 @@ import { z } from "zod";
 const createContractSchema = z.object({
   contractNumber: z.string().min(1, "Số hợp đồng không được để trống"),
   contractType: z.enum(["PROBATION", "DEFINITE_12M", "DEFINITE_24M", "DEFINITE_36M", "INDEFINITE"]),
+  position: z.string().optional().nullable(),
   startDate: z.string().min(1, "Ngày bắt đầu không được để trống"),
   endDate: z.string().optional().nullable(),
   baseSalary: z.number().int().positive("Lương cơ bản phải > 0"),
+  insuranceSalary: z.number().int().min(0).optional().nullable(),
+  allowances: z.record(z.string(), z.number()).optional().nullable(),
   fileUrl: z.string().optional().nullable(),
 });
 
@@ -43,7 +46,7 @@ export async function POST(
     );
   }
 
-  const { contractNumber, contractType, startDate, endDate, baseSalary, fileUrl } = parsed.data;
+  const { contractNumber, contractType, position, startDate, endDate, baseSalary, insuranceSalary, allowances, fileUrl } = parsed.data;
 
   // Check duplicate contract number
   const existing = await prisma.contract.findFirst({ where: { contractNumber } });
@@ -59,9 +62,12 @@ export async function POST(
       employeeId,
       contractNumber,
       contractType: contractType as any,
+      position: position || null,
       startDate: new Date(startDate),
       endDate: endDate ? new Date(endDate) : null,
       baseSalary,
+      insuranceSalary: insuranceSalary ?? null,
+      allowances: (allowances as any) ?? undefined,
       fileUrl: fileUrl || null,
       status: "ACTIVE",
     },
