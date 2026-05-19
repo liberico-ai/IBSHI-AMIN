@@ -102,20 +102,17 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // 4 — workDaysHC (= "Công đi làm" trong file khách — chỉ tính ngày đi làm thực):
   //   PRESENT / LATE / BUSINESS_TRIP → +1
   //   HALF_DAY (làm nửa ngày, "x/2") → +0.5
-  //   ABSENT_APPROVED (AL/L/CL/ML/SL/CO/MT — nghỉ có lương) → KHÔNG cộng vào workDaysHC
-  //     → tính riêng thành "Lương phép" (mục 11 — policyAllowance trong salary-calc).
+  //   ABSENT_APPROVED / ABSENT_APPROVED_HALF (AL/L/CL/ML/SL/CO/MT — nghỉ có lương)
+  //     → KHÔNG cộng workDaysHC → tính riêng thành "Lương phép" (mục 11 — policyAllowance).
   //   ABSENT_UNAPPROVED → KHÔNG cộng.
   const workDaysMap: Record<string, number> = {};
-  // alDaysFromAttendance: ngày phép (AL) lấy từ bảng công đã import.
-  //   workHours=0 → 1 ngày AL đầy đủ. workHours=4 → 0.5 ngày AL (marker half-day cho "al/2").
   const alDaysFromAttendance: Record<string, number> = {};
   for (const a of attendanceData) {
     if (!workDaysMap[a.employeeId]) workDaysMap[a.employeeId] = 0;
     if (["PRESENT", "LATE", "BUSINESS_TRIP"].includes(a.status)) workDaysMap[a.employeeId] += 1;
     else if (a.status === "HALF_DAY") workDaysMap[a.employeeId] += 0.5;
-    else if (a.status === "ABSENT_APPROVED") {
-      alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + (a.workHours === 4 ? 0.5 : 1);
-    }
+    else if (a.status === "ABSENT_APPROVED") alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + 1;
+    else if (a.status === "ABSENT_APPROVED_HALF") alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + 0.5;
   }
 
   // 5 — Phân loại OT — gộp 2 nguồn:

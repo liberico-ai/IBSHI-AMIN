@@ -1,8 +1,9 @@
 // Sync Employee.dependents từ file lương khách (cột 72 "Người phụ thuộc" sheet "Chi tiết lương").
-// Ưu tiên T4 (mới nhất) > T3.
+// Nhận 1 hoặc nhiều file qua CLI args. File sau ghi đè file trước (ưu tiên file gần đây nhất).
 //
-// Chạy: npx tsx --env-file=.env scripts/sync-dependents.ts          (dry-run)
-//       npx tsx --env-file=.env scripts/sync-dependents.ts --apply
+// Usage:
+//   npx tsx --env-file=.env scripts/sync-dependents.ts <file1.xls> [<file2.xls> ...]             (dry-run)
+//   npx tsx --env-file=.env scripts/sync-dependents.ts <file1.xls> [<file2.xls> ...] --apply
 
 import * as XLSX from "xlsx";
 import { PrismaClient } from "@prisma/client";
@@ -10,6 +11,13 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 const APPLY = process.argv.includes("--apply");
+const FILES = process.argv.slice(2).filter((a) => a !== "--apply");
+
+if (FILES.length === 0) {
+  console.error("Usage: npx tsx --env-file=.env scripts/sync-dependents.ts <file1.xls> [<file2.xls> ...] [--apply]");
+  console.error("  Truyền file mới nhất CUỐI cùng (sẽ ghi đè file trước).");
+  process.exit(2);
+}
 
 function readDependents(file: string): Map<string, number> {
   const wb = XLSX.readFile(file);
@@ -30,9 +38,14 @@ function readDependents(file: string): Map<string, number> {
 async function main() {
   console.log(APPLY ? "🚀 APPLY" : "🔍 DRY-RUN");
 
-  const depT4 = readDependents("C:/Users/sontt/Downloads/HSNS và Lương/Bảng lương 04.2026 (11.05.2026).xls");
-  const depT3 = readDependents("C:/Users/sontt/Downloads/Bảng lương 03.2026 lần 2 (1).xls");
-  console.log(`File T4: ${depT4.size} NV | File T3: ${depT3.size} NV`);
+  // Đọc tất cả file, gộp lại (file sau ghi đè file trước)
+  const depMap = new Map<string, number>();
+  for (const f of FILES) {
+    const m = readDependents(f);
+    console.log(`File "${f.split(/[\\/]/).pop()}": ${m.size} NV`);
+    for (const [ma, dep] of m) depMap.set(ma, dep);
+  }
+  console.log(`Tổng NV sau gộp: ${depMap.size}\n`);
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
   const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
@@ -44,7 +57,7 @@ async function main() {
   let updated = 0, kept = 0, notFound = 0;
   for (const emp of dbEmps) {
     const erp = emp.user?.erpCode; if (!erp) { notFound++; continue; }
-    const newDep = depT4.get(erp) ?? depT3.get(erp);
+    const newDep = depMap.get(erp);
     if (newDep === undefined) { notFound++; continue; }
     if (emp.dependents === newDep) { kept++; continue; }
     console.log(`  ${emp.code} ${emp.fullName} (${erp}): dependents ${emp.dependents} → ${newDep}`);

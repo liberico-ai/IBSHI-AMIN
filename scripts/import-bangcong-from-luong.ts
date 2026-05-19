@@ -78,9 +78,9 @@ function parseBangCong(wb: XLSX.WorkBook): Map<string, Map<number, { status: str
       const base = isHalf ? raw.slice(0, -2) : raw;
       if (base === "x") { status = isHalf ? "HALF_DAY" : "PRESENT"; workHours = isHalf ? 4 : 8; }
       else if (paidLeaveCodes.includes(base)) {
-        // AL full: status=ABSENT_APPROVED, workHours=0 → 1 ngày phép
-        // AL/2: status=ABSENT_APPROVED, workHours=4 → 0.5 ngày phép (workHours=4 dùng làm marker half-day)
-        status = "ABSENT_APPROVED"; workHours = isHalf ? 4 : 0;
+        // AL full: status=ABSENT_APPROVED → 1 ngày phép có lương
+        // AL/2:   status=ABSENT_APPROVED_HALF → 0.5 ngày phép có lương
+        status = isHalf ? "ABSENT_APPROVED_HALF" : "ABSENT_APPROVED"; workHours = 0;
       }
       else if (base === "ul") { status = "ABSENT_UNAPPROVED"; workHours = 0; }
       else if (base === "ct") { status = "BUSINESS_TRIP"; workHours = isHalf ? 4 : 8; }
