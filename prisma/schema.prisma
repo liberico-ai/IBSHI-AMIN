@@ -85,11 +85,12 @@ enum WorkHistoryType {
 
 enum AttendanceStatus {
   PRESENT
-  ABSENT_APPROVED
+  ABSENT_APPROVED       // Nghỉ phép có lương — cả ngày (al / l / cl / ml / sl / co / mt)
+  ABSENT_APPROVED_HALF  // Nghỉ phép có lương — nửa ngày (al/2 ...)
   ABSENT_UNAPPROVED
   LATE
   BUSINESS_TRIP
-  HALF_DAY
+  HALF_DAY              // Làm nửa ngày (x/2)
 }
 
 enum LeaveType {

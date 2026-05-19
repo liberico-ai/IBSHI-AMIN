@@ -72,13 +72,15 @@ function parseBangCong(wb: XLSX.WorkBook): Map<string, Map<number, { status: str
       const raw = String(data[r][colIdx] ?? "").trim().toLowerCase();
       if (!raw || raw === "0") return; // ô trống → không đếm
       let status = "PRESENT", workHours = 0;
-      // Mapping theo header file: al/l/cl/ml/wl/sl/co/mt = nghỉ có lương (+1 ngày công thanh toán)
+      // Mapping theo header file: al/l/cl/ml/wl/sl/co/mt = nghỉ có lương phép (tách riêng khỏi Lương HC)
       const paidLeaveCodes = ["al", "l", "cl", "ml", "wl", "sl", "co", "mt"];
       const isHalf = raw.endsWith("/2");
       const base = isHalf ? raw.slice(0, -2) : raw;
       if (base === "x") { status = isHalf ? "HALF_DAY" : "PRESENT"; workHours = isHalf ? 4 : 8; }
       else if (paidLeaveCodes.includes(base)) {
-        status = isHalf ? "HALF_DAY" : "ABSENT_APPROVED"; workHours = 0;
+        // AL full: status=ABSENT_APPROVED → 1 ngày phép có lương
+        // AL/2:   status=ABSENT_APPROVED_HALF → 0.5 ngày phép có lương
+        status = isHalf ? "ABSENT_APPROVED_HALF" : "ABSENT_APPROVED"; workHours = 0;
       }
       else if (base === "ul") { status = "ABSENT_UNAPPROVED"; workHours = 0; }
       else if (base === "ct") { status = "BUSINESS_TRIP"; workHours = isHalf ? 4 : 8; }
