@@ -195,13 +195,8 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   // ── 11. PC chế độ = (2.1)/26 × 6 (chỉ trên Lương chính) ──
   const policyAllowance = Math.round(dailyRateBaseOnly * input.workDaysPolicy);
 
-  // ── 12. Ăn ca thêm giờ ──
-  const overtimeMealAllow = calcOvertimeMealAllow(
-    input.otHoursWeekday + input.otHoursWeekdayNight,
-    input.otHoursSunday + input.otHoursSundayNight,
-    input.otHoursHoliday + input.otHoursHolidayNight,
-    input.companyServesMealOnSunday ?? false,
-  );
+  // ── 12. Ăn ca thêm giờ — HCNS tính tay ngoài hệ thống (không có công thức cố định, đơn giá khác nhau giữa các NV) ──
+  const overtimeMealAllow = 0;
 
   // ── 3.2 Phụ cấp xăng nhà trọ ──
   const fuelHousingAllow = calcFuelHousingAllow(input);
