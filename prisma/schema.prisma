@@ -305,6 +305,8 @@ model Employee {
   payrollRecords      PayrollRecord[]
   kpiOverrides        PayrollKpiOverride[]
   stationeryRequests  StationeryRequest[]  @relation("stationeryRequester")
+  roomBookings        RoomBooking[]        @relation("bookingRequester")
+  bookingAttendees    BookingAttendee[]    @relation("bookingAttendee")
   hseIncidents        HSEIncident[]        @relation("reporter")
   hseInductions       HSEInduction[]
   ppeIssuances        PPEIssuance[]
@@ -1606,28 +1608,62 @@ model MeetingRoom {
   name      String
   capacity  Int
   location  String?
-  equipment Json?
+  equipment Json?    // string[] vd ["Wifi", "Tivi", "Máy chiếu", "Bảng trắng"]
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
   bookings RoomBooking[]
 }
 
+enum RoomBookingStatus {
+  PENDING_APPROVAL  // Chờ duyệt (NV phụ trách phòng họp)
+  APPROVED          // Đã duyệt — lock slot
+  REJECTED
+  CANCELLED         // NV tự huỷ
+}
+
 model RoomBooking {
-  id              String      @id @default(uuid())
+  id              String            @id @default(uuid())
   roomId          String
-  room            MeetingRoom @relation(fields: [roomId], references: [id])
-  bookedBy        String
+  room            MeetingRoom       @relation(fields: [roomId], references: [id])
+  requesterId     String            // employeeId của NV đặt
+  requester       Employee          @relation("bookingRequester", fields: [requesterId], references: [id], onDelete: Restrict)
   startTime       DateTime
   endTime         DateTime
-  purpose         String
-  attendees       Int?
-  equipmentNeeded Json?
-  status          String      @default("CONFIRMED")
-  notes           String?
-  createdAt       DateTime    @default(now())
+  title           String            // Tiêu đề cuộc họp
+  description     String?           // Mô tả chi tiết
+  priorityNote    String?           // Mức ưu tiên dạng text tự do (anh sontt yêu cầu)
+  status          RoomBookingStatus @default(PENDING_APPROVAL)
+  approvedById    String?
+  approvedAt      DateTime?
+  rejectReason    String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  attendees BookingAttendee[]
 
   @@index([roomId, startTime])
+  @@index([requesterId])
+  @@index([status])
+}
+
+enum RsvpStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+model BookingAttendee {
+  id         String      @id @default(uuid())
+  bookingId  String
+  booking    RoomBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee    @relation("bookingAttendee", fields: [employeeId], references: [id], onDelete: Cascade)
+  rsvp       RsvpStatus  @default(PENDING)
+  respondedAt DateTime?
+
+  @@unique([bookingId, employeeId])
+  @@index([employeeId])
 }
 
 model RepairRequest {
