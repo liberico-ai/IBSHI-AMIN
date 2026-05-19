@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-
-// Normalize tên item để fuzzy match (tránh duplicate "Giấy A4" vs "giấy a4").
-export function normalizeItemName(name: string): string {
-  return name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
-}
+import { normalizeItemName } from "@/lib/stationery";
 
 export async function GET(request: NextRequest) {
   const session = await auth();

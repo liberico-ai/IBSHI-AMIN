@@ -175,7 +175,8 @@ function StockInTab() {
 
 function StockInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierId, setSupplierId] = useState("");
+  const [supplierName, setSupplierName] = useState("");
+  const [showSupplierList, setShowSupplierList] = useState(false);
   const [importDate, setImportDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<{ name: string; unit: string; quantity: string; itemId?: string }[]>([{ name: "", unit: "", quantity: "" }]);
@@ -184,10 +185,7 @@ function StockInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   const [suggestions, setSuggestions] = useState<Record<number, Item[]>>({});
 
   useEffect(() => {
-    fetch("/api/v1/stationery/suppliers").then((r) => r.json()).then((res) => {
-      setSuppliers(res.data || []);
-      if (res.data?.[0]) setSupplierId(res.data[0].id);
-    });
+    fetch("/api/v1/stationery/suppliers").then((r) => r.json()).then((res) => setSuppliers(res.data || []));
   }, []);
 
   async function searchItem(idx: number, q: string) {
@@ -213,13 +211,13 @@ function StockInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     setError(null);
     const valid = items.filter((it) => it.name.trim() && it.unit.trim() && Number(it.quantity) > 0);
     if (valid.length === 0) { setError("Cần ít nhất 1 item"); return; }
-    if (!supplierId) { setError("Chưa chọn NCC"); return; }
+    if (!supplierName.trim()) { setError("Chưa nhập tên NCC"); return; }
     setSubmitting(true);
     try {
       const res = await fetch("/api/v1/stationery/stock-in", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          supplierId, importDate, notes: notes || null,
+          supplierName: supplierName.trim(), importDate, notes: notes || null,
           items: valid.map((it) => ({ itemId: it.itemId, name: it.name.trim(), unit: it.unit.trim(), quantity: Number(it.quantity) })),
         }),
       });
@@ -238,12 +236,26 @@ function StockInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
+          <div className="relative">
             <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>NCC *</label>
-            <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="w-full px-3 py-2 rounded-lg border text-[13px]"
-              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <input
+              value={supplierName}
+              onChange={(e) => { setSupplierName(e.target.value); setShowSupplierList(true); }}
+              onFocus={() => setShowSupplierList(true)}
+              onBlur={() => setTimeout(() => setShowSupplierList(false), 200)}
+              placeholder="Nhập tên NCC (vd: Super MRO)"
+              className="w-full px-3 py-2 rounded-lg border text-[13px]"
+              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}
+            />
+            {showSupplierList && suppliers.filter((s) => s.name.toLowerCase().includes(supplierName.toLowerCase())).length > 0 && (
+              <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border shadow-lg max-h-40 overflow-y-auto"
+                style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                {suppliers.filter((s) => s.name.toLowerCase().includes(supplierName.toLowerCase())).map((s) => (
+                  <button key={s.id} type="button" onMouseDown={() => { setSupplierName(s.name); setShowSupplierList(false); }}
+                    className="block w-full text-left px-3 py-1.5 text-[12px] hover:bg-black/5">{s.name}</button>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày nhập *</label>

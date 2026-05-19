@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
-import { isApprover } from "../../route";
+import { isStationeryApprover } from "@/lib/stationery";
 
 const Schema = z.object({ reason: z.string().min(1) });
 
@@ -10,7 +10,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userId = (session.user as any).id;
-  if (!(await isApprover(userId)))
+  if (!(await isStationeryApprover(userId)))
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { id } = await params;

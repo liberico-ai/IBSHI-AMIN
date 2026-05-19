@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { isApprover } from "../../route";
+import { isStationeryApprover } from "@/lib/stationery";
 
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userId = (session.user as any).id;
-  if (!(await isApprover(userId)))
+  if (!(await isStationeryApprover(userId)))
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ TP HCNS / BOM được duyệt" } }, { status: 403 });
 
   const { id } = await params;

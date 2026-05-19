@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
-import { normalizeItemName } from "../items/route";
+import { normalizeItemName } from "@/lib/stationery";
 
 const ItemSchema = z.object({
   // Có thể là item đã có (itemId) HOẶC item mới (name + unit)
@@ -13,7 +13,7 @@ const ItemSchema = z.object({
 });
 
 const CreateSchema = z.object({
-  supplierId: z.string().uuid(),
+  supplierName: z.string().min(1),  // tên NCC nhập tay — auto find-or-create
   importDate: z.string(),
   notes: z.string().optional().nullable(),
   items: z.array(ItemSchema).min(1),
@@ -45,6 +45,14 @@ export async function POST(request: NextRequest) {
   const userId = (session.user as any).id;
 
   const result = await prisma.$transaction(async (tx) => {
+    // Find-or-create NCC theo tên (case-insensitive, trim)
+    const supplierName = body.supplierName.trim();
+    let supplier = await tx.stationerySupplier.findFirst({
+      where: { name: { equals: supplierName, mode: "insensitive" } },
+    });
+    if (!supplier) {
+      supplier = await tx.stationerySupplier.create({ data: { name: supplierName } });
+    }
     // Resolve/create từng item, dedupe theo normalizedName
     const resolved: { itemId: string; quantity: number }[] = [];
     for (const it of body.items) {
@@ -66,7 +74,7 @@ export async function POST(request: NextRequest) {
     // Tạo StockIn
     const stockIn = await tx.stationeryStockIn.create({
       data: {
-        supplierId: body.supplierId,
+        supplierId: supplier.id,
         importDate: new Date(body.importDate),
         notes: body.notes ?? null,
         createdById: userId,

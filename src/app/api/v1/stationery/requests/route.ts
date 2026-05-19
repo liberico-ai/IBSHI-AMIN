@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
+import { isStationeryApprover } from "@/lib/stationery";
 
 const ItemSchema = z.object({
   itemId: z.string().uuid(),
@@ -16,27 +17,11 @@ const CreateSchema = z.object({
   items: z.array(ItemSchema).min(1),
 });
 
-// Check user có phải TP HCNS (có quyền duyệt) không.
-// TP HCNS = User có role HR_ADMIN VÀ Position.level = MANAGER VÀ Department = "P. HCNS"
-// Hoặc BOM (BGĐ — duyệt được mọi thứ).
-async function isApprover(userId: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { employee: { include: { position: true, department: true } } },
-  });
-  if (!user) return false;
-  if (user.role === "BOM") return true;
-  if (user.role !== "HR_ADMIN") return false;
-  const emp = user.employee;
-  if (!emp) return false;
-  return emp.position?.level === "MANAGER" && (emp.department?.name?.toLowerCase().includes("hcns") ?? false);
-}
-
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userId = (session.user as any).id;
-  const canApprove = await isApprover(userId);
+  const canApprove = await isStationeryApprover(userId);
 
   // Mặc định: HCNS staff chỉ thấy phiếu mình tạo. TP HCNS / BOM thấy tất cả.
   const where = canApprove ? {} : { createdById: userId };
@@ -87,4 +72,3 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ data: req }, { status: 201 });
 }
 
-export { isApprover };
