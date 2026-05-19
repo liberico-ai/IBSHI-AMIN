@@ -5,65 +5,45 @@ import { z } from "zod";
 
 const CreateSchema = z.object({
   roomId: z.string().uuid(),
-  startTime: z.string(),  // ISO
+  startTime: z.string(),
   endTime: z.string(),
   title: z.string().min(1),
   description: z.string().optional().nullable(),
   priorityNote: z.string().optional().nullable(),
-  attendeeIds: z.array(z.string().uuid()).optional().default([]),
 });
 
 // GET: list bookings — params:
-//   ?view=mine   — phiếu NV tạo
-//   ?view=invites — phiếu được mời
-//   ?view=pending — phiếu chờ duyệt (chỉ approver)
 //   ?roomId=X&date=YYYY-MM-DD — bookings của phòng X trong ngày (cho slot picker)
-//   (default) all APPROVED bookings tuần này
+//   (default) tất cả booking APPROVED gần đây — mọi NV đều thấy
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userId = (session.user as any).id;
-  const role = (session.user as any).role;
-  const empCode = (session.user as any).employeeCode;
   const me = await prisma.employee.findFirst({ where: { user: { id: userId } }, select: { id: true } });
 
   const { searchParams } = new URL(request.url);
-  const view = searchParams.get("view");
   const roomId = searchParams.get("roomId");
   const date = searchParams.get("date");
 
-  let where: any = {};
+  let where: any = { status: { in: ["APPROVED"] } };
 
-  if (view === "mine") {
-    where = me ? { requesterId: me.id } : { id: "__none__" };
-  } else if (view === "invites") {
-    where = me ? { attendees: { some: { employeeId: me.id } } } : { id: "__none__" };
-  } else if (view === "pending") {
-    if (role !== "HR_ADMIN" && role !== "BOM") return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-    where = { status: "PENDING_APPROVAL" };
-  } else if (roomId && date) {
+  if (roomId && date) {
     const day = new Date(date);
     const dayEnd = new Date(day); dayEnd.setDate(dayEnd.getDate() + 1);
-    where = {
-      roomId,
-      status: { in: ["APPROVED", "PENDING_APPROVAL"] },
-      startTime: { gte: day, lt: dayEnd },
-    };
+    where = { roomId, status: "APPROVED", startTime: { gte: day, lt: dayEnd } };
   }
 
   const data = await prisma.roomBooking.findMany({
     where,
-    orderBy: { startTime: "asc" },
+    orderBy: { startTime: "desc" },
     include: {
       room: { select: { id: true, name: true, code: true, capacity: true } },
       requester: { select: { id: true, code: true, fullName: true } },
-      attendees: {
-        include: { employee: { select: { id: true, code: true, fullName: true } } },
-      },
     },
+    take: roomId && date ? 200 : 100,
   });
 
-  return NextResponse.json({ data, myEmployeeId: me?.id ?? null, role });
+  return NextResponse.json({ data, myEmployeeId: me?.id ?? null });
 }
 
 export async function POST(request: NextRequest) {
@@ -97,7 +77,7 @@ export async function POST(request: NextRequest) {
     }, { status: 409 });
   }
 
-  // Không cần duyệt — booking APPROVED ngay khi tạo (anh sontt confirm Q1).
+  // Không cần duyệt — booking APPROVED ngay khi tạo.
   const booking = await prisma.roomBooking.create({
     data: {
       roomId: body.roomId,
@@ -107,11 +87,7 @@ export async function POST(request: NextRequest) {
       description: body.description?.trim() || null,
       priorityNote: body.priorityNote?.trim() || null,
       status: "APPROVED",
-      attendees: {
-        create: body.attendeeIds.filter((id) => id !== me.id).map((id) => ({ employeeId: id })),
-      },
     },
-    include: { attendees: true },
   });
   return NextResponse.json({ data: booking }, { status: 201 });
 }
