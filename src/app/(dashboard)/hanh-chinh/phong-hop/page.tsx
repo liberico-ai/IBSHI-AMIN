@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
-import { Plus, Check, X, ChevronDown, ChevronRight, Calendar, Mail, ClipboardList, Users } from "lucide-react";
+import { Check, X, ChevronDown, ChevronRight, Calendar, Mail, ClipboardList } from "lucide-react";
 
 type Room = { id: string; code: string; name: string; capacity: number; equipment: string[] };
 type Attendee = { id: string; employeeId: string; rsvp: string; employee: { id: string; code: string; fullName: string } };
@@ -38,30 +38,26 @@ function timeToSlot(date: Date): number {
 }
 
 export default function PhongHopPage() {
-  const [tab, setTab] = useState<"book" | "mine" | "invites" | "pending">("book");
+  const [tab, setTab] = useState<"book" | "mine" | "invites">("book");
   const [me, setMe] = useState<{ id: string; role: string; employeeId: string | null } | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then(async (res) => {
       if (!res?.id) return;
-      // Lấy employeeId
       const list = await fetch(`/api/v1/room-bookings?view=mine`).then((r) => r.json());
       setMe({ id: res.id, role: res.role, employeeId: list.myEmployeeId });
     });
   }, []);
 
-  const isApprover = me?.role === "HR_ADMIN" || me?.role === "BOM";
-
   return (
     <div>
-      <PageTitle title="M10.1 — Đặt phòng họp" description="Đặt phòng họp, mời đồng nghiệp, RSVP, duyệt phiếu" />
+      <PageTitle title="M10.1 — Đặt phòng họp" description="Đặt phòng họp, mời đồng nghiệp, RSVP — phòng tự lock theo lịch trống" />
 
       <div className="flex gap-2 mb-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
         {[
           { k: "book", label: "Đặt phòng", icon: Calendar },
           { k: "mine", label: "Phiếu của tôi", icon: ClipboardList },
           { k: "invites", label: "Lời mời", icon: Mail },
-          ...(isApprover ? [{ k: "pending" as const, label: "Chờ duyệt", icon: Users }] : []),
         ].map((t) => {
           const Icon = t.icon;
           const active = tab === t.k;
@@ -78,7 +74,6 @@ export default function PhongHopPage() {
       {tab === "book" && <BookTab />}
       {tab === "mine" && <ListTab view="mine" me={me} />}
       {tab === "invites" && <ListTab view="invites" me={me} />}
-      {tab === "pending" && isApprover && <ListTab view="pending" me={me} />}
     </div>
   );
 }
@@ -271,7 +266,7 @@ function BookTab() {
   );
 }
 
-function ListTab({ view, me }: { view: "mine" | "invites" | "pending"; me: { id: string; role: string; employeeId: string | null } | null }) {
+function ListTab({ view, me }: { view: "mine" | "invites"; me: { id: string; role: string; employeeId: string | null } | null }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -283,17 +278,6 @@ function ListTab({ view, me }: { view: "mine" | "invites" | "pending"; me: { id:
   }
   useEffect(() => { load(); }, [view]);
 
-  async function approve(id: string) {
-    const res = await fetch(`/api/v1/room-bookings/${id}/approve`, { method: "POST" });
-    if (!res.ok) { const d = await res.json(); alert("Lỗi: " + (d.error?.message || "")); return; }
-    load();
-  }
-  async function reject(id: string) {
-    const reason = prompt("Lý do từ chối:");
-    if (!reason) return;
-    await fetch(`/api/v1/room-bookings/${id}/reject`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) });
-    load();
-  }
   async function cancel(id: string) {
     if (!confirm("Huỷ phiếu này?")) return;
     await fetch(`/api/v1/room-bookings/${id}/cancel`, { method: "POST" });
@@ -316,7 +300,6 @@ function ListTab({ view, me }: { view: "mine" | "invites" | "pending"; me: { id:
         : bookings.map((b) => {
           const st = STATUS_LABEL[b.status] || { label: b.status, color: "#6b7280" };
           const isOwner = me?.employeeId && me.employeeId === b.requester.id;
-          const isApprover = me?.role === "HR_ADMIN" || me?.role === "BOM";
           const myAttendee = b.attendees.find((a) => a.employeeId === me?.employeeId);
           const start = new Date(b.startTime), end = new Date(b.endTime);
           return (
@@ -338,17 +321,7 @@ function ListTab({ view, me }: { view: "mine" | "invites" | "pending"; me: { id:
                 <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap" style={{ background: st.color + "22", color: st.color }}>{st.label}</span>
 
                 <div className="flex gap-2 shrink-0">
-                  {view === "pending" && b.status === "PENDING_APPROVAL" && isApprover && (
-                    <>
-                      <button onClick={() => approve(b.id)} className="px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1" style={{ background: "var(--ibs-success)", color: "white" }}>
-                        <Check size={12} /> Duyệt
-                      </button>
-                      <button onClick={() => reject(b.id)} className="px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1" style={{ background: "var(--ibs-danger)", color: "white" }}>
-                        <X size={12} /> Từ chối
-                      </button>
-                    </>
-                  )}
-                  {view === "mine" && (b.status === "PENDING_APPROVAL" || b.status === "APPROVED") && isOwner && (
+                  {view === "mine" && b.status === "APPROVED" && isOwner && (
                     <button onClick={() => cancel(b.id)} className="px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
                       <X size={12} /> Huỷ
                     </button>

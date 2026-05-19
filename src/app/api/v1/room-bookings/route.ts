@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
     }, { status: 409 });
   }
 
+  // Không cần duyệt — booking APPROVED ngay khi tạo (anh sontt confirm Q1).
   const booking = await prisma.roomBooking.create({
     data: {
       roomId: body.roomId,
@@ -105,6 +106,7 @@ export async function POST(request: NextRequest) {
       title: body.title.trim(),
       description: body.description?.trim() || null,
       priorityNote: body.priorityNote?.trim() || null,
+      status: "APPROVED",
       attendees: {
         create: body.attendeeIds.filter((id) => id !== me.id).map((id) => ({ employeeId: id })),
       },
