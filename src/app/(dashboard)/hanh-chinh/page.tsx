@@ -1,8 +1,16 @@
 import { PageTitle } from "@/components/layout/page-title";
 import Link from "next/link";
-import { Car, UtensilsCrossed, Sparkles, UserPlus, Calendar } from "lucide-react";
+import { Car, UtensilsCrossed, Sparkles, UserPlus, Calendar, FileText } from "lucide-react";
 
 const SUB_MODULES = [
+  {
+    href: "/hanh-chinh/vpp",
+    icon: FileText,
+    title: "Văn phòng phẩm",
+    desc: "Tồn kho VPP + phiếu xuất",
+    color: "#3b82f6",
+    bg: "rgba(59,130,246,0.1)",
+  },
   {
     href: "/hanh-chinh/xe",
     icon: Car,
