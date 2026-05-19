@@ -35,7 +35,9 @@ export default function VppPage() {
   const [me, setMe] = useState<{ id: string; role: string } | null>(null);
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setMe(res.data || null));
+    fetch("/api/v1/me").then((r) => r.json()).then((res) => {
+      if (res?.id) setMe({ id: res.id, role: res.role });
+    });
   }, []);
 
   return (
