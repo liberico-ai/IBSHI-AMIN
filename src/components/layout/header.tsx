@@ -134,7 +134,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
             style={{
               borderColor: open ? "var(--ibs-accent)" : "var(--ibs-border)",
               color: open ? "var(--ibs-accent)" : "var(--ibs-text-muted)",
-              background: open ? "rgba(0,180,216,0.08)" : "transparent",
+              background: open ? "rgba(230,57,70,0.08)" : "transparent",
             }}
             title="Thông báo"
           >
@@ -192,16 +192,16 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
                       onClick={() => handleNotifClick(n)}
                       className="flex gap-3 px-4 py-3 cursor-pointer transition-colors border-b"
                       style={{
-                        borderColor: "rgba(51,65,85,0.4)",
-                        background: n.isRead ? "transparent" : "rgba(0,180,216,0.04)",
+                        borderColor: "var(--ibs-border)",
+                        background: n.isRead ? "transparent" : "rgba(230,57,70,0.05)",
                       }}
                       onMouseEnter={(e) =>
-                        ((e.currentTarget as HTMLDivElement).style.background = "rgba(46,117,182,0.06)")
+                        ((e.currentTarget as HTMLDivElement).style.background = "var(--ibs-bg-card-hover)")
                       }
                       onMouseLeave={(e) =>
                         ((e.currentTarget as HTMLDivElement).style.background = n.isRead
                           ? "transparent"
-                          : "rgba(0,180,216,0.04)")
+                          : "rgba(230,57,70,0.05)")
                       }
                     >
                       <span className="text-[18px] mt-0.5 flex-shrink-0">
@@ -209,7 +209,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
                       </span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-0.5">
-                          <span className={`text-[13px] font-medium truncate ${!n.isRead ? "text-white" : ""}`}>
+                          <span className={`text-[13px] truncate ${!n.isRead ? "font-semibold" : "font-medium"}`} style={{ color: "var(--ibs-text)" }}>
                             {n.title}
                           </span>
                           {!n.isRead && (

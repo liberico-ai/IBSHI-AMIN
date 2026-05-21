@@ -124,23 +124,16 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onC
         `}
         style={{
           background: "var(--ibs-bg-sidebar)",
-          borderColor: "var(--ibs-border)",
+          borderColor: "rgba(255,255,255,0.08)",
         }}
       >
         {/* Logo */}
-        <div className="px-5 py-5 border-b flex items-center justify-between" style={{ borderColor: "var(--ibs-border)" }}>
+        <div className="px-5 py-5 border-b flex items-center justify-between" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
           <div>
-            <h1
-              className="text-lg font-extrabold tracking-tight"
-              style={{
-                background: "linear-gradient(135deg, #00B4D8, #2E75B6)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-              }}
-            >
-              IBS ONE
+            <h1 className="text-lg font-extrabold tracking-tight text-white">
+              IBS<span style={{ color: "var(--ibs-red)" }}>ONE</span>
             </h1>
-            <p className="text-[11px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
+            <p className="text-[11px] mt-0.5" style={{ color: "rgba(255,255,255,0.45)" }}>
               Admin Platform v1.2
             </p>
           </div>
@@ -148,7 +141,7 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onC
           <button
             onClick={onClose}
             className="md:hidden p-1 rounded"
-            style={{ color: "var(--ibs-text-dim)" }}
+            style={{ color: "rgba(255,255,255,0.6)" }}
           >
             <X size={18} />
           </button>
@@ -160,7 +153,7 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onC
             <div key={section.section}>
               <div
                 className="px-5 py-2 text-[10px] uppercase tracking-[1.2px] font-semibold"
-                style={{ color: "var(--ibs-text-dim)" }}
+                style={{ color: "rgba(255,255,255,0.4)" }}
               >
                 {section.section}
               </div>
@@ -174,9 +167,9 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onC
                     onClick={onClose}
                     className="flex items-center gap-3 px-5 py-2.5 text-[13.5px] transition-all border-l-[3px]"
                     style={{
-                      color: active ? "var(--ibs-accent)" : "var(--ibs-text-muted)",
-                      background: active ? "rgba(46,117,182,0.12)" : "transparent",
-                      borderLeftColor: active ? "var(--ibs-accent)" : "transparent",
+                      color: active ? "#ffffff" : "rgba(255,255,255,0.7)",
+                      background: active ? "rgba(230,57,70,0.18)" : "transparent",
+                      borderLeftColor: active ? "var(--ibs-red)" : "transparent",
                       fontWeight: active ? 600 : 400,
                     }}
                   >
@@ -206,9 +199,9 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onC
                     className="flex items-center gap-3 py-2.5 text-[12.5px] transition-all border-l-[3px]"
                     style={{
                       paddingLeft: "44px",
-                      color: active ? "var(--ibs-accent)" : "var(--ibs-text-muted)",
-                      background: active ? "rgba(46,117,182,0.12)" : "transparent",
-                      borderLeftColor: active ? "var(--ibs-accent)" : "transparent",
+                      color: active ? "#ffffff" : "rgba(255,255,255,0.7)",
+                      background: active ? "rgba(230,57,70,0.18)" : "transparent",
+                      borderLeftColor: active ? "var(--ibs-red)" : "transparent",
                       fontWeight: active ? 600 : 400,
                     }}
                   >
@@ -234,21 +227,21 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onC
         {/* User Card */}
         <div
           className="px-5 py-4 border-t flex items-center gap-3"
-          style={{ borderColor: "var(--ibs-border)" }}
+          style={{ borderColor: "rgba(255,255,255,0.08)" }}
         >
           <div
             className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
             style={{
-              background: "linear-gradient(135deg, var(--ibs-primary), var(--ibs-accent))",
+              background: "var(--ibs-red)",
             }}
           >
             {getInitials(userName)}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[13px] font-semibold truncate" style={{ color: "var(--ibs-text)" }}>
+            <div className="text-[13px] font-semibold truncate text-white">
               {userName}
             </div>
-            <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
+            <div className="text-[11px]" style={{ color: "rgba(255,255,255,0.5)" }}>
               {ROLE_LABELS[userRole] || userRole}
             </div>
           </div>
@@ -256,9 +249,9 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onC
             onClick={() => signOut({ callbackUrl: "/login" })}
             title="Đăng xuất"
             className="flex-shrink-0 p-1.5 rounded-lg transition-colors"
-            style={{ color: "var(--ibs-text-dim)" }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--ibs-danger)")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--ibs-text-dim)")}
+            style={{ color: "rgba(255,255,255,0.5)" }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--ibs-red)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.5)")}
           >
             <LogOut size={15} />
           </button>
