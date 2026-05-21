@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { PageTitle } from "@/components/layout/page-title";
+import { PageHeader, Button, Badge } from "@/components/ui";
 import { Plus, Upload, Check, X, ChevronDown, ChevronRight, FileText, Package } from "lucide-react";
 
 type Supplier = { id: string; name: string };
@@ -21,11 +21,11 @@ type Request = {
 };
 type Employee = { id: string; code: string; fullName: string; department: { name: string } };
 
-const STATUS_LABEL: Record<string, { label: string; color: string }> = {
-  PENDING_APPROVAL: { label: "Chờ duyệt", color: "var(--ibs-warning)" },
-  APPROVED: { label: "Đã duyệt", color: "var(--ibs-accent)" },
-  COMPLETED: { label: "Đã cấp", color: "var(--ibs-success)" },
-  REJECTED: { label: "Từ chối", color: "var(--ibs-danger)" },
+const STATUS_BADGE: Record<string, { label: string; variant: "warning" | "info" | "success" | "danger" | "default" }> = {
+  PENDING_APPROVAL: { label: "Chờ duyệt", variant: "warning" },
+  APPROVED: { label: "Đã duyệt", variant: "info" },
+  COMPLETED: { label: "Đã cấp", variant: "success" },
+  REJECTED: { label: "Từ chối", variant: "danger" },
 };
 
 const fmt = (n: number) => Number.isInteger(n) ? n.toString() : n.toFixed(2);
@@ -42,9 +42,9 @@ export default function VppPage() {
 
   return (
     <div>
-      <PageTitle title="M10.3 — Văn phòng phẩm" description="Quản lý tồn kho VPP, nhập kho, phiếu yêu cầu xuất VPP" />
+      <PageHeader title="M10.3 — Văn phòng phẩm" subtitle="Quản lý tồn kho VPP, nhập kho, phiếu yêu cầu xuất VPP" />
 
-      <div className="flex gap-2 mb-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+      <div className="flex gap-2 mb-4">
         {[
           { k: "stock", label: "Tồn kho", icon: Package },
           { k: "stockIn", label: "Nhập VPP", icon: Upload },
@@ -56,11 +56,7 @@ export default function VppPage() {
             <button
               key={t.k}
               onClick={() => setTab(t.k as any)}
-              className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-semibold transition-colors"
-              style={{
-                color: active ? "var(--ibs-accent)" : "var(--ibs-text-dim)",
-                borderBottom: active ? "2px solid var(--ibs-accent)" : "2px solid transparent",
-              }}
+              className={`filter-pill${active ? " active" : ""}`}
             >
               <Icon size={14} /> {t.label}
             </button>
@@ -144,10 +140,9 @@ function StockInTab() {
     <div>
       <div className="flex justify-between mb-4">
         <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{history.length} phiếu nhập gần nhất</span>
-        <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold"
-          style={{ background: "var(--ibs-accent)", color: "white" }}>
+        <Button variant="accent" size="sm" onClick={() => setShowNew(true)}>
           <Plus size={14} /> Nhập kho mới
-        </button>
+        </Button>
       </div>
 
       <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
@@ -307,11 +302,10 @@ function StockInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         {error && <div className="mb-3 p-2 rounded text-[13px]" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
 
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)" }}>Hủy</button>
-          <button onClick={submit} disabled={submitting} className="px-4 py-2 rounded-lg text-[13px] font-semibold"
-            style={{ background: "var(--ibs-accent)", color: "white", opacity: submitting ? 0.5 : 1 }}>
+          <Button variant="outline" size="sm" onClick={onClose}>Hủy</Button>
+          <Button variant="accent" size="sm" loading={submitting} onClick={submit}>
             {submitting ? "Đang lưu..." : "Lưu phiếu nhập"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -367,17 +361,16 @@ function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
         <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
           {requests.length} phiếu — {canApprove ? "Xem tất cả (quyền duyệt)" : "Chỉ phiếu bạn tạo"}
         </span>
-        <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold"
-          style={{ background: "var(--ibs-accent)", color: "white" }}>
+        <Button variant="accent" size="sm" onClick={() => setShowNew(true)}>
           <Plus size={14} /> Tạo phiếu xuất
-        </button>
+        </Button>
       </div>
 
       <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         {loading ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
           : requests.length === 0 ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Chưa có phiếu xuất nào</div>
           : requests.map((r) => {
-            const st = STATUS_LABEL[r.status] || { label: r.status, color: "#6b7280" };
+            const st = STATUS_BADGE[r.status] || { label: r.status, variant: "default" as const };
             const isOwner = me?.id === r.createdById;
             return (
               <div key={r.id} className="border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }}>
@@ -397,24 +390,24 @@ function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
                     </div>
                   </button>
 
-                  <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap" style={{ background: st.color + "22", color: st.color }}>{st.label}</span>
+                  <Badge variant={st.variant}>{st.label}</Badge>
 
-                  <div className="flex gap-2 shrink-0">
+                  <div className="flex gap-2 shrink-0 items-center">
                     {r.fileUrl && <a href={r.fileUrl} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 File</a>}
                     {r.status === "PENDING_APPROVAL" && canApprove && r.createdById !== me?.id && (
                       <>
-                        <button onClick={() => approve(r.id)} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold" style={{ background: "var(--ibs-success)", color: "white" }}>
+                        <Button size="sm" onClick={() => approve(r.id)} style={{ background: "var(--success)" }}>
                           <Check size={12} /> Duyệt
-                        </button>
-                        <button onClick={() => reject(r.id)} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold" style={{ background: "var(--ibs-danger)", color: "white" }}>
+                        </Button>
+                        <Button variant="danger" size="sm" onClick={() => reject(r.id)}>
                           <X size={12} /> Từ chối
-                        </button>
+                        </Button>
                       </>
                     )}
                     {r.status === "APPROVED" && (isOwner || me?.role === "BOM") && (
-                      <button onClick={() => complete(r.id)} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold" style={{ background: "var(--ibs-accent)", color: "white" }}>
+                      <Button variant="accent" size="sm" onClick={() => complete(r.id)}>
                         <Check size={12} /> Hoàn thành
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -600,11 +593,10 @@ function RequestModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         {error && <div className="mb-3 p-2 rounded text-[13px]" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
 
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)" }}>Hủy</button>
-          <button onClick={submit} disabled={submitting} className="px-4 py-2 rounded-lg text-[13px] font-semibold"
-            style={{ background: "var(--ibs-accent)", color: "white", opacity: submitting ? 0.5 : 1 }}>
+          <Button variant="outline" size="sm" onClick={onClose}>Hủy</Button>
+          <Button variant="accent" size="sm" loading={submitting} onClick={submit}>
             {submitting ? "Đang gửi..." : "Gửi phiếu xuất"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

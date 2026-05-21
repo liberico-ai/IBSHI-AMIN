@@ -16,60 +16,95 @@
     --font-sans: var(--font-sans);
   }
 
-  /* IBS ONE Dark Theme - Design Tokens from Mockup */
+  /* IBS-ERP Design System v3 — Light Theme */
   :root {
-    /* Core brand colors */
-    --ibs-primary: #1F4E79;
-    --ibs-primary-light: #2E75B6;
-    --ibs-primary-dark: #0D2B45;
-    --ibs-accent: #00B4D8;
-    --ibs-success: #10B981;
-    --ibs-warning: #F59E0B;
-    --ibs-danger: #EF4444;
+    /* === Brand === */
+    --ibs-navy: #0a2540;
+    --ibs-red: #e63946;
+
+    /* Core brand (legacy --ibs-* names kept; values remapped to light) */
+    --ibs-primary: #0a2540;
+    --ibs-primary-light: #1c3d5e;
+    --ibs-primary-dark: #061726;
+    --ibs-accent: #e63946;
+    --ibs-success: #059669;
+    --ibs-warning: #d97706;
+    --ibs-danger: #dc2626;
+    --ibs-info: #2563eb;
 
     /* Background colors */
-    --ibs-bg: #0F172A;
-    --ibs-bg-card: #1E293B;
-    --ibs-bg-card-hover: #263548;
-    --ibs-bg-sidebar: #0D1B2A;
+    --ibs-bg: #f8fafc;
+    --ibs-bg-card: #ffffff;
+    --ibs-bg-card-hover: #f1f5f9;
+    --ibs-bg-sidebar: #0a2540;
 
     /* Text colors */
-    --ibs-text: #E2E8F0;
-    --ibs-text-muted: #94A3B8;
-    --ibs-text-dim: #64748B;
+    --ibs-text: #0a2540;
+    --ibs-text-muted: #64748b;
+    --ibs-text-dim: #94a3b8;
 
     /* Border */
-    --ibs-border: #334155;
+    --ibs-border: #e2e8f0;
 
-    /* shadcn compatibility variables - dark theme always */
-    --background: #0F172A;
-    --foreground: #E2E8F0;
-    --card: #1E293B;
-    --card-foreground: #E2E8F0;
-    --popover: #1E293B;
-    --popover-foreground: #E2E8F0;
-    --primary: #1F4E79;
-    --primary-foreground: #FFFFFF;
-    --secondary: #334155;
-    --secondary-foreground: #E2E8F0;
-    --muted: #334155;
-    --muted-foreground: #94A3B8;
-    --accent: #00B4D8;
-    --accent-foreground: #FFFFFF;
-    --destructive: #EF4444;
-    --border: #334155;
-    --input: #334155;
-    --ring: #00B4D8;
-    --radius: 0.75rem;
+    /* === Semantic (Design System tokens) === */
+    --success: #059669;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --info: #2563eb;
+    --accent: #e63946;
 
-    --sidebar: #0D1B2A;
-    --sidebar-foreground: #E2E8F0;
-    --sidebar-primary: #1F4E79;
-    --sidebar-primary-foreground: #FFFFFF;
-    --sidebar-accent: #00B4D8;
-    --sidebar-accent-foreground: #FFFFFF;
-    --sidebar-border: #334155;
-    --sidebar-ring: #00B4D8;
+    /* === Typography scale === */
+    --text-xs: 12px;
+    --text-sm: 13px;
+    --text-base: 15px;
+    --text-md: 16px;
+    --text-lg: 18px;
+    --text-xl: 22px;
+    --text-2xl: 28px;
+    --text-3xl: 36px;
+
+    /* === Spacing === */
+    --space-xs: 8px;
+    --space-sm: 12px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 40px;
+
+    /* === Border radius === */
+    --radius-sm: 6px;
+    --radius: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+    --radius-pill: 9999px;
+
+    /* shadcn compatibility variables — light theme */
+    --background: #f8fafc;
+    --foreground: #0a2540;
+    --card: #ffffff;
+    --card-foreground: #0a2540;
+    --popover: #ffffff;
+    --popover-foreground: #0a2540;
+    --primary: #0a2540;
+    --primary-foreground: #ffffff;
+    --secondary: #f1f5f9;
+    --secondary-foreground: #0a2540;
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b;
+    --accent-foreground: #ffffff;
+    --destructive: #dc2626;
+    --border: #e2e8f0;
+    --input: #e2e8f0;
+    --ring: #e63946;
+
+    --sidebar: #0a2540;
+    --sidebar-foreground: #e2e8f0;
+    --sidebar-primary: #ffffff;
+    --sidebar-primary-foreground: #0a2540;
+    --sidebar-accent: #e63946;
+    --sidebar-accent-foreground: #ffffff;
+    --sidebar-border: rgba(255, 255, 255, 0.08);
+    --sidebar-ring: #e63946;
   }
 
   * {
@@ -77,30 +112,113 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-inter), 'Be Vietnam Pro', system-ui, -apple-system, sans-serif;
+    font-size: var(--text-base);
   }
 
   /* Custom scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--ibs-border);
-    border-radius: 3px;
+    background: #cbd5e1;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
   }
 }
 
 @layer components {
+  /* === Section headings === */
+  .section-title {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    color: var(--ibs-navy);
+    line-height: 1.3;
+  }
+  .section-subtitle {
+    font-size: var(--text-sm);
+    color: var(--ibs-text-muted);
+    margin-top: 2px;
+  }
+  .mono-label {
+    font-size: var(--text-xs);
+    font-weight: 700;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ibs-text-muted);
+  }
+
+  /* === Filter pill === */
+  .filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--ibs-border);
+    background: var(--ibs-bg-card);
+    color: var(--ibs-text-muted);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .filter-pill:hover {
+    border-color: var(--ibs-navy);
+    color: var(--ibs-navy);
+  }
+  .filter-pill.active {
+    background: var(--ibs-navy);
+    border-color: var(--ibs-navy);
+    color: #ffffff;
+  }
+
+  /* === Welcome banner === */
+  .welcome-banner {
+    background: linear-gradient(135deg, #0a2540 0%, #1c3d5e 100%);
+    color: #ffffff;
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+  }
+
+  /* === Project row === */
+  .project-row {
+    display: flex;
+    align-items: center;
+    padding: var(--space-md);
+    border-radius: var(--radius);
+    border: 1px solid var(--ibs-border);
+    background: var(--ibs-bg-card);
+    transition: all 0.15s ease;
+  }
+  .project-row:hover {
+    background: var(--ibs-bg-card-hover);
+    border-color: var(--ibs-navy);
+  }
+
+  /* === Bottleneck item === */
+  .bottleneck-item {
+    padding: var(--space-md);
+    border-radius: var(--radius);
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+  }
+
   /* Stat card hover effect */
   .stat-card-hover {
     @apply transition-all duration-200;
   }
   .stat-card-hover:hover {
-    border-color: var(--ibs-primary-light);
+    border-color: var(--ibs-navy);
     transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(10, 37, 64, 0.08);
   }
 
   /* Quick action hover */
@@ -114,8 +232,8 @@
 
   /* Nav item active */
   .nav-item-active {
-    background: rgba(46, 117, 182, 0.12);
-    color: var(--ibs-accent);
+    background: rgba(230, 57, 70, 0.15);
+    color: #ffffff;
     border-left-color: var(--ibs-accent);
     font-weight: 600;
   }
