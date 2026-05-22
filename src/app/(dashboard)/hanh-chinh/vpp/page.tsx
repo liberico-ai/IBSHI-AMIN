@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { PageHeader, Button, Badge } from "@/components/ui";
+import { apiError } from "@/lib/utils";
 import { Plus, Upload, Check, X, ChevronDown, ChevronRight, FileText, Package } from "lucide-react";
 
 type Supplier = { id: string; name: string };
@@ -219,7 +220,7 @@ function StockInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || "Lỗi");
+      if (!res.ok) throw new Error(apiError(res.status, data.error));
       onSuccess();
     } catch (e: any) { setError(String(e.message || e)); } finally { setSubmitting(false); }
   }
@@ -344,7 +345,7 @@ function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
     const res = await fetch(`/api/v1/stationery/requests/${id}/complete`, { method: "POST" });
     if (!res.ok) {
       const d = await res.json();
-      alert("Lỗi: " + (d.error?.message || "Không hoàn thành được"));
+      alert("Lỗi: " + apiError(res.status, d.error));
       return;
     }
     load();
@@ -492,7 +493,7 @@ function RequestModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     try {
       const res = await fetch("/api/v1/upload", { method: "POST", body: fd });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error?.message || "Upload lỗi");
+      if (!res.ok) throw new Error(apiError(res.status, d.error));
       setFileUrl(d.data?.url || d.url || "");
     } catch (e: any) { setError(String(e.message || e)); } finally { setUploading(false); }
   }
@@ -520,7 +521,7 @@ function RequestModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         }),
       });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error?.message || "Lỗi");
+      if (!res.ok) throw new Error(apiError(res.status, d.error));
       onSuccess();
     } catch (e: any) { setError(String(e.message || e)); } finally { setSubmitting(false); }
   }

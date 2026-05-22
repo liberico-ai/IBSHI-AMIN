@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
+import { apiError } from "@/lib/utils";
 import { X, Calendar, ClipboardList, ChevronDown, ChevronRight } from "lucide-react";
 
 type Room = { id: string; code: string; name: string; capacity: number; equipment: string[] };
@@ -133,7 +134,7 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
         }),
       });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error?.message || "Lỗi");
+      if (!res.ok) throw new Error(apiError(res.status, d.error));
       setTitle(""); setDescription(""); setPriorityNote("");
       setSlotStart(null); setSlotEnd(null);
       onCreated();

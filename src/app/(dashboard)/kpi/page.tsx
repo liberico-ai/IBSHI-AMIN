@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
+import { apiError } from "@/lib/utils";
 import { BarChart2, TrendingUp, TrendingDown, RefreshCw, Star, Users, Minus } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -106,7 +107,7 @@ function EvalDialog({
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error?.message || "Có lỗi xảy ra");
+        setError(apiError(res.status, json?.error));
         return;
       }
       onSuccess();

@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, Fragment } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { DataTable, Column } from "@/components/shared/data-table";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Plus, Check, X, RefreshCw, CalendarDays, Clock, Download, Upload } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
@@ -197,7 +197,7 @@ function OfficeAttendanceCard({
         // Delay refresh so user sees the message
         setTimeout(() => onRefresh(), 1500);
       } else {
-        setImportMsg({ ok: false, text: result.error?.message || "Có lỗi xảy ra" });
+        setImportMsg({ ok: false, text: apiError(res.status, result.error) });
       }
     } catch (err) {
       setImportMsg({ ok: false, text: "Lỗi đọc file: " + String(err) });
@@ -520,7 +520,7 @@ function AttendanceGridCard({
         setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${result.skipped ? `. Bỏ qua ${result.skipped} bản ghi (${result.missingCodes?.length ?? 0} mã NV không tìm thấy).` : "."}` });
         setTimeout(() => onRefresh(), 1500);
       } else {
-        setImportMsg({ ok: false, text: result.error?.message || "Có lỗi xảy ra" });
+        setImportMsg({ ok: false, text: apiError(res.status, result.error) });
       }
     } catch (err) {
       setImportMsg({ ok: false, text: "Lỗi đọc file: " + String(err) });
@@ -1102,7 +1102,7 @@ function LeaveRequestForm({ onClose, onSuccess }: { onClose: () => void; onSucce
         body: JSON.stringify(form),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error?.message || "Có lỗi xảy ra"); return; }
+      if (!res.ok) { setError(apiError(res.status, data.error)); return; }
       onSuccess(data.data);
     } finally { setSubmitting(false); }
   }
@@ -1174,7 +1174,7 @@ function OTRequestForm({ onClose, onSuccess }: { onClose: () => void; onSuccess:
         body: JSON.stringify(form),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error?.message || "Có lỗi xảy ra"); return; }
+      if (!res.ok) { setError(apiError(res.status, data.error)); return; }
       onSuccess(data.data);
     } finally { setSubmitting(false); }
   }

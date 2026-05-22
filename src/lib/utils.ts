@@ -7,6 +7,44 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Trả về thông báo lỗi tiếng Việt rõ ràng từ response API.
+ * Ưu tiên message do API trả; nếu không có thì map theo mã lỗi / HTTP status.
+ * Dùng: setError(apiError(res.status, data.error))
+ */
+export function apiError(status: number, error?: any): string {
+  const fromApi =
+    error?.message ||
+    error?.issues?.[0]?.message ||
+    error?.details?.[0]?.message;
+  if (fromApi) return fromApi;
+
+  switch (error?.code) {
+    case "FORBIDDEN": return "Bạn không có quyền thực hiện thao tác này";
+    case "UNAUTHORIZED": return "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại";
+    case "VALIDATION_ERROR": return "Dữ liệu nhập chưa hợp lệ";
+    case "NOT_FOUND": return "Không tìm thấy dữ liệu";
+    case "CONFLICT": return "Dữ liệu bị trùng hoặc xung đột";
+    case "FILE_TOO_LARGE": return "File vượt quá dung lượng cho phép";
+    case "UPLOAD_FAILED": return "Lỗi upload file";
+    case "MINIO_UNAVAILABLE": return "Máy chủ lưu trữ file chưa sẵn sàng";
+    case "UPDATE_FAILED": return "Cập nhật thất bại, vui lòng thử lại";
+  }
+
+  switch (status) {
+    case 400: return "Yêu cầu không hợp lệ";
+    case 401: return "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại";
+    case 403: return "Bạn không có quyền thực hiện thao tác này";
+    case 404: return "Không tìm thấy dữ liệu";
+    case 409: return "Dữ liệu bị trùng hoặc xung đột";
+    case 413: return "File vượt quá dung lượng cho phép";
+    case 422: return "Dữ liệu nhập chưa hợp lệ";
+    case 500: return "Lỗi máy chủ, vui lòng thử lại sau";
+    case 503: return "Máy chủ tạm thời không khả dụng";
+    default: return "Có lỗi xảy ra, vui lòng thử lại";
+  }
+}
+
 /** Format VND: 24910600 → "24,910,600" */
 export function formatVND(amount: number): string {
   return new Intl.NumberFormat("vi-VN").format(amount);

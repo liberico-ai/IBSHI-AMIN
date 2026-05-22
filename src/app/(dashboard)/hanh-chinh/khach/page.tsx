@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatDate, formatDateTime, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, UserCheck, UserX, LogIn, LogOut } from "lucide-react";
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
@@ -189,7 +189,7 @@ function NewVisitorModal({ employees, onClose, onSuccess }: { employees: Employe
     if (!body.notes) delete body.notes;
     const res = await fetch("/api/v1/visitors", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     setSaving(false);
-    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   return (

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, Download } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 
@@ -114,7 +114,7 @@ function CreatePeriodModal({
       onSuccess();
     } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 

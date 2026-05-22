@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { getInitials } from "@/lib/utils";
+import { getInitials, apiError } from "@/lib/utils";
 import { UserPlus, Eye, RefreshCw, X, Download } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { DateInput } from "@/components/shared/date-input";
@@ -268,8 +268,7 @@ function CreateEmployeeDialog({ onClose, onSuccess }: {
       });
       const data = await res.json();
       if (!res.ok) {
-        const msg = data.error?.details?.[0]?.message || data.error?.message || "Có lỗi xảy ra";
-        setError(msg); return;
+        setError(apiError(res.status, data.error)); return;
       }
       onSuccess(data.data);
     } finally {

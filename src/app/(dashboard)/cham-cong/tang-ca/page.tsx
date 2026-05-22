@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ApprovalWorkflow } from "@/components/shared/approval-workflow";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import { Plus, X, Clock, Calendar } from "lucide-react";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
 
@@ -69,7 +69,7 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error?.message || json?.error?.details?.[0]?.message || "Có lỗi xảy ra");
+        setError(apiError(res.status, json?.error));
         return;
       }
       onSuccess(json.data);

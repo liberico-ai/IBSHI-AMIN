@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { RefreshCw, FileText, FileSpreadsheet, BarChart2, Wallet, Users, ClipboardList } from "lucide-react";
 import { PageTitle } from "@/components/layout/page-title";
 import { ExportButton } from "@/components/shared/export-button";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import type ExcelJS from "exceljs";
 import { DateInput } from "@/components/shared/date-input";
 
@@ -160,7 +160,7 @@ function ReportCard({
 async function exportWeeklyHR(weekStart: string) {
   const res = await fetch(`/api/v1/reports?type=weekly-hr&weekStart=${weekStart}`);
   const json = await res.json();
-  if (!res.ok) throw new Error(json?.error?.message || "Lỗi lấy dữ liệu");
+  if (!res.ok) throw new Error(apiError(res.status, json?.error));
   const d = json.data;
 
   const from = new Date(d.period.from);
@@ -229,7 +229,7 @@ async function exportWeeklyHR(weekStart: string) {
 async function exportMonthlyHR(month: number, year: number) {
   const res = await fetch(`/api/v1/reports?type=monthly-hr&month=${month}&year=${year}`);
   const json = await res.json();
-  if (!res.ok) throw new Error(json?.error?.message || "Lỗi lấy dữ liệu");
+  if (!res.ok) throw new Error(apiError(res.status, json?.error));
   const d = json.data;
 
   const { default: ExcelJS } = await import("exceljs");
@@ -326,7 +326,7 @@ async function exportMonthlyHR(month: number, year: number) {
 async function exportFinanceSummary(month: number, year: number) {
   const res = await fetch(`/api/v1/reports?type=finance-summary&month=${month}&year=${year}`);
   const json = await res.json();
-  if (!res.ok) throw new Error(json?.error?.message || "Lỗi lấy dữ liệu");
+  if (!res.ok) throw new Error(apiError(res.status, json?.error));
   const d = json.data;
 
   const { default: ExcelJS } = await import("exceljs");
