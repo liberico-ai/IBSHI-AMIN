@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, FileText, AlertTriangle, Search } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
@@ -277,7 +277,7 @@ function NewRegulationModal({ onClose, onSuccess }: { onClose: () => void; onSuc
     setSaving(false);
     if (res.ok) { onSuccess(); } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
@@ -371,7 +371,7 @@ function NewActionModal({ employees, regulations, onClose, onSuccess }: {
     setSaving(false);
     if (res.ok) { onSuccess(); } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 

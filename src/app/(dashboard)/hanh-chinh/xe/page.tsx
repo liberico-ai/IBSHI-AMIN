@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatDate, formatDateTime, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench } from "lucide-react";
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
@@ -542,7 +542,7 @@ function NewFuelModal({ vehicles, defaultVehicleId, onClose, onSuccess }: {
       }),
     });
     setSaving(false);
-    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   const ic = "w-full rounded-lg px-3 py-2 text-[13px] border";
@@ -651,7 +651,7 @@ function CompleteBookingModal({ booking, onClose, onSuccess }: {
       onSuccess();
     } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
@@ -728,7 +728,7 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
       body: JSON.stringify({ vehicleId: form.vehicleId, destination: form.destination, purpose: form.purpose, passengers: parseInt(form.passengers), startDate, endDate }),
     });
     setSaving(false);
-    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   const inputCls = "w-full rounded-lg px-3 py-2 text-[13px] border";
@@ -816,7 +816,7 @@ function NewVehicleModal({ onClose, onSuccess }: { onClose: () => void; onSucces
       body: JSON.stringify({ ...form, seats: parseInt(form.seats) }),
     });
     setSaving(false);
-    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   return (
@@ -995,7 +995,7 @@ function NewMaintenanceModal({ vehicles, defaultVehicleId, onClose, onSuccess }:
       }),
     });
     setSaving(false);
-    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   const ic = "w-full rounded-lg px-3 py-2 text-[13px] border";

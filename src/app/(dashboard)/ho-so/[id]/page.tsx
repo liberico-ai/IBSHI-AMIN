@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { formatDate, getInitials, formatVND } from "@/lib/utils";
+import { formatDate, getInitials, formatVND, apiError } from "@/lib/utils";
 import {
   ArrowLeft,
   Phone,
@@ -172,11 +172,7 @@ function AddContractDialog({
       });
       const json = await res.json();
       if (!res.ok) {
-        const msg =
-          json?.error?.issues?.[0]?.message ||
-          json?.error?.message ||
-          "Có lỗi xảy ra";
-        setError(msg);
+        setError(apiError(res.status, json?.error));
         return;
       }
       onSuccess(json.data);
@@ -393,11 +389,7 @@ function AddCertificateDialog({
       });
       const json = await res.json();
       if (!res.ok) {
-        const msg =
-          json?.error?.issues?.[0]?.message ||
-          json?.error?.message ||
-          "Có lỗi xảy ra";
-        setError(msg);
+        setError(apiError(res.status, json?.error));
         return;
       }
       onSuccess(json.data);
@@ -580,7 +572,7 @@ function EditEmployeeDialog({
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error?.message || "Có lỗi xảy ra");
+        setError(apiError(res.status, json?.error));
         return;
       }
       onSuccess(body);
@@ -1314,7 +1306,7 @@ function DependentFormDialog({
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error?.issues?.[0]?.message || json?.error?.message || "Có lỗi xảy ra");
+        setError(apiError(res.status, json?.error));
         return;
       }
       onSaved(json.data, mode === "edit");

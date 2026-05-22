@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, Star } from "lucide-react";
 import Link from "next/link";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -615,7 +615,7 @@ function RegisterMealModal({ departments, selectedDate, onClose, onSuccess }: {
       }),
     });
     setSaving(false);
-    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   const ic = "w-full rounded-lg px-3 py-2 text-[13px] border";

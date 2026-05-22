@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, BookOpen, Users, CheckSquare, AlertTriangle } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
@@ -398,7 +398,7 @@ function CertificateFormModal({ cert, employees, onClose, onSuccess }: {
       });
     }
     setSaving(false);
-    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   return (
@@ -490,7 +490,7 @@ function NewPlanModal({ departments, onClose, onSuccess }: {
     setSaving(false);
     if (res.ok) { onSuccess(); } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 

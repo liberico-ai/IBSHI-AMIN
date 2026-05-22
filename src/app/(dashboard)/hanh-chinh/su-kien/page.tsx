@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, Trash2, CheckSquare, Square, Users } from "lucide-react";
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
@@ -334,7 +334,7 @@ function NewEventModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     if (!body.organizer) delete body.organizer;
     const res = await fetch("/api/v1/events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     setSaving(false);
-    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(d.error?.message || "Có lỗi xảy ra"); }
+    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   return (
@@ -425,7 +425,7 @@ function AttendeesModal({ eventId, canManage, myEmployeeId, onClose }: {
   async function enroll() {
     setEnrolling(true); setError("");
     const res = await fetch(`/api/v1/events/${eventId}/attendees`, { method: "POST" });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message || "Có lỗi"); }
+    if (!res.ok) { const d = await res.json(); setError(apiError(res.status, d.error)); }
     setEnrolling(false);
     fetchAttendees();
   }

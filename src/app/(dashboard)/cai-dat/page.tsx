@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { X, RefreshCw, Shield, Users, FileText } from "lucide-react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, apiError } from "@/lib/utils";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type SystemUser = {
@@ -145,10 +145,12 @@ function EditUserModal({
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error?.message || "Có lỗi xảy ra");
+        setError(apiError(res.status, data.error));
         return;
       }
       onSuccess({ id: user.id, role, isActive });
+    } catch {
+      setError("Không kết nối được máy chủ");
     } finally {
       setSubmitting(false);
     }

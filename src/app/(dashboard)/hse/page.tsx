@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, ShieldAlert, AlertTriangle } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
@@ -939,7 +939,7 @@ function ReportIncidentModal({
       onSuccess();
     } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
@@ -1100,7 +1100,7 @@ function UpdateIncidentModal({
       onSuccess();
     } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
@@ -1223,7 +1223,7 @@ function AddInductionModal({
       onSuccess();
     } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
@@ -1361,7 +1361,7 @@ function AddPpeModal({
       onSuccess();
     } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
@@ -1477,7 +1477,7 @@ function IssuePpeModal({
       onSuccess();
     } else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 

@@ -5,7 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { FileUpload } from "@/components/shared/file-upload";
 import { DateInput } from "@/components/shared/date-input";
 import { BUCKETS } from "@/lib/minio-constants";
-import { formatDate, formatVND } from "@/lib/utils";
+import { formatDate, formatVND, apiError } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
 import { PROBATION_CRITERIA, PROBATION_RATINGS, TIER_LABELS, type RatingKey } from "@/lib/probation-eval";
 import {
@@ -364,7 +364,7 @@ function NewEvalFormSheet({ employeeId, onClose, onCreated }: { employeeId: stri
     if (res.ok) { onCreated(); onClose(); }
     else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
@@ -656,7 +656,7 @@ function ApproveModal({ evaluationId, onClose, onDone }: { evaluationId: string;
     if (res.ok) onDone();
     else {
       const data = await res.json();
-      setError(data.error?.message || data.error?.issues?.[0]?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
@@ -732,7 +732,7 @@ function SignContractModal({ evaluation, onClose, onDone }: { evaluation: Evalua
     if (res.ok) onDone();
     else {
       const data = await res.json();
-      setError(data.error?.message || data.error?.issues?.[0]?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 

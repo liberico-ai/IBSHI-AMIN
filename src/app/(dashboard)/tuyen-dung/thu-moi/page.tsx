@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DateInput } from "@/components/shared/date-input";
-import { formatDate, formatVND } from "@/lib/utils";
+import { formatDate, formatVND, apiError } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
 import {
   Plus, RefreshCw, X, Check, Clock, ClipboardCheck, Send, FileText,
@@ -341,7 +341,7 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
     if (res.ok) { onCreated(); onClose(); }
     else {
       const d = await res.json();
-      setError(d.error?.message || d.error?.issues?.[0]?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, d.error));
     }
   }
 
@@ -458,7 +458,7 @@ function OfferDetailModal({ data, canEdit, canApprove, onClose, onChanged }: {
     const res = await fetch(`/api/v1/recruitment/offer-letters/${data.id}/resend`, { method: "POST" });
     setBusy(false);
     if (res.ok) { onChanged(); onClose(); }
-    else { const d = await res.json(); alert(d.error?.message || "Lỗi"); }
+    else { const d = await res.json(); alert(apiError(res.status, d.error)); }
   }
 
   return (
@@ -603,7 +603,7 @@ function ApproveRejectModal({ id, mode, onClose, onDone }: { id: string; mode: "
         setTimeout(() => onDone(), 3000);
       } else onDone();
     }
-    else { const d = await res.json(); setError(d.error?.message || "Lỗi"); }
+    else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   return (
@@ -665,7 +665,7 @@ function MarkResultModal({ id, result, onClose, onDone }: { id: string; result: 
         onDone();
       }
     } else {
-      setError(data.error?.message || "Lỗi");
+      setError(apiError(res.status, data.error));
     }
   }
 

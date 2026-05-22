@@ -5,7 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { FileUpload } from "@/components/shared/file-upload";
 import { DateInput } from "@/components/shared/date-input";
 import { BUCKETS } from "@/lib/minio-constants";
-import { formatDate } from "@/lib/utils";
+import { formatDate, apiError } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
 import {
   Plus, RefreshCw, X, Check, Settings, Trash2, Calendar,
@@ -313,7 +313,7 @@ function CreateOnboardingModal({ onClose, onCreated }: { onClose: () => void; on
     if (res.ok) onCreated();
     else {
       const data = await res.json();
-      setError(data.error?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
@@ -721,7 +721,7 @@ function ExtendModal({ checklistId, currentDue, onClose, onExtended }: {
     if (res.ok) onExtended();
     else {
       const data = await res.json();
-      setError(data.error?.message || data.error?.issues?.[0]?.message || "Có lỗi xảy ra");
+      setError(apiError(res.status, data.error));
     }
   }
 
