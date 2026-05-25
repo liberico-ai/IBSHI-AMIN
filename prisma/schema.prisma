@@ -339,6 +339,7 @@ model Contract {
   endDate        DateTime? // null = indefinite
   baseSalary     Int // VND — Lương cơ bản (Mức lương chính)
   insuranceSalary Int? // Mức lương đóng BHXH (có thể khác baseSalary)
+  allowance      Int? // VND — Tổng phụ cấp (đầu vào cho M7 tính lương)
   allowances     Json? // {phone, fuel, housing, kpi, ...}
   status         ContractStatus @default(ACTIVE)
   fileUrl        String?

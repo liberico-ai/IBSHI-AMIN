@@ -59,6 +59,7 @@ type Employee = {
     endDate?: string;
     baseSalary: number;
     insuranceSalary?: number | null;
+    allowance?: number | null;
     status: string;
   }[];
   dependentsList: {
@@ -1084,7 +1085,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                 <table className="w-full border-collapse">
                   <thead>
                     <tr>
-                      {["Số HĐ", "Loại HĐ", "Vị trí", "Ngày bắt đầu", "Ngày kết thúc", "Lương cơ bản", "Lương đóng BHXH", "Trạng thái"].map(
+                      {["Số HĐ", "Loại HĐ", "Vị trí", "Ngày bắt đầu", "Ngày kết thúc", "Lương cơ bản", "Lương đóng BHXH", "Phụ cấp", "Trạng thái"].map(
                         (h) => (
                           <th
                             key={h}
@@ -1112,6 +1113,9 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                         </td>
                         <td className="px-4 py-3 text-[13px]" style={{ color: c.insuranceSalary ? "var(--ibs-accent)" : "var(--ibs-text-dim)" }}>
                           {c.insuranceSalary ? formatVND(c.insuranceSalary) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-[13px] font-medium" style={{ color: c.allowance ? "var(--ibs-warning)" : "var(--ibs-text-dim)" }}>
+                          {c.allowance ? formatVND(c.allowance) : "—"}
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge status={c.status} />

@@ -54,8 +54,11 @@ export async function GET(
 const UpdateEmployeeSchema = z.object({
   phone: z.string().regex(/^0\d{9}$/).optional(),
   currentAddress: z.string().optional(),
+  address: z.string().optional(),
   bankAccount: z.string().optional(),
   bankName: z.string().optional(),
+  taxCode: z.string().optional(),
+  insuranceNumber: z.string().optional(),
   emergencyContact: z.string().optional(),
   emergencyPhone: z.string().optional(),
   status: z.enum(["ACTIVE", "PROBATION", "ON_LEAVE", "RESIGNED", "TERMINATED"]).optional(),
