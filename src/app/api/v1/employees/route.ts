@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 1000);
   const search = searchParams.get("search") || "";
   const departmentId = searchParams.get("departmentId") || "";
+  const teamId = searchParams.get("teamId") || "";
   const status = searchParams.get("status") || "";
 
   const userRole = (session.user as any).role;
@@ -63,6 +64,7 @@ export async function GET(request: NextRequest) {
     ];
   }
   if (departmentId) where.departmentId = departmentId;
+  if (teamId) where.teamId = teamId;
   if (status) where.status = status;
 
   const [data, total] = await Promise.all([
