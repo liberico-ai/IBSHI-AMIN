@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canViewPayroll } from "@/lib/access";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -19,8 +20,8 @@ export async function GET(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "payroll", "readAll")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canViewPayroll((session.user as any).employeeCode)) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -50,8 +51,8 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "payroll", "readAll")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canViewPayroll((session.user as any).employeeCode)) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
   }
 
   const body = await request.json();

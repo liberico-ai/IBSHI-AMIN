@@ -46,9 +46,14 @@ type Employee = {
   emergencyContact?: string;
   emergencyPhone?: string;
   taxCode?: string;
+  departmentId?: string;
+  teamId?: string | null;
   department: { name: string };
   position: { name: string; level: string };
   team?: { name: string };
+  jobRole?: string | null;
+  jobPosition?: string | null;
+  skillLevel?: string | null;
   user: { email: string; isActive: boolean };
   contracts: {
     id: string;
@@ -529,9 +534,16 @@ function EditEmployeeDialog({
 }) {
   const isHR = userRole === "HR_ADMIN" || userRole === "BOM";
   const [form, setForm] = useState({
+    fullName: employee.fullName || "",
+    gender: employee.gender || "MALE",
+    dateOfBirth: employee.dateOfBirth ? String(employee.dateOfBirth).slice(0, 10) : "",
+    idNumber: employee.idNumber || "",
     phone: employee.phone || "",
     currentAddress: employee.currentAddress || "",
     address: employee.address || "",
+    departmentId: employee.departmentId || "",
+    teamId: employee.teamId || "",
+    startDate: employee.startDate ? String(employee.startDate).slice(0, 10) : "",
     bankAccount: employee.bankAccount || "",
     bankName: employee.bankName || "",
     taxCode: employee.taxCode || "",
@@ -539,9 +551,20 @@ function EditEmployeeDialog({
     emergencyContact: employee.emergencyContact || "",
     emergencyPhone: employee.emergencyPhone || "",
     status: employee.status || "ACTIVE",
+    jobRole: employee.jobRole || "",
+    jobPosition: employee.jobPosition || "",
+    skillLevel: employee.skillLevel || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
+  const [teams, setTeams] = useState<{ id: string; name: string; departmentId: string }[]>([]);
+  useEffect(() => {
+    fetch("/api/v1/departments").then((r) => r.json()).then((res) => {
+      setDepts(res.data || []);
+      setTeams(res.teams || []);
+    }).catch(() => {});
+  }, []);
 
   const handleChange = (field: string, value: string) =>
     setForm((f) => ({ ...f, [field]: value }));
@@ -558,12 +581,22 @@ function EditEmployeeDialog({
         emergencyPhone: form.emergencyPhone,
       };
       if (isHR) {
+        body.fullName = form.fullName;
+        body.gender = form.gender;
+        if (form.dateOfBirth) body.dateOfBirth = form.dateOfBirth;
+        body.idNumber = form.idNumber;
         body.address = form.address;
+        if (form.departmentId) body.departmentId = form.departmentId;
+        body.teamId = form.teamId || null;
+        if (form.startDate) body.startDate = form.startDate;
         body.bankAccount = form.bankAccount;
         body.bankName = form.bankName;
         body.taxCode = form.taxCode;
         body.insuranceNumber = form.insuranceNumber;
         body.status = form.status;
+        body.jobRole = form.jobRole;
+        body.jobPosition = form.jobPosition;
+        body.skillLevel = form.skillLevel;
       }
 
       const res = await fetch(`/api/v1/employees/${employee.id}`, {
@@ -610,6 +643,38 @@ function EditEmployeeDialog({
             <div className="text-[13px] px-3 py-2 rounded-lg"
               style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>
               {error}
+            </div>
+          )}
+
+          {isHR && (
+            <div>
+              <p className="text-[11px] uppercase tracking-wider font-semibold mb-3"
+                style={{ color: "var(--ibs-text-dim)" }}>Thông tin cơ bản</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls} style={labelStyle}>Họ tên đầy đủ</label>
+                  <input value={form.fullName} onChange={(e) => handleChange("fullName", e.target.value)}
+                    className={inputCls} style={inputStyle} />
+                </div>
+                <div>
+                  <label className={labelCls} style={labelStyle}>Giới tính</label>
+                  <select value={form.gender} onChange={(e) => handleChange("gender", e.target.value)}
+                    className={inputCls} style={inputStyle}>
+                    <option value="MALE">Nam</option>
+                    <option value="FEMALE">Nữ</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls} style={labelStyle}>Ngày sinh</label>
+                  <input type="date" value={form.dateOfBirth} onChange={(e) => handleChange("dateOfBirth", e.target.value)}
+                    className={inputCls} style={inputStyle} />
+                </div>
+                <div>
+                  <label className={labelCls} style={labelStyle}>Số CCCD/CMND</label>
+                  <input value={form.idNumber} onChange={(e) => handleChange("idNumber", e.target.value)}
+                    className={inputCls} style={inputStyle} />
+                </div>
+              </div>
             </div>
           )}
 
@@ -671,6 +736,44 @@ function EditEmployeeDialog({
                   <input value={form.insuranceNumber} onChange={(e) => handleChange("insuranceNumber", e.target.value)}
                     className={inputCls} style={inputStyle} />
                 </div>
+                <div>
+                  <label className={labelCls} style={labelStyle}>Phòng ban</label>
+                  <select value={form.departmentId} onChange={(e) => handleChange("departmentId", e.target.value)}
+                    className={inputCls} style={inputStyle}>
+                    <option value="">-- Chọn phòng ban --</option>
+                    {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls} style={labelStyle}>Tổ / Đội / Bộ phận</label>
+                  <select value={form.teamId} onChange={(e) => handleChange("teamId", e.target.value)}
+                    className={inputCls} style={inputStyle}>
+                    <option value="">-- Không thuộc tổ --</option>
+                    {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls} style={labelStyle}>Ngày vào làm</label>
+                  <input type="date" value={form.startDate} onChange={(e) => handleChange("startDate", e.target.value)}
+                    className={inputCls} style={inputStyle} />
+                </div>
+                <div>
+                  <label className={labelCls} style={labelStyle}>Chức vụ</label>
+                  <input value={form.jobRole} onChange={(e) => handleChange("jobRole", e.target.value)}
+                    placeholder="VD: Công nhân / Tổ trưởng" className={inputCls} style={inputStyle} />
+                </div>
+                <div>
+                  <label className={labelCls} style={labelStyle}>Vị trí công việc</label>
+                  <input value={form.jobPosition} onChange={(e) => handleChange("jobPosition", e.target.value)}
+                    placeholder="VD: Thợ hàn / Thợ mài" className={inputCls} style={inputStyle} />
+                </div>
+                {form.jobRole === "Công nhân" && (
+                  <div>
+                    <label className={labelCls} style={labelStyle}>Cấp bậc</label>
+                    <input value={form.skillLevel} onChange={(e) => handleChange("skillLevel", e.target.value)}
+                      placeholder="VD: Bậc 5" className={inputCls} style={inputStyle} />
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -734,19 +837,23 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
   const [showEditEmployee, setShowEditEmployee] = useState(false);
   const [showDependentForm, setShowDependentForm] = useState<null | { mode: "create" } | { mode: "edit"; dep: any }>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
+  const [canViewPayroll, setCanViewPayroll] = useState(false);
 
   useEffect(() => {
     fetch("/api/v1/me")
       .then((r) => r.json())
-      .then((res) => { if (res.role) setUserRole(res.role); })
+      .then((res) => { if (res.role) setUserRole(res.role); setCanViewPayroll(!!res.canViewPayroll); })
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    fetch(`/api/v1/employees/${id}`)
+  function loadEmployee() {
+    return fetch(`/api/v1/employees/${id}`)
       .then((r) => r.json())
       .then((res) => setEmployee(res.data))
       .finally(() => setLoading(false));
+  }
+  useEffect(() => {
+    loadEmployee();
   }, [id]);
 
   if (loading) {
@@ -773,7 +880,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
 
   const tabs: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: "info", label: "Thông tin cá nhân", icon: User },
-    { key: "contracts", label: "Hợp đồng", icon: FileText, count: employee.contracts.length },
+    ...(canViewPayroll ? [{ key: "contracts" as Tab, label: "Hợp đồng", icon: FileText, count: employee.contracts.length }] : []),
     { key: "certificates", label: "Chứng chỉ", icon: Award, count: employee.certificates.length },
     { key: "history", label: "Lịch sử công tác", icon: History, count: employee.workHistory.length },
   ];
@@ -821,7 +928,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
             </button>
           </div>
           <div className="text-[13px] mb-3" style={{ color: "var(--ibs-text-dim)" }}>
-            {employee.code} · {employee.department.name} · {employee.position.name}
+            {employee.code} · {employee.department.name} · {employee.jobRole || employee.position.name}
             {employee.team && ` · ${employee.team.name}`}
           </div>
           <div className="flex items-center gap-5 flex-wrap">
@@ -896,8 +1003,8 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
           employee={employee}
           userRole={userRole}
           onClose={() => setShowEditEmployee(false)}
-          onSuccess={(updates) => {
-            setEmployee((prev) => prev ? { ...prev, ...updates } : prev);
+          onSuccess={() => {
+            loadEmployee();
             setShowEditEmployee(false);
           }}
         />
@@ -973,8 +1080,12 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                 Thông tin công việc
               </h4>
               <InfoRow label="Phòng ban" value={employee.department.name} icon={Building2} />
-              <InfoRow label="Chức vụ" value={employee.position.name} icon={Briefcase} />
-              {employee.team && <InfoRow label="Tổ / Đội" value={employee.team.name} />}
+              {employee.team && <InfoRow label="Tổ / Đội / Bộ phận" value={employee.team.name} />}
+              <InfoRow label="Chức vụ" value={employee.jobRole || employee.position.name} icon={Briefcase} />
+              {employee.jobPosition && <InfoRow label="Vị trí công việc" value={employee.jobPosition} />}
+              {employee.jobRole === "Công nhân" && employee.skillLevel && (
+                <InfoRow label="Cấp bậc" value={employee.skillLevel} />
+              )}
               <InfoRow label="Ngày vào làm" value={formatDate(new Date(employee.startDate))} icon={Calendar} />
               {employee.salaryGrade && (
                 <InfoRow label="Bậc lương" value={`Bậc ${employee.salaryGrade}`} />
@@ -1085,7 +1196,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                 <table className="w-full border-collapse">
                   <thead>
                     <tr>
-                      {["Số HĐ", "Loại HĐ", "Vị trí", "Ngày bắt đầu", "Ngày kết thúc", "Lương cơ bản", "Lương đóng BHXH", "Phụ cấp", "Trạng thái"].map(
+                      {["Số HĐ", "Loại HĐ", "Vị trí", "Ngày bắt đầu", "Ngày kết thúc", "Lương đóng BHXH", "Phụ cấp", "Tổng thu nhập", "Trạng thái"].map(
                         (h) => (
                           <th
                             key={h}
@@ -1108,14 +1219,14 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                         <td className="px-4 py-3 text-[13px]">
                           {c.endDate ? formatDate(new Date(c.endDate)) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}
                         </td>
-                        <td className="px-4 py-3 text-[13px] font-medium" style={{ color: "var(--ibs-success)" }}>
-                          {c.baseSalary > 0 ? formatVND(c.baseSalary) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}
-                        </td>
-                        <td className="px-4 py-3 text-[13px]" style={{ color: c.insuranceSalary ? "var(--ibs-accent)" : "var(--ibs-text-dim)" }}>
+                        <td className="px-4 py-3 text-[13px] font-medium" style={{ color: c.insuranceSalary ? "var(--ibs-accent)" : "var(--ibs-text-dim)" }}>
                           {c.insuranceSalary ? formatVND(c.insuranceSalary) : "—"}
                         </td>
                         <td className="px-4 py-3 text-[13px] font-medium" style={{ color: c.allowance ? "var(--ibs-warning)" : "var(--ibs-text-dim)" }}>
                           {c.allowance ? formatVND(c.allowance) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-[13px] font-semibold" style={{ color: "var(--ibs-success)" }}>
+                          {(() => { const tn = (c.insuranceSalary ?? 0) + (c.allowance ?? 0); return tn > 0 ? formatVND(tn) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>; })()}
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge status={c.status} />

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canViewPayroll } from "@/lib/access";
 import { z } from "zod";
 
 export async function GET(
@@ -48,13 +49,31 @@ export async function GET(
     }
   }
 
+  // Tab Hợp đồng (lương trên HĐ) chỉ cho NV trong allowlist M7 — ẩn với người khác
+  if (!canViewPayroll((session.user as any).employeeCode)) {
+    (employee as any).contracts = [];
+  }
+
   return NextResponse.json({ data: employee });
 }
 
 const UpdateEmployeeSchema = z.object({
+  // Thông tin cơ bản
+  fullName: z.string().min(1).optional(),
+  gender: z.enum(["MALE", "FEMALE"]).optional(),
+  dateOfBirth: z.string().optional(),
+  idNumber: z.string().optional(),
   phone: z.string().regex(/^0\d{9}$/).optional(),
   currentAddress: z.string().optional(),
   address: z.string().optional(),
+  // Thông tin công việc
+  departmentId: z.string().uuid().optional(),
+  teamId: z.string().uuid().nullable().optional(),
+  jobRole: z.string().optional(),
+  jobPosition: z.string().optional(),
+  skillLevel: z.string().optional(),
+  startDate: z.string().optional(),
+  // HR khác
   bankAccount: z.string().optional(),
   bankName: z.string().optional(),
   taxCode: z.string().optional(),
@@ -99,7 +118,10 @@ export async function PUT(
   }
 
   // Non-HR_ADMIN cannot change status
-  const updateData = { ...parsed.data };
+  const { dateOfBirth, startDate, ...rest } = parsed.data;
+  const updateData: any = { ...rest };
+  if (dateOfBirth) updateData.dateOfBirth = new Date(dateOfBirth);
+  if (startDate) updateData.startDate = new Date(startDate);
   if (!canDo(userRole, "employees", "readAll") && updateData.status) {
     delete updateData.status;
   }

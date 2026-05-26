@@ -122,14 +122,18 @@ export function OrgChartTabs({
 
             {/* BOM */}
             <div className="flex justify-center gap-4 mb-2">
-              {(deptsByDir["bom"] || []).slice(0, 1).map((d) => (
-                <div key={d.id} className="rounded-xl px-4 py-3 border text-center"
-                  style={{ background: "linear-gradient(135deg,rgba(0,180,216,0.2),rgba(31,78,121,0.3))", borderColor: "var(--ibs-accent)", minWidth: "160px" }}>
-                  <div className="text-[13px] font-semibold" style={{ color: "var(--ibs-accent)" }}>{d.name}</div>
-                  <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Ban Giám đốc (BOM)</div>
-                  <div className="text-[10px] mt-0.5" style={{ color: "var(--ibs-accent)" }}>{d.actual} thành viên</div>
-                </div>
-              ))}
+              {(() => {
+                const bomGroup = deptsByDir["bom"] || [];
+                const bom = bomGroup.find((d) => d.name.includes("Giám đốc")) || bomGroup[0];
+                if (!bom) return null;
+                return (
+                  <div className="rounded-xl px-4 py-3 border text-center"
+                    style={{ background: "linear-gradient(135deg,rgba(0,180,216,0.2),rgba(31,78,121,0.3))", borderColor: "var(--ibs-accent)", minWidth: "160px" }}>
+                    <div className="text-[13px] font-semibold" style={{ color: "var(--ibs-accent)" }}>Ban Giám đốc (BOM)</div>
+                    <div className="text-[10px] mt-0.5" style={{ color: "var(--ibs-accent)" }}>{bom.actual} thành viên</div>
+                  </div>
+                );
+              })()}
             </div>
             <div className="flex justify-center"><ConnectorLine vertical /></div>
             <div className="flex justify-center mb-0">
@@ -276,6 +280,7 @@ type EmpRow = {
   id: string;
   employeeId: string;
   fullName: string;
+  jobRole?: string | null;
   position: { name: string } | string | null;
   email: string | null;
   status: string;
@@ -348,7 +353,7 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
                     <td className="px-4 py-3 text-[12px] font-mono" style={{ color: "var(--ibs-accent)" }}>{emp.employeeId}</td>
                     <td className="px-4 py-3 text-[13px] font-medium">{emp.fullName}</td>
                     <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>
-                      {emp.position == null ? "—" : (emp.position as any).name ?? (emp.position as string)}
+                      {emp.jobRole || (emp.position == null ? "—" : (emp.position as any).name ?? (emp.position as string))}
                     </td>
                     <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>{emp.email ?? "—"}</td>
                     <td className="px-4 py-3">

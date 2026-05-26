@@ -35,6 +35,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
         select: {
           id: true, code: true, fullName: true, photo: true, status: true, startDate: true,
           department: { select: { id: true, name: true } },
+          jobRole: true,
           position: { select: { id: true, name: true } },
         },
       },
@@ -86,6 +87,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         select: {
           id: true, code: true, fullName: true,
           department: { select: { name: true } },
+          jobRole: true,
           position: { select: { name: true } },
         },
       },

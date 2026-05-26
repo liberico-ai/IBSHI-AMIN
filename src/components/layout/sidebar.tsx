@@ -93,11 +93,12 @@ const ROLE_LABELS: Record<string, string> = {
 interface SidebarProps {
   userName?: string;
   userRole?: string;
+  canViewPayroll?: boolean;
   open?: boolean;
   onClose?: () => void;
 }
 
-export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onClose }: SidebarProps) {
+export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll = false, open = true, onClose }: SidebarProps) {
   const pathname = usePathname();
 
   const isActive = (href: string) => {
@@ -157,7 +158,7 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", open = true, onC
               >
                 {section.section}
               </div>
-              {section.items.map((item) => {
+              {section.items.filter((item) => canViewPayroll || item.href !== "/luong").map((item) => {
                 const Icon = iconMap[item.icon];
                 const active = isActive(item.href);
                 return (

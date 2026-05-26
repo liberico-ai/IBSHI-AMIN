@@ -511,6 +511,11 @@ export default function LuongPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [calculatingId, setCalculatingId] = useState<string | null>(null);
   const [actioningId, setActioningId] = useState<string | null>(null);
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/me").then((r) => r.json()).then((res) => setAllowed(!!res.canViewPayroll)).catch(() => setAllowed(false));
+  }, []);
 
   const canManage = canDo("payroll", "calculate");
   const isBOM = hasRole("BOM");
@@ -717,6 +722,18 @@ export default function LuongPage() {
       },
     },
   ];
+
+  if (allowed === false) {
+    return (
+      <div>
+        <PageTitle title="M7 - Lương & Phúc lợi" description="Quản lý lương, phúc lợi" />
+        <div className="rounded-xl border p-10 text-center text-[14px]"
+          style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
+          🔒 Bạn không có quyền truy cập mục Lương &amp; Phúc lợi. Vui lòng liên hệ quản trị nếu cần.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
