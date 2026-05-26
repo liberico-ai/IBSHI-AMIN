@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canViewPayroll } from "@/lib/access";
 
-// GET /api/v1/payroll/:periodId/slip  — returns the current user's slip for this period
-// HR_ADMIN can pass ?employeeId=xxx to see any employee's slip
+// GET /api/v1/payroll/:periodId/slip  — chỉ NV trong allowlist M7 được xem
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
+  if (!canViewPayroll((session.user as any).employeeCode)) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
+  }
 
   const { id: periodId } = await params;
   const userRole = (session.user as any).role;

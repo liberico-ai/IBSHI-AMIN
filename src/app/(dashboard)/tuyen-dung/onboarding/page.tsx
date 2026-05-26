@@ -233,7 +233,7 @@ function OnboardingRow({ item, onClick }: { item: Onboarding; onClick: () => voi
           {overdue && <span className="text-[11px] px-2 py-0.5 rounded-lg font-semibold" style={{ background: "rgba(239,68,68,0.12)", color: "var(--ibs-danger)" }}>Quá hạn</span>}
         </div>
         <div className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
-          {item.employee.position.name} · {item.employee.department.name}
+          {((item.employee as any).jobRole || item.employee.position.name)} · {item.employee.department.name}
           {due && <> · Hạn: <span style={{ color: overdue ? "var(--ibs-danger)" : "var(--ibs-text)" }}>{formatDate(due)}</span></>}
         </div>
       </div>
@@ -351,7 +351,7 @@ function CreateOnboardingModal({ onClose, onCreated }: { onClose: () => void; on
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-medium">{e.fullName}</div>
                   <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
-                    {e.code} · {e.position.name} · {e.department.name}
+                    {e.code} · {(e as any).jobRole || e.position.name} · {e.department.name}
                   </div>
                 </div>
                 {selected === e.id && <Check size={16} style={{ color: "var(--ibs-accent)" }} />}
@@ -442,7 +442,7 @@ function OnboardingDetailModal({ data, canEdit, onClose, onChanged }: {
       {/* Header info */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 rounded-lg" style={{ background: "var(--ibs-bg)" }}>
         <Info label="Mã NV" value={data.employee.code} />
-        <Info label="Vị trí" value={data.employee.position.name} />
+        <Info label="Vị trí" value={((data.employee as any).jobRole || data.employee.position.name)} />
         <Info label="Phòng ban" value={data.employee.department.name} />
         <Info label="Bắt đầu" value={formatDate(data.startedAt)} />
       </div>

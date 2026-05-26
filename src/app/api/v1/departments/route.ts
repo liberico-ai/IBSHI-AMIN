@@ -14,5 +14,10 @@ export async function GET() {
     select: { id: true, code: true, name: true, headcount: true },
   });
 
-  return NextResponse.json({ data: departments });
+  const teams = await prisma.productionTeam.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, departmentId: true },
+  });
+
+  return NextResponse.json({ data: departments, teams });
 }

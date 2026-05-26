@@ -274,6 +274,9 @@ model Employee {
   departmentId        String
   positionId          String
   teamId              String?
+  jobRole             String? // Chức vụ: Công nhân / Tổ trưởng / Nhân viên ...
+  jobPosition         String? // Vị trí công việc: Thợ hàn / Thợ mài ...
+  skillLevel          String? // Cấp bậc / Bậc thợ: "Bậc 5" ...
   startDate           DateTime
   status              EmployeeStatus @default(ACTIVE)
   salaryGrade         Int? // 1-7
@@ -339,6 +342,7 @@ model Contract {
   endDate        DateTime? // null = indefinite
   baseSalary     Int // VND — Lương cơ bản (Mức lương chính)
   insuranceSalary Int? // Mức lương đóng BHXH (có thể khác baseSalary)
+  allowance      Int? // VND — Tổng phụ cấp (đầu vào cho M7 tính lương)
   allowances     Json? // {phone, fuel, housing, kpi, ...}
   status         ContractStatus @default(ACTIVE)
   fileUrl        String?

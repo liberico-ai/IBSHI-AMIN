@@ -15,6 +15,7 @@ type Employee = {
   startDate: string;
   department: { id: string; name: string };
   position: { name: string };
+  jobRole?: string | null;
   contracts: { contractType: string; status: string; baseSalary: number }[];
 };
 type Dept = { id: string; code: string; name: string };
@@ -75,7 +76,7 @@ export default function EmployeesPage() {
         code: emp.code,
         fullName: emp.fullName,
         dept: emp.department?.name || "",
-        pos: emp.position?.name || "",
+        pos: emp.jobRole || emp.position?.name || "",
         contract: CONTRACT_TYPE_LABELS[emp.contracts?.[0]?.contractType || ""] || "",
         status: emp.status,
         startDate: emp.startDate ? new Date(emp.startDate).toLocaleDateString("vi-VN") : "",
@@ -112,7 +113,7 @@ export default function EmployeesPage() {
     },
     {
       key: "positionName", header: "Chức vụ",
-      render: (row) => <span style={{ color: "var(--ibs-text-muted)" }}>{(row as unknown as Employee).position?.name || "—"}</span>,
+      render: (row) => { const e = row as unknown as Employee; return <span style={{ color: "var(--ibs-text-muted)" }}>{e.jobRole || e.position?.name || "—"}</span>; },
     },
     {
       key: "contractType", header: "Loại HĐ",

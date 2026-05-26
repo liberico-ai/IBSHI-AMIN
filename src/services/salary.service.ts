@@ -1,18 +1,7 @@
 import prisma from "@/lib/prisma";
 import { calculateSalary, type SalaryInput } from "@/lib/salary-calc";
 import { SALARY_CONFIG, INSURANCE_RATES } from "@/lib/constants";
-
-// ─── Constants (legacy lookup theo role/team — có thể override ở UI) ──────────
-
-const SALARY_BASE_UNIT = 730_000; // Mức lương cơ sở để tính từ salaryGrade × salaryCoefficient
-
-const RESPONSIBILITY_ALLOWANCE: Record<string, number> = {
-  TEAM_LEAD: SALARY_CONFIG.TEAM_LEAD_ALLOWANCE,
-  MANAGER: SALARY_CONFIG.MANAGER_ALLOWANCE,
-  HR_ADMIN: SALARY_CONFIG.MANAGER_ALLOWANCE,
-  BOM: SALARY_CONFIG.MANAGER_ALLOWANCE,
-  EMPLOYEE: 0,
-};
+import { standardWorkDays, isHoliday, holidaysInMonth } from "@/lib/holidays";
 
 // ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
 
@@ -37,7 +26,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // M3: Bảng chấm công đã import (vân tay khối gián tiếp + khuôn mặt khối trực tiếp)
   const attendanceData = await prisma.attendanceRecord.findMany({
     where: { date: { gte: startDate, lte: endDate } },
-    select: { employeeId: true, status: true, otHours: true, date: true },
+    select: { employeeId: true, status: true, workHours: true, otHours: true, date: true },
   });
 
   // CHỈ tính lương cho NV CÓ DỮ LIỆU CHẤM CÔNG trong tháng
@@ -83,85 +72,76 @@ export async function calculatePayrollForPeriod(periodId: string) {
     select: { employeeId: true, leaveType: true, totalDays: true },
   });
 
-  // Lương khoán (M7 piece-rate) theo tổ × tháng (Phase 2 sẽ mở rộng theo công đoạn)
-  const pieceRateData = await prisma.pieceRateRecord.findMany({
-    where: { month: period.month, year: period.year },
-    include: { members: { select: { id: true } } },
-  });
-
-  // KPI/PC trách nhiệm override theo kỳ — biến động theo tháng nên không thể fix cứng ở Contract.
-  // Lookup ưu tiên theo (employeeId, month, year). Fallback về Contract.allowances nếu không có.
-  const kpiOverrides = await prisma.payrollKpiOverride.findMany({
-    where: { month: period.month, year: period.year },
-    select: { employeeId: true, kpi: true, responsibility: true },
-  });
-  const kpiOverrideMap = new Map(kpiOverrides.map((o) => [o.employeeId, o]));
 
   // ── Build lookup maps ──
 
-  // 4 — workDaysHC (= "Công đi làm" trong file khách — chỉ tính ngày đi làm thực):
-  //   PRESENT / LATE / BUSINESS_TRIP → +1
-  //   HALF_DAY (làm nửa ngày, "x/2") → +0.5
-  //   ABSENT_APPROVED / ABSENT_APPROVED_HALF (AL/L/CL/ML/SL/CO/MT — nghỉ có lương)
-  //     → KHÔNG cộng workDaysHC → tính riêng thành "Lương phép" (mục 11 — policyAllowance).
-  //   ABSENT_UNAPPROVED → KHÔNG cộng.
-  const workDaysMap: Record<string, number> = {};
+  // ── Phân loại theo NGÀY (chốt 2026-05-26) ──
+  //   Ngày thường (T2–T7, không lễ): workHours → công thường (÷8); otHours → OT ngày thường (×1.5).
+  //   Chủ Nhật (ngày nghỉ): TOÀN BỘ giờ làm (workHours + otHours) → OT Chủ Nhật (×2).
+  //   Ngày Lễ: TOÀN BỘ giờ làm → OT Lễ (×3).  (Ca đêm để 0 — chờ máy chấm công.)
+  //   ABSENT_APPROVED(_HALF) (phép) → leaveDays (hưởng theo Lương BHXH/CC).
+  const workDaysMap: Record<string, number> = {};        // công thường (ngày làm thực, ÷8)
   const alDaysFromAttendance: Record<string, number> = {};
-  for (const a of attendanceData) {
-    if (!workDaysMap[a.employeeId]) workDaysMap[a.employeeId] = 0;
-    if (["PRESENT", "LATE", "BUSINESS_TRIP"].includes(a.status)) workDaysMap[a.employeeId] += 1;
-    else if (a.status === "HALF_DAY") workDaysMap[a.employeeId] += 0.5;
-    else if (a.status === "ABSENT_APPROVED") alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + 1;
-    else if (a.status === "ABSENT_APPROVED_HALF") alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + 0.5;
-  }
-
-  // 5 — Phân loại OT — gộp 2 nguồn:
-  //   (a) AttendanceRecord.otHours (từ import M3 — phân loại theo thứ trong tuần)
-  //   (b) OTRequest đã APPROVED (đơn OT cá nhân — phân loại theo otRate)
   const otMap: Record<string, { weekday: number; sunday: number; holiday: number }> = {};
+  const ensureOt = (id: string) => (otMap[id] ||= { weekday: 0, sunday: 0, holiday: 0 });
 
-  // (a) Từ AttendanceRecord — date.getDay() === 0 → CN, else → ngày thường
-  // (Không phân biệt ngày Lễ ở phase này — sẽ làm Phase 2 với holiday calendar)
   for (const a of attendanceData) {
-    if (!a.otHours || a.otHours <= 0) continue;
-    if (!otMap[a.employeeId]) otMap[a.employeeId] = { weekday: 0, sunday: 0, holiday: 0 };
-    const dow = new Date(a.date).getDay();
-    if (dow === 0) otMap[a.employeeId].sunday += a.otHours;       // Chủ nhật
-    else otMap[a.employeeId].weekday += a.otHours;                 // Ngày thường (T2-T7)
+    const d = new Date(a.date);
+    const wh = a.workHours || 0;
+    const oh = a.otHours || 0;
+    if (isHoliday(d)) {
+      if (wh + oh > 0) ensureOt(a.employeeId).holiday += wh + oh;       // mọi giờ lễ = OT lễ
+    } else if (d.getUTCDay() === 0) {
+      if (wh + oh > 0) ensureOt(a.employeeId).sunday += wh + oh;        // mọi giờ CN = OT CN
+    } else {
+      // Ngày thường
+      if (["PRESENT", "LATE", "BUSINESS_TRIP", "HALF_DAY"].includes(a.status)) {
+        workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + wh / 8;
+      } else if (a.status === "ABSENT_APPROVED") {
+        alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + 1;
+      } else if (a.status === "ABSENT_APPROVED_HALF") {
+        alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + 0.5;
+      }
+      if (oh > 0) ensureOt(a.employeeId).weekday += oh;                 // OT ngày thường
+    }
   }
 
-  // (b) Từ OTRequest — bù thêm nếu có (vd OT ngày Lễ chỉ track ở đây)
+  // OTRequest đã APPROVED — phân loại theo otRate (bổ sung nếu có đơn OT riêng)
   for (const o of otData) {
-    if (!otMap[o.employeeId]) otMap[o.employeeId] = { weekday: 0, sunday: 0, holiday: 0 };
+    ensureOt(o.employeeId);
     if (o.otRate >= 3.0) otMap[o.employeeId].holiday += o.hours;
     else if (o.otRate >= 2.0) otMap[o.employeeId].sunday += o.hours;
     else otMap[o.employeeId].weekday += o.hours;
   }
 
-  // 6 — Công chế độ (phép/lễ/TNLĐ) | 7.1 — Nghỉ không lương
-  // Lấy từ 2 nguồn: LeaveRequest (đơn nghỉ trong hệ thống) + AttendanceRecord (mã AL từ bảng công import)
-  const policyMap: Record<string, number> = {};
-  const unpaidMap: Record<string, number> = {};
+  // 6 — Nghỉ phép có lương (LeaveRequest + mã AL bảng công) → hưởng theo Lương BHXH/CC
+  const leavePaidMap: Record<string, number> = {};
   for (const l of leaveData) {
-    if (l.leaveType === "UNPAID") {
-      unpaidMap[l.employeeId] = (unpaidMap[l.employeeId] || 0) + l.totalDays;
-    } else {
-      policyMap[l.employeeId] = (policyMap[l.employeeId] || 0) + l.totalDays;
-    }
+    if (l.leaveType !== "UNPAID") leavePaidMap[l.employeeId] = (leavePaidMap[l.employeeId] || 0) + l.totalDays;
   }
-  // Cộng thêm AL từ bảng công đã import (ưu tiên dùng nếu có)
   for (const [empId, days] of Object.entries(alDaysFromAttendance)) {
-    policyMap[empId] = (policyMap[empId] || 0) + days;
+    leavePaidMap[empId] = (leavePaidMap[empId] || 0) + days;
   }
 
-  // 10 — Lương khoán: chia đều theo memberCount (Phase 2 sẽ chia theo công đi làm)
-  const pieceRateMap: Record<string, number> = {};
-  for (const pr of pieceRateData) {
-    const perMember = pr.memberCount > 0 ? Math.round(pr.totalAmount / pr.memberCount) : 0;
-    for (const member of pr.members) {
-      pieceRateMap[member.id] = (pieceRateMap[member.id] || 0) + perMember;
+  // Nghỉ lễ: ngày lễ (lịch VN) mà NV KHÔNG đi làm → cũng hưởng lương theo Lương BHXH/CC
+  const holidayYmds = holidaysInMonth(period.year, period.month);
+  const workedKey = (empId: string, d: Date) =>
+    `${empId}|${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  const workedSet = new Set<string>();
+  for (const a of attendanceData) {
+    if (["PRESENT", "LATE", "BUSINESS_TRIP", "HALF_DAY"].includes(a.status)) {
+      workedSet.add(workedKey(a.employeeId, new Date(a.date)));
     }
   }
+  const holidayRestMap: Record<string, number> = {};
+  for (const empId of employeeIdsWithAttendance) {
+    let rest = 0;
+    for (const hy of holidayYmds) if (!workedSet.has(`${empId}|${hy}`)) rest++;
+    if (rest > 0) holidayRestMap[empId] = rest;
+  }
+
+  // Công chuẩn (CC) = số ngày trong tháng − số Chủ Nhật
+  const CC = standardWorkDays(period.year, period.month);
 
   // ── Tính lương cho từng NV (dùng calculateSalary từ lib/salary-calc.ts) ──
 
@@ -179,98 +159,64 @@ export async function calculatePayrollForPeriod(periodId: string) {
   for (const emp of employees) {
     const contract = emp.contracts[0];
 
-    // Lương cơ bản (2.1) — ưu tiên Contract.baseSalary (đồng bộ từ file lương khách = master).
-    // Fallback: salaryGrade × coefficient (legacy) khi không có HĐ ACTIVE.
-    let baseSalary = 0;
-    if (contract && contract.baseSalary > 0) {
-      baseSalary = contract.baseSalary;
-      withContractEmployees.push({ code: emp.code, fullName: emp.fullName, baseSalary });
-    } else if (emp.salaryGrade && emp.salaryCoefficient) {
-      baseSalary = Math.round(emp.salaryGrade * emp.salaryCoefficient * SALARY_BASE_UNIT);
-      withContractEmployees.push({ code: emp.code, fullName: emp.fullName, baseSalary });
+    // Gốc lương từ HĐ: Lương đóng BHXH (lương chính) + Phụ cấp = Tổng thu nhập
+    const insuranceSalary = contract?.insuranceSalary ?? contract?.baseSalary ?? 0;
+    const allowance = contract?.allowance ?? 0;
+    const totalIncome = insuranceSalary + allowance;
+
+    if (totalIncome > 0) {
+      withContractEmployees.push({ code: emp.code, fullName: emp.fullName, baseSalary: insuranceSalary });
     } else {
-      // Không có HĐ active và cũng không có salaryGrade → vẫn tạo record
-      // để HR thấy NV nào cần bổ sung HĐ. baseSalary = 0 → lương = 0.
       missingContractEmployees.push({ code: emp.code, fullName: emp.fullName });
     }
 
-    const workDaysHC = workDaysMap[emp.id] || 0;
+    const workDaysActual = workDaysMap[emp.id] || 0;
+    const leaveDays = (leavePaidMap[emp.id] || 0) + (holidayRestMap[emp.id] || 0);
     const ot = otMap[emp.id] || { weekday: 0, sunday: 0, holiday: 0 };
-    const workDaysPolicy = policyMap[emp.id] || 0;
-    const workDaysUnpaid = unpaidMap[emp.id] || 0;
-    const pieceRateSalary = pieceRateMap[emp.id] || 0;
 
-    // Phụ cấp HĐ (2.2) + PC trách nhiệm (3.1) — lấy từ Contract.allowances (import từ Bảng lương)
-    const allw = (contract?.allowances as Record<string, number> | null) || {};
-    const phoneAllowance = allw.phone || 0;
-    const fuelAllowance = allw.fuel || 0;
-    const housingAllowance = allw.housing || 0;
-    // KPI/PC trách nhiệm: ưu tiên PayrollKpiOverride cho kỳ này (biến động theo tháng),
-    // fallback về Contract.allowances. KHÔNG dùng fallback theo role (file khách quyết định).
-    const override = kpiOverrideMap.get(emp.id);
-    const kpiAllowance = override?.kpi ?? allw.kpi ?? 0;
-    const responsibilityAllowance = override?.responsibility ?? allw.responsibility ?? 0;
-
-    // Build SalaryInput theo spec IBSHI
     const input: SalaryInput = {
-      // Hợp đồng — phụ cấp 2.2 từ Contract.allowances
-      baseSalary,
-      phoneAllowance,
-      fuelAllowance,
-      housingAllowance,
-      kpiAllowance,
-      // Bổ sung — 3.1 PC trách nhiệm; 3.2 PC xăng nhà trọ (200K nếu eligible + ≥14 công)
-      responsibilityAllowance,
-      fuelHousingEligible: emp.fuelHousingEligible || false,
+      totalIncome,
+      insuranceSalary,
+      standardDays: CC,
+      workDaysActual,
+      leaveDays,
+      ot: {
+        weekday: ot.weekday,
+        weekdayNight: 0,   // ca đêm chờ máy chấm công
+        sunday: ot.sunday,
+        sundayNight: 0,
+        holiday: ot.holiday,
+        holidayNight: 0,
+      },
       dependentsCount: emp.dependents || 0,
-      // Số công (từ M3)
-      workDaysHC,
-      otHoursWeekday: ot.weekday,
-      otHoursWeekdayNight: 0,         // chưa tách ngày/đêm — Phase 2
-      otHoursSunday: ot.sunday,
-      otHoursSundayNight: 0,
-      otHoursHoliday: ot.holiday,
-      otHoursHolidayNight: 0,
-      workDaysPolicy,
-      workDaysUnpaid,
-      workDaysLate: 0,                 // chưa có cột đi muộn — Phase 2
-      // Lương khoán
-      pieceRateSalary,
-      companyServesMealOnSunday: false,
     };
 
     const out = calculateSalary(input);
 
-    // Map output → existing PayrollRecord schema
-    // Note: schema chưa có đủ fields theo spec mới. Phase 2 sẽ migrate.
-    // Tạm map các trường chính:
-    //   mealAllowance → ăn ca OT (mục 12)
-    //   otherIncome   → PC xăng nhà trọ (mục 3.2)
-    //   deductions    → đi muộn (mục 7.2)
-    //   bhxh/bhyt/bhtn → split 8% / 1.5% / 1% (tổng 10.5% theo spec)
-    const bhxhBase = Math.min(baseSalary, SALARY_CONFIG.INSURANCE_SALARY_CAP);
-    const totalOtHours = ot.weekday + ot.sunday + ot.holiday;
+    // Map → PayrollRecord. Split BHXH NLĐ (10.5%) thành 8% / 1.5% / 1% (0 nếu chưa đủ 14 công).
+    const bhxhBase = Math.min(insuranceSalary, SALARY_CONFIG.INSURANCE_SALARY_CAP);
+    const hasBHXH = out.bhxhEmployee > 0;
 
     records.push({
       periodId,
       employeeId: emp.id,
-      standardDays: SALARY_CONFIG.STANDARD_WORK_DAYS,
-      workDays: workDaysHC,
-      otHours: totalOtHours,
-      baseSalary,
-      pieceRateSalary: out.pieceRateSalary,
-      hazardAllowance: 0,                                  // Phase 2: theo điều kiện công ty
-      responsibilityAllow: input.responsibilityAllowance,
-      mealAllowance: out.overtimeMealAllow,                // mục 12
-      otherIncome: out.fuelHousingAllow,                   // mục 3.2
-      otPay: out.salaryOT,                                 // mục 9
-      grossSalary: out.grossSalary,                        // B2
-      bhxh: Math.round(bhxhBase * INSURANCE_RATES.SOCIAL),       // 8%
-      bhyt: Math.round(bhxhBase * INSURANCE_RATES.HEALTH),       // 1.5%
-      bhtn: Math.round(bhxhBase * INSURANCE_RATES.UNEMPLOYMENT), // 1%
-      tncn: out.tncn,                                       // mục 18
-      deductions: out.lateDeduction,                       // ((2)/26 × 7.2)
-      netSalary: out.netSalary,                            // mục 19
+      standardDays: CC,
+      workDays: workDaysActual,
+      otHours: out.otHoursTotal,
+      baseSalary: insuranceSalary,
+      pieceRateSalary: 0,
+      hazardAllowance: 0,
+      responsibilityAllow: 0,
+      mealAllowance: 0,
+      otherIncome: out.leavePay,                           // lương phép + lễ
+      otPay: out.salaryOT,                                 // lương OT (đã nhân hệ số)
+      grossSalary: out.grossSalary,
+      bhxh: hasBHXH ? Math.round(bhxhBase * INSURANCE_RATES.SOCIAL) : 0,       // 8%
+      bhyt: hasBHXH ? Math.round(bhxhBase * INSURANCE_RATES.HEALTH) : 0,       // 1.5%
+      bhtn: hasBHXH ? Math.round(bhxhBase * INSURANCE_RATES.UNEMPLOYMENT) : 0, // 1%
+      tncn: out.tncn,
+      deductions: 0,
+      netSalary: out.netSalary,
     });
   }
 

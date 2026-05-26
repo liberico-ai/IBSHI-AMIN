@@ -197,7 +197,7 @@ function EvalRow({ item, onClick }: { item: Evaluation; onClick: () => void }) {
           <span className="text-[11px] px-2 py-0.5 rounded-lg font-semibold" style={{ background: info.bg, color: info.color }}>{info.label}</span>
         </div>
         <div className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
-          {item.employee.position.name} · {item.employee.department.name} · Ngày đánh giá: {formatDate(item.evaluationDate)}
+          {((item.employee as any).jobRole || item.employee.position.name)} · {item.employee.department.name} · Ngày đánh giá: {formatDate(item.evaluationDate)}
         </div>
       </div>
       <div className="flex items-center gap-3 flex-shrink-0">
@@ -295,7 +295,7 @@ function CreateEvalModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-medium">{e.fullName}</div>
                   <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
-                    {e.code} · {e.position.name} · {e.department.name}
+                    {e.code} · {(e as any).jobRole || e.position.name} · {e.department.name}
                   </div>
                 </div>
                 {selected === e.id && <Check size={16} style={{ color: "var(--ibs-accent)" }} />}
@@ -477,7 +477,7 @@ function EvalDetailModal({ data, isBOM, canEdit, onClose, onChanged }: {
       {/* Header info */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 rounded-lg" style={{ background: "var(--ibs-bg)" }}>
         <Info label="Mã NV" value={data.employee.code} />
-        <Info label="Vị trí" value={data.employee.position.name} />
+        <Info label="Vị trí" value={((data.employee as any).jobRole || data.employee.position.name)} />
         <Info label="Phòng ban" value={data.employee.department.name} />
         <Info label="Trạng thái" value={
           <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg" style={{ background: STATUS_INFO[data.status].bg, color: STATUS_INFO[data.status].color }}>

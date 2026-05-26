@@ -57,6 +57,7 @@ export const MEAL_UNIT_PRICE = 35000; // VND/suất
 
 export const SALARY_CONFIG = {
   STANDARD_WORK_DAYS: 26,
+  BHXH_MIN_DAYS: 14,                // ≥14 công (đi làm + phép + lễ) mới đóng/trừ BHXH
   INSURANCE_SALARY_CAP: 36000000,   // 36M VND — mức trần đóng BH
   // ── Giảm trừ gia cảnh (Nghị quyết mới 2025) ──
   PERSONAL_DEDUCTION: 15500000,     // Giảm trừ bản thân
