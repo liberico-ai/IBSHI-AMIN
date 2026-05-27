@@ -65,10 +65,11 @@ export function OrgChartTabs({
 }: {
   departments: Dept[];
   directorates: Directorate[];
-  productionTeams: string[];
+  productionTeams: { id: string; name: string; memberCount: number; actual: number }[];
 }) {
   const [activeTab, setActiveTab] = useState<"chart" | "headcount">("chart");
   const [selectedDept, setSelectedDept] = useState<Dept | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState<{ id: string; name: string; memberCount: number; actual: number } | null>(null);
 
   const tabs = [
     { key: "chart" as const, label: "Sơ đồ tổ chức" },
@@ -188,15 +189,24 @@ export function OrgChartTabs({
               </div>
               <div className="flex flex-wrap justify-center gap-2">
                 {productionTeams.map((team) => (
-                  <div key={team} className="px-3 py-1.5 rounded-lg text-[11px] font-medium border"
-                    style={{ background: "rgba(245,158,11,0.08)", borderColor: "rgba(245,158,11,0.3)", color: "#f59e0b" }}>
-                    {team}
-                  </div>
+                  <button key={team.id} onClick={() => setSelectedTeam(team)}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all hover:-translate-y-0.5 flex items-center gap-1.5"
+                    style={{ background: "rgba(245,158,11,0.08)", borderColor: "rgba(245,158,11,0.3)", color: "#f59e0b", cursor: "pointer" }}>
+                    {team.name}
+                    <span className="px-1.5 rounded-full text-[10px] font-bold" style={{ background: "rgba(245,158,11,0.2)" }}>
+                      {team.actual}/{team.memberCount}
+                    </span>
+                  </button>
                 ))}
               </div>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Team employees modal */}
+      {selectedTeam && (
+        <TeamEmployeesModal team={selectedTeam} onClose={() => setSelectedTeam(null)} />
       )}
 
       {/* Dept employees modal */}
@@ -371,6 +381,97 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── TeamEmployeesModal — NV trong 1 tổ, gom theo nhóm thợ (Vị trí), sắp theo bậc ──
+type TeamEmp = {
+  code: string;
+  fullName: string;
+  jobRole?: string | null;
+  jobPosition?: string | null;
+  skillLevel?: string | null;
+  status: string;
+};
+
+function bacNum(s?: string | null): number {
+  const m = String(s ?? "").match(/\d+/);
+  return m ? parseInt(m[0]) : -1;
+}
+
+function TeamEmployeesModal({ team, onClose }: { team: { id: string; name: string; memberCount: number }; onClose: () => void }) {
+  const [emps, setEmps] = useState<TeamEmp[]>([]);
+  const [loading, setLoading] = useState(true);
+  const activeCount = emps.filter((e) => e.status === "ACTIVE" || e.status === "PROBATION").length;
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/v1/employees?teamId=${team.id}&limit=300`)
+      .then((r) => r.json())
+      .then((json) => setEmps(json.data ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [team.id]);
+
+  // Gom theo Vị trí công việc (nhóm thợ); trong nhóm sắp bậc thợ giảm dần
+  const groups = (() => {
+    const map = new Map<string, TeamEmp[]>();
+    for (const e of emps) {
+      const key = (e.jobPosition || "Khác").trim();
+      (map.get(key) ?? map.set(key, []).get(key)!).push(e);
+    }
+    const arr = Array.from(map.entries()).map(([name, list]) => ({
+      name,
+      list: list.sort((a: TeamEmp, b: TeamEmp) => bacNum(b.skillLevel) - bacNum(a.skillLevel) || a.fullName.localeCompare(b.fullName)),
+    }));
+    arr.sort((a, b) => b.list.length - a.list.length); // nhóm đông trước
+    return arr;
+  })();
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div className="rounded-2xl border w-full max-w-2xl max-h-[85vh] flex flex-col"
+        style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <div>
+            <h3 className="text-[15px] font-semibold">{team.name}</h3>
+            <p className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
+              {activeCount}/{team.memberCount} CBNV · {groups.length} nhóm thợ
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors"><X size={18} /></button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-4">
+          {loading ? (
+            <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: "var(--ibs-accent)" }} /></div>
+          ) : emps.length === 0 ? (
+            <p className="text-center py-10 text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Tổ này chưa có nhân sự</p>
+          ) : (
+            <div className="space-y-4">
+              {groups.map((g) => (
+                <div key={g.name}>
+                  <div className="text-[12px] font-semibold mb-1.5 px-1" style={{ color: "#f59e0b" }}>
+                    {g.name} <span style={{ color: "var(--ibs-text-dim)" }}>({g.list.length})</span>
+                  </div>
+                  <div className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--ibs-border)" }}>
+                    {g.list.map((e, i) => (
+                      <div key={e.code} className="flex items-center justify-between px-3 py-2 text-[13px]"
+                        style={{ borderTop: i > 0 ? "1px solid var(--ibs-border)" : "none" }}>
+                        <span><span className="font-mono text-[12px]" style={{ color: "var(--ibs-accent)" }}>{e.code}</span> · {e.fullName}</span>
+                        <span className="flex items-center gap-2">
+                          {e.skillLevel && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: "rgba(245,158,11,0.12)", color: "#f59e0b" }}>{e.skillLevel}</span>}
+                          {e.status !== "ACTIVE" && <span className="text-[11px]" style={{ color: "var(--ibs-danger)" }}>Đã nghỉ</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>

@@ -18,6 +18,15 @@ export default async function OrgChartPage() {
     }),
   ]);
 
+  // Số NV đang làm theo từng tổ
+  const teamCounts = await prisma.employee.groupBy({
+    by: ["teamId"],
+    where: { status: { in: ["ACTIVE", "PROBATION"] }, teamId: { not: null } },
+    _count: { id: true },
+  });
+  const teamCountMap: Record<string, number> = {};
+  for (const c of teamCounts) if (c.teamId) teamCountMap[c.teamId] = c._count.id;
+
   const countMap: Record<string, number> = {};
   for (const c of employeeCounts) {
     countMap[c.departmentId] = c._count.id;
@@ -68,7 +77,7 @@ export default async function OrgChartPage() {
       <OrgChartTabs
         departments={deptWithCounts}
         directorates={directorates.map((d) => ({ id: d.id, name: d.name, nameVi: d.nameVi }))}
-        productionTeams={productionTeams.map((t) => t.name)}
+        productionTeams={productionTeams.map((t) => ({ id: t.id, name: t.name, memberCount: t.memberCount, actual: teamCountMap[t.id] ?? 0 }))}
       />
 
       {/* Legend */}
