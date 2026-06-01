@@ -7,6 +7,7 @@ import { Plus, RefreshCw, X, Trash2, CheckSquare, Square, Users } from "lucide-r
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
 import { DateInput } from "@/components/shared/date-input";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 type CompanyEvent = {
   id: string; title: string; type: string; startDate: string; endDate: string;
@@ -63,7 +64,7 @@ export default function SuKienPage() {
   const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "MANAGER";
 
   async function handleDelete(id: string) {
-    if (!confirm("Xóa sự kiện này?")) return;
+    if (!(await confirmDialog({ message: "Xóa sự kiện này?", tone: "danger", confirmText: "Xóa" }))) return;
     await fetch(`/api/v1/events/${id}`, { method: "DELETE" });
     fetchEvents();
   }
@@ -240,7 +241,7 @@ function ChecklistModal({ eventId, canManage, onClose }: { eventId: string; canM
   }
 
   async function deleteItem(itemId: string) {
-    if (!confirm("Xóa mục này?")) return;
+    if (!(await confirmDialog({ message: "Xóa mục này?", tone: "danger", confirmText: "Xóa" }))) return;
     await fetch(`/api/v1/events/${eventId}/checklist/${itemId}`, { method: "DELETE" });
     fetchItems();
   }
@@ -431,7 +432,8 @@ function AttendeesModal({ eventId, canManage, myEmployeeId, onClose }: {
   }
 
   async function unenroll() {
-    if (!myEnrollment || !confirm("Hủy đăng ký tham gia?")) return;
+    if (!myEnrollment) return;
+    if (!(await confirmDialog("Hủy đăng ký tham gia?"))) return;
     await fetch(`/api/v1/events/${eventId}/attendees/${myEnrollment.id}`, { method: "DELETE" });
     fetchAttendees();
   }

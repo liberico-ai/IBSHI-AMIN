@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { FileUpload } from "@/components/shared/file-upload";
 import { DateInput } from "@/components/shared/date-input";
 import { BUCKETS } from "@/lib/minio-constants";
 import { formatDate, apiError } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import {
   Plus, RefreshCw, X, Check, Settings, Trash2, Calendar,
   ClipboardCheck, Clock, AlertCircle, FileText, ChevronRight, Edit3,
@@ -20,6 +21,12 @@ type Employee = {
   status: string; startDate: string;
   department: { id: string; name: string };
   position: { id: string; name: string };
+};
+type ProbationRow = {
+  id: string; code: string; fullName: string; jobRole?: string | null;
+  departmentName: string; startDate: string;
+  probation: { id: string; status: string; endDate: string | null; contractNumber: string; rejectedReason?: string | null } | null;
+  hasOnboarding: boolean;
 };
 type ChecklistItem = {
   id: string;
@@ -91,6 +98,10 @@ export default function OnboardingPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // HĐ thử việc
+  const [prob, setProb] = useState<ProbationRow[]>([]);
+  const [probCanApprove, setProbCanApprove] = useState(false);
+  const [showProbCreate, setShowProbCreate] = useState(false);
 
   function fetchList() {
     setLoading(true);
@@ -100,7 +111,25 @@ export default function OnboardingPage() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { fetchList(); }, []);
+  function fetchProb() {
+    fetch("/api/v1/recruitment/probation")
+      .then((r) => r.json())
+      .then((res) => { setProb(res.data || []); setProbCanApprove(!!res.canApprove); });
+  }
+
+  async function approveProb(empId: string, contractId: string, action: "APPROVE" | "REJECT") {
+    let reason: string | undefined;
+    if (action === "REJECT") {
+      if (!(await confirmDialog({ message: "Từ chối HĐ thử việc này?", tone: "danger", confirmText: "Từ chối" }))) return;
+    }
+    const res = await fetch(`/api/v1/employees/${empId}/contracts/${contractId}/approve`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, reason }),
+    });
+    if (!res.ok) { const d = await res.json(); await alertDialog("Lỗi: " + apiError(res.status, d.error)); return; }
+    fetchProb();
+  }
+
+  useEffect(() => { fetchList(); fetchProb(); }, []);
 
   const filtered = useMemo(() => {
     if (!filterStatus) return list;
@@ -163,12 +192,50 @@ export default function OnboardingPage() {
             </button>
           )}
           {canDo("recruitment", "create") && (
+            <button onClick={() => setShowProbCreate(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}>
+              <FileText size={14} /> Tạo HĐ thử việc
+            </button>
+          )}
+          {canDo("recruitment", "create") && (
             <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
               <Plus size={14} /> Tạo onboarding
             </button>
           )}
         </div>
       </div>
+
+      {/* HĐ thử việc chờ TP HCNS duyệt */}
+      {(() => {
+        const pending = prob.filter((p) => p.probation?.status === "PENDING_APPROVAL");
+        if (pending.length === 0) return null;
+        return (
+          <div className="rounded-xl border mb-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+            <div className="px-5 py-3 border-b text-[13px] font-semibold flex items-center gap-2" style={{ borderColor: "var(--ibs-border)" }}>
+              <FileText size={14} style={{ color: "var(--ibs-warning)" }} /> HĐ thử việc chờ duyệt ({pending.length})
+            </div>
+            <div className="divide-y" style={{ borderColor: "var(--ibs-border)" }}>
+              {pending.map((p) => (
+                <div key={p.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-medium">{p.fullName} <span className="font-normal text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>· {p.code} · {p.departmentName}</span></div>
+                    <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
+                      {p.probation!.contractNumber} · Hết thử việc: {p.probation!.endDate ? formatDate(new Date(p.probation!.endDate)) : "—"}
+                    </div>
+                  </div>
+                  {probCanApprove ? (
+                    <div className="flex gap-2 shrink-0">
+                      <button onClick={() => approveProb(p.id, p.probation!.id, "APPROVE")} className="text-[12px] px-2.5 py-1 rounded-md font-semibold text-white" style={{ background: "#10b981" }}>Duyệt</button>
+                      <button onClick={() => approveProb(p.id, p.probation!.id, "REJECT")} className="text-[12px] px-2.5 py-1 rounded-md font-semibold" style={{ background: "rgba(220,38,38,0.1)", color: "var(--ibs-danger)" }}>Từ chối</button>
+                    </div>
+                  ) : (
+                    <span className="text-[11px] font-semibold px-2 py-1 rounded-md shrink-0" style={{ background: "rgba(234,179,8,0.1)", color: "var(--ibs-warning)" }}>Chờ TP HCNS duyệt</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* List */}
       <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
@@ -189,10 +256,17 @@ export default function OnboardingPage() {
       </div>
 
       {/* Modals */}
+      {showProbCreate && (
+        <ProbationContractModal
+          rows={prob.filter((p) => !p.probation || p.probation.status === "REJECTED")}
+          onClose={() => setShowProbCreate(false)}
+          onCreated={() => { setShowProbCreate(false); fetchProb(); }}
+        />
+      )}
       {showCreate && (
         <CreateOnboardingModal
           onClose={() => setShowCreate(false)}
-          onCreated={() => { setShowCreate(false); fetchList(); }}
+          onCreated={() => { setShowCreate(false); fetchList(); fetchProb(); }}
         />
       )}
       {showConfig && (
@@ -266,7 +340,7 @@ function StatCard({ label, value, icon, color }: { label: string; value: number;
 
 // ============== CREATE MODAL ==============
 function CreateOnboardingModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [employees, setEmployees] = useState<(Employee & { hasOnboarding?: boolean })[]>([]);
+  const [rows, setRows] = useState<ProbationRow[]>([]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string>("");
   const [dueDate, setDueDate] = useState("");
@@ -275,23 +349,14 @@ function CreateOnboardingModal({ onClose, onCreated }: { onClose: () => void; on
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/v1/employees?status=PROBATION").then((r) => r.json()),
-      fetch("/api/v1/recruitment/onboarding").then((r) => r.json()),
-    ])
-      .then(([empRes, obRes]) => {
-        const haveOnboarding = new Set((obRes.data || []).map((o: Onboarding) => o.employeeId));
-        const list: (Employee & { hasOnboarding?: boolean })[] = (empRes.data || []).map((e: any) => ({
-          ...e,
-          hasOnboarding: haveOnboarding.has(e.id),
-        }));
-        setEmployees(list);
-      })
+    // Chỉ NV đã được TP HCNS DUYỆT HĐ thử việc (probation.status = ACTIVE) và chưa có onboarding.
+    fetch("/api/v1/recruitment/probation")
+      .then((r) => r.json())
+      .then((res) => setRows((res.data || []).filter((p: ProbationRow) => p.probation?.status === "ACTIVE" && !p.hasOnboarding)))
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = employees.filter((e) => {
-    if (e.hasOnboarding) return false;
+  const filtered = rows.filter((e) => {
     if (!search) return true;
     const q = search.toLowerCase();
     return e.fullName.toLowerCase().includes(q) || e.code.toLowerCase().includes(q);
@@ -322,7 +387,7 @@ function CreateOnboardingModal({ onClose, onCreated }: { onClose: () => void; on
       <div className="flex flex-col gap-3">
         <div>
           <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>
-            Tìm nhân viên (PROBATION, chưa có onboarding)
+            Tìm nhân viên (đã duyệt HĐ thử việc, chưa có onboarding)
           </label>
           <input
             value={search}
@@ -351,7 +416,7 @@ function CreateOnboardingModal({ onClose, onCreated }: { onClose: () => void; on
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-medium">{e.fullName}</div>
                   <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
-                    {e.code} · {(e as any).jobRole || e.position.name} · {e.department.name}
+                    {e.code} · {e.jobRole || "—"} · {e.departmentName}
                   </div>
                 </div>
                 {selected === e.id && <Check size={16} style={{ color: "var(--ibs-accent)" }} />}
@@ -379,6 +444,127 @@ function CreateOnboardingModal({ onClose, onCreated }: { onClose: () => void; on
         </div>
       </div>
     </ModalShell>
+  );
+}
+
+// ============== TẠO HĐ THỬ VIỆC (soạn + phát hành chờ TP HCNS duyệt) ==============
+function ProbationContractModal({ rows, onClose, onCreated }: { rows: ProbationRow[]; onClose: () => void; onCreated: () => void }) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [empId, setEmpId] = useState("");
+  const [search, setSearch] = useState("");
+  const [loadingDoc, setLoadingDoc] = useState(false);
+  const [contractNumber, setContractNumber] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [baseSalary, setBaseSalary] = useState("");
+  const [position, setPosition] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const filtered = rows.filter((r) => !search || r.fullName.toLowerCase().includes(search.toLowerCase()) || r.code.toLowerCase().includes(search.toLowerCase()));
+
+  function pick(id: string) {
+    setEmpId(id); setError(""); setLoadingDoc(true);
+    fetch(`/api/v1/employees/${id}/contracts/probation-prefill`)
+      .then((r) => r.json())
+      .then((res) => {
+        const s = res.data?.suggested || {};
+        setContractNumber(s.contractNumber || "");
+        setStartDate(s.startDate || "");
+        setEndDate(s.endDate || "");
+        setBaseSalary(s.baseSalary ? Number(s.baseSalary).toLocaleString("vi-VN") : "");
+        setPosition(s.jobTitle || "");
+        if (editorRef.current && res.data?.html) editorRef.current.innerHTML = res.data.html;
+      })
+      .catch(() => setError("Không tải được nội dung HĐ"))
+      .finally(() => setLoadingDoc(false));
+  }
+
+  const exec = (cmd: string) => { document.execCommand(cmd, false); editorRef.current?.focus(); };
+
+  async function publish() {
+    setError("");
+    if (!empId) { setError("Hãy chọn 1 nhân viên thử việc"); return; }
+    if (!startDate || !endDate) { setError("Thiếu ngày bắt đầu / kết thúc"); return; }
+    setSaving(true);
+    const res = await fetch(`/api/v1/employees/${empId}/contracts/probation`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contractNumber, startDate, endDate,
+        baseSalary: parseInt(baseSalary.replace(/\D/g, ""), 10) || 0,
+        position: position.trim() || null,
+        documentHtml: editorRef.current?.innerHTML || null,
+      }),
+    });
+    setSaving(false);
+    if (res.ok) onCreated();
+    else { const d = await res.json(); setError(apiError(res.status, d.error)); }
+  }
+
+  const fcls = "w-full rounded-lg px-2.5 py-1.5 text-[12px] border outline-none";
+  const fst = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" } as React.CSSProperties;
+  const L = ({ children }: { children: React.ReactNode }) => <label className="text-[11px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>{children}</label>;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+      <div className="rounded-2xl w-full max-w-3xl p-6 max-h-[92vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[16px] font-bold">Tạo HĐ thử việc</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-3 p-2.5 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
+          ⓘ Chọn NV thử việc → kiểm tra thông tin (lương 85% tự fill, thời hạn 2 tháng) → <strong>Phát hành</strong>. HĐ sẽ chờ <strong>TP HCNS duyệt</strong> trước khi onboard.
+        </div>
+
+        {!empId ? (
+          <>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm tên / mã NV thử việc…" className={`${fcls} mb-2`} style={fst} />
+            <div className="rounded-lg border max-h-72 overflow-y-auto" style={{ borderColor: "var(--ibs-border)" }}>
+              {filtered.length === 0 ? (
+                <div className="p-4 text-center text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không có NV thử việc cần tạo HĐ</div>
+              ) : filtered.map((e) => (
+                <button key={e.id} onClick={() => pick(e.id)} className="w-full flex items-center justify-between gap-3 p-3 hover:bg-white/[0.03] text-left border-b last:border-0" style={{ borderColor: "rgba(51,65,85,0.3)" }}>
+                  <div>
+                    <div className="text-[13px] font-medium">{e.fullName}</div>
+                    <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{e.code} · {e.jobRole || "—"} · {e.departmentName}</div>
+                  </div>
+                  {e.probation?.status === "REJECTED" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: "rgba(220,38,38,0.1)", color: "var(--ibs-danger)" }}>Bị từ chối — soạn lại</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3 p-3 rounded-lg" style={{ background: "var(--ibs-bg)" }}>
+              <div className="col-span-2 md:col-span-1"><L>Số HĐLĐ (tự sinh)</L><input value={contractNumber} readOnly className={fcls} style={{ ...fst, opacity: 0.75 }} /></div>
+              <div><L>Loại HĐ</L><input value="Thử việc" readOnly className={fcls} style={{ ...fst, opacity: 0.75 }} /></div>
+              <div><L>Ngày bắt đầu *</L><DateInput value={startDate} onChange={(e) => setStartDate(e.target.value)} className={fcls} style={fst} /></div>
+              <div><L>Ngày kết thúc (2 tháng) *</L><DateInput value={endDate} onChange={(e) => setEndDate(e.target.value)} className={fcls} style={fst} /></div>
+              <div><L>Lương thử việc (85%)</L><input type="text" inputMode="numeric" value={baseSalary} onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setBaseSalary(d ? Number(d).toLocaleString("vi-VN") : ""); }} className={fcls} style={fst} /></div>
+              <div><L>Chức danh</L><input value={position} onChange={(e) => setPosition(e.target.value)} className={fcls} style={fst} /></div>
+            </div>
+            <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>NỘI DUNG HĐ THỬ VIỆC (sửa trực tiếp như Word)</div>
+            <div className="flex gap-1 mb-1">
+              <button type="button" onMouseDown={(e) => { e.preventDefault(); exec("bold"); }} className="px-2 py-1 rounded text-[12px] font-bold border" style={{ borderColor: "var(--ibs-border)" }}>B</button>
+              <button type="button" onMouseDown={(e) => { e.preventDefault(); exec("italic"); }} className="px-2 py-1 rounded text-[12px] italic border" style={{ borderColor: "var(--ibs-border)" }}>I</button>
+            </div>
+            {loadingDoc && <div className="text-[12px] py-4 text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải nội dung…</div>}
+            <div ref={editorRef} contentEditable suppressContentEditableWarning className="rounded-lg border p-4 text-[12.5px] overflow-y-auto leading-relaxed" style={{ background: "#fff", color: "#111", borderColor: "var(--ibs-border)", minHeight: 260, maxHeight: 340, display: loadingDoc ? "none" : "block" }} />
+          </>
+        )}
+
+        {error && <div className="text-[12px] text-red-500 mt-2">{error}</div>}
+        <div className="flex gap-2 justify-end mt-4">
+          {empId && <button onClick={() => setEmpId("")} className="px-4 py-2 rounded-lg text-[13px] border mr-auto" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>← Chọn NV khác</button>}
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          {empId && (
+            <button onClick={publish} disabled={saving || loadingDoc} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving || loadingDoc ? 0.6 : 1 }}>
+              {saving ? "Đang phát hành..." : "Phát hành HĐ thử việc"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -410,7 +596,7 @@ function OnboardingDetailModal({ data, canEdit, onClose, onChanged }: {
   }
 
   async function deleteItem(itemId: string) {
-    if (!confirm("Xóa mục này?")) return;
+    if (!(await confirmDialog({ message: "Xóa mục này?", tone: "danger", confirmText: "Xóa" }))) return;
     const res = await fetch(`/api/v1/recruitment/onboarding/${data.id}/items/${itemId}`, {
       method: "DELETE",
     });
@@ -627,7 +813,7 @@ function ChecklistItemRow({ item, canEdit, onUpdate, onDelete }: {
               await onUpdate({ attachmentUrl: res.url, isCompleted: true });
               setShowUpload(false);
             }}
-            onError={(msg) => alert(msg)}
+            onError={(msg) => void alertDialog(msg)}
           />
         </div>
       )}
@@ -759,7 +945,7 @@ function ExtendModal({ checklistId, currentDue, onClose, onExtended }: {
             folder={`onboarding/${checklistId}/extension`}
             label="Upload file scan (PDF/ảnh)"
             onUploaded={(res) => setDocUrl(res.url)}
-            onError={(msg) => alert(msg)}
+            onError={(msg) => void alertDialog(msg)}
             currentUrl={docUrl || undefined}
           />
         </div>
@@ -824,7 +1010,7 @@ function ConfigPositionRequirementsModal({ onClose }: { onClose: () => void }) {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Xoá yêu cầu này khỏi vị trí?")) return;
+    if (!(await confirmDialog({ message: "Xoá yêu cầu này khỏi vị trí?", tone: "danger", confirmText: "Xoá" }))) return;
     const res = await fetch(`/api/v1/position-requirements/${id}`, { method: "DELETE" });
     if (res.ok) setReqs((prev) => prev.filter((r) => r.id !== id));
   }

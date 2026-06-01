@@ -9,6 +9,7 @@ const CreateSchema = z.object({
   model: z.string().min(2),
   type: z.enum(["CAR", "VAN", "TRUCK", "MOTORBIKE", "PICKUP_TRUCK", "CONTAINER", "FORKLIFT"]),
   seats: z.number().int().min(1).default(5),
+  owner: z.string().optional().nullable(),
   driverName: z.string().optional().nullable(),
   nextMaintenanceDate: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),

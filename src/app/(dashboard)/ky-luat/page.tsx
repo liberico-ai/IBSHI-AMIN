@@ -9,6 +9,7 @@ import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 import { DateInput } from "@/components/shared/date-input";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 type Regulation = {
   id: string;
@@ -140,7 +141,7 @@ export default function KyLuatPage() {
   ];
 
   async function handleDeactivate(id: string) {
-    if (!confirm("Hủy kích hoạt quy định này?")) return;
+    if (!(await confirmDialog("Hủy kích hoạt quy định này?"))) return;
     await fetch(`/api/v1/regulations/${id}`, { method: "DELETE" });
     fetchRegulations();
   }

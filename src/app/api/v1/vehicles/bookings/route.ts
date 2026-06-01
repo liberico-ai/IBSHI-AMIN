@@ -9,6 +9,7 @@ const CreateSchema = z.object({
   vehicleId: z.string().uuid(),
   startDate: z.string(),
   endDate: z.string(),
+  origin: z.string().optional().nullable(),
   destination: z.string().min(2),
   purpose: VehiclePurposeEnum,
   passengers: z.number().int().min(1).default(1),
@@ -78,12 +79,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "CONFLICT", message: "Xe đã được đặt trong khoảng thời gian này" } }, { status: 409 });
   }
 
-  // Check maintenance overlap
+  // Check maintenance overlap — bảo trì lưu theo NGÀY (00:00) nên phải coi là TRỌN NGÀY:
+  // dùng đầu ngày của booking.start và cuối ngày của booking.end để so, tránh lọt booking
+  // vào buổi chiều ngày kết thúc bảo trì (vd bảo trì hết 28/05 mà đặt 28/05 10:00 vẫn lọt).
+  const bookStartDay = new Date(startDate); bookStartDay.setUTCHours(0, 0, 0, 0);
+  const bookEndDay = new Date(endDate); bookEndDay.setUTCHours(23, 59, 59, 999);
   const maintenance = await prisma.maintenanceRecord.findFirst({
     where: {
       vehicleId: parsed.data.vehicleId,
-      startDate: { lte: endDate },
-      OR: [{ endDate: null }, { endDate: { gte: startDate } }],
+      startDate: { lte: bookEndDay },
+      OR: [{ endDate: null }, { endDate: { gte: bookStartDay } }],
     },
   });
   if (maintenance) {

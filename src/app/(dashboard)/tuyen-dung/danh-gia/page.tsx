@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { FileUpload } from "@/components/shared/file-upload";
 import { DateInput } from "@/components/shared/date-input";
 import { BUCKETS } from "@/lib/minio-constants";
 import { formatDate, formatVND, apiError } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { PROBATION_CRITERIA, PROBATION_RATINGS, TIER_LABELS, type RatingKey } from "@/lib/probation-eval";
 import {
   Plus, RefreshCw, X, Check, ClipboardCheck, Clock, AlertCircle,
@@ -25,6 +26,11 @@ type Scores = {
   q9PerformsWell: boolean;
   q10SignContract: boolean;
 };
+type ContractDraft = {
+  contractNumber: string; contractType: string; startDate: string; endDate: string | null;
+  baseSalary: number; allowance: number; kpi: number;
+  jobTitle: string | null; workLocation: string | null; terms: string | null;
+};
 type Evaluation = {
   id: string;
   employeeId: string;
@@ -35,7 +41,8 @@ type Evaluation = {
   recommendedTier: string;
   selectedTier: string | null;
   comments: string | null;
-  status: "DRAFT" | "PENDING_DIRECTOR" | "APPROVED" | "REJECTED" | "SIGNED" | "FAILED";
+  status: "DRAFT" | "PENDING_DIRECTOR" | "APPROVED" | "CONTRACT_ISSUED" | "REJECTED" | "SIGNED" | "FAILED";
+  contractDraft?: ContractDraft | null;
   directorApprovedAt?: string | null;
   directorRejectedAt?: string | null;
   directorComments?: string | null;
@@ -52,6 +59,7 @@ const STATUS_INFO: Record<Evaluation["status"], { label: string; color: string; 
   DRAFT:             { label: "Nháp",                color: "var(--ibs-text-dim)", bg: "rgba(100,116,139,0.15)" },
   PENDING_DIRECTOR:  { label: "Chờ BGĐ duyệt",       color: "var(--ibs-accent)",   bg: "rgba(0,180,216,0.12)" },
   APPROVED:          { label: "BGĐ đã duyệt",         color: "var(--ibs-success)",  bg: "rgba(34,197,94,0.12)" },
+  CONTRACT_ISSUED:   { label: "Đợi ký hợp đồng",       color: "#f59e0b",             bg: "rgba(245,158,11,0.14)" },
   REJECTED:          { label: "Trả lại (đánh giá lại)", color: "var(--ibs-danger)", bg: "rgba(239,68,68,0.12)" },
   SIGNED:            { label: "Đã ký HĐ chính thức",  color: "#22c55e",             bg: "rgba(34,197,94,0.18)" },
   FAILED:            { label: "Chấm dứt thử việc",    color: "#dc2626",             bg: "rgba(220,38,38,0.18)" },
@@ -229,33 +237,37 @@ function StatCard({ label, value, icon, color }: { label: string; value: number;
 
 // ============== CREATE MODAL ==============
 function CreateEvalModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [employees, setEmployees] = useState<(Employee & { hasEval?: boolean })[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Chỉ NV đã được TP DUYỆT HĐ thử việc (probation.status = ACTIVE) VÀ còn ≤ 7 ngày là hết hạn thử việc.
     Promise.all([
-      fetch("/api/v1/employees?status=PROBATION&limit=200").then((r) => r.json()),
+      fetch("/api/v1/recruitment/probation").then((r) => r.json()),
       fetch("/api/v1/recruitment/probation-evaluation").then((r) => r.json()),
     ])
-      .then(([empRes, evalRes]) => {
+      .then(([probRes, evalRes]) => {
         const hasEval = new Set(
           (evalRes.data || [])
             .filter((e: Evaluation) => ["DRAFT", "PENDING_DIRECTOR", "APPROVED", "REJECTED"].includes(e.status))
             .map((e: Evaluation) => e.employeeId)
         );
-        const list: (Employee & { hasEval?: boolean })[] = (empRes.data || []).map((e: any) => ({
-          ...e,
-          hasEval: hasEval.has(e.id),
-        }));
+        const list = (probRes.data || [])
+          .filter((p: any) => {
+            if (p.probation?.status !== "ACTIVE" || hasEval.has(p.id)) return false;
+            if (!p.probation.endDate) return false;
+            const daysLeft = Math.ceil((new Date(p.probation.endDate).getTime() - Date.now()) / 864e5);
+            return daysLeft <= 7; // còn ≤ 1 tuần là hết hạn thử việc
+          })
+          .map((p: any) => ({ id: p.id, code: p.code, fullName: p.fullName, jobRole: p.jobRole, department: { name: p.departmentName } }));
         setEmployees(list);
       })
       .finally(() => setLoading(false));
   }, []);
 
   const filtered = employees.filter((e) => {
-    if (e.hasEval) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return e.fullName.toLowerCase().includes(q) || e.code.toLowerCase().includes(q);
@@ -266,7 +278,7 @@ function CreateEvalModal({ onClose, onCreated }: { onClose: () => void; onCreate
       <div className="flex flex-col gap-3">
         <div>
           <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>
-            Tìm NV (PROBATION, chưa có đánh giá đang xử lý)
+            NV đã duyệt HĐ thử việc & còn ≤ 1 tuần hết hạn thử việc
           </label>
           <input
             value={search}
@@ -295,7 +307,7 @@ function CreateEvalModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-medium">{e.fullName}</div>
                   <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
-                    {e.code} · {(e as any).jobRole || e.position.name} · {e.department.name}
+                    {e.code} · {(e as any).jobRole || "Nhân viên"}{(e as any).jobPosition ? ` · ${(e as any).jobPosition}` : ""} · {e.department.name}
                   </div>
                 </div>
                 {selected === e.id && <Check size={16} style={{ color: "var(--ibs-accent)" }} />}
@@ -470,15 +482,15 @@ function EvalDetailModal({ data, isBOM, canEdit, onClose, onChanged }: {
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const [tab, setTab] = useState<"view" | "approve" | "sign">("view");
+  const [tab, setTab] = useState<"view" | "approve" | "draft" | "sign">("view");
 
   return (
     <ModalShell title={`Đánh giá thử việc — ${data.employee.fullName}`} onClose={onClose} size="lg">
       {/* Header info */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 rounded-lg" style={{ background: "var(--ibs-bg)" }}>
         <Info label="Mã NV" value={data.employee.code} />
-        <Info label="Vị trí" value={((data.employee as any).jobRole || data.employee.position.name)} />
-        <Info label="Phòng ban" value={data.employee.department.name} />
+        <Info label="Chức vụ" value={((data.employee as any).jobRole || "Nhân viên")} />
+        <Info label="Vị trí / Phòng ban" value={`${(data.employee as any).jobPosition || data.employee.position.name} · ${data.employee.department.name}`} />
         <Info label="Trạng thái" value={
           <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg" style={{ background: STATUS_INFO[data.status].bg, color: STATUS_INFO[data.status].color }}>
             {STATUS_INFO[data.status].label}
@@ -573,6 +585,37 @@ function EvalDetailModal({ data, isBOM, canEdit, onClose, onChanged }: {
         </div>
       )}
 
+      {/* Nội dung HĐ đã soạn (Đợi ký hợp đồng) */}
+      {data.status === "CONTRACT_ISSUED" && data.contractDraft && (
+        <div className="mb-4 p-3 rounded-lg border text-[12px]" style={{ background: "rgba(245,158,11,0.06)", borderColor: "rgba(245,158,11,0.35)" }}>
+          <div className="flex items-center gap-2 font-semibold mb-2" style={{ color: "#f59e0b" }}>
+            <FileText size={14} /> Hợp đồng đã soạn — chờ ký
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div><span style={{ color: "var(--ibs-text-dim)" }}>Số HĐ:</span> <strong>{data.contractDraft.contractNumber}</strong></div>
+            <div><span style={{ color: "var(--ibs-text-dim)" }}>Loại:</span> <strong>{TIER_LABELS[data.contractDraft.contractType] || data.contractDraft.contractType}</strong></div>
+            <div><span style={{ color: "var(--ibs-text-dim)" }}>Từ ngày:</span> {formatDate(data.contractDraft.startDate)}</div>
+            <div><span style={{ color: "var(--ibs-text-dim)" }}>Đến ngày:</span> {data.contractDraft.endDate ? formatDate(data.contractDraft.endDate) : "Không thời hạn"}</div>
+            <div><span style={{ color: "var(--ibs-text-dim)" }}>Lương chính:</span> {data.contractDraft.baseSalary.toLocaleString("vi-VN")}đ</div>
+            <div><span style={{ color: "var(--ibs-text-dim)" }}>Phụ cấp + KPI:</span> {((data.contractDraft.allowance||0)+(data.contractDraft.kpi||0)).toLocaleString("vi-VN")}đ</div>
+            {data.contractDraft.jobTitle && <div><span style={{ color: "var(--ibs-text-dim)" }}>Chức danh:</span> {data.contractDraft.jobTitle}</div>}
+            {data.contractDraft.workLocation && <div><span style={{ color: "var(--ibs-text-dim)" }}>Nơi làm việc:</span> {data.contractDraft.workLocation}</div>}
+          </div>
+          <div className="flex gap-2 mt-3">
+            <a href={`/api/v1/recruitment/probation-evaluation/${data.id}/contract-pdf`} download
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold border"
+              style={{ borderColor: "#f59e0b", color: "#f59e0b" }}>
+              <FileText size={12} /> Tải PDF
+            </a>
+            <a href={`/api/v1/recruitment/probation-evaluation/${data.id}/contract-docx`} download
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold border"
+              style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }}>
+              <FileText size={12} /> Tải Word
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
         {/* BGĐ duyệt / từ chối */}
@@ -587,8 +630,15 @@ function EvalDetailModal({ data, isBOM, canEdit, onClose, onChanged }: {
           </>
         )}
 
-        {/* HCNS ký HĐ */}
+        {/* HCNS soạn thảo HĐ (BGĐ đã duyệt) */}
         {data.status === "APPROVED" && canEdit && (data.selectedTier || data.recommendedTier) !== "FAIL" && (
+          <button onClick={() => setTab("draft")} className="px-3 py-2 rounded-lg text-[12px] font-semibold flex items-center gap-1.5" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+            <FileText size={13} /> Soạn thảo HĐ
+          </button>
+        )}
+
+        {/* HCNS xác nhận đã ký (Đợi ký hợp đồng) */}
+        {data.status === "CONTRACT_ISSUED" && canEdit && (
           <button onClick={() => setTab("sign")} className="px-3 py-2 rounded-lg text-[12px] font-semibold flex items-center gap-1.5" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
             <Award size={13} /> Xác nhận đã ký HĐ
           </button>
@@ -598,7 +648,7 @@ function EvalDetailModal({ data, isBOM, canEdit, onClose, onChanged }: {
         {data.status === "APPROVED" && canEdit && (data.selectedTier || data.recommendedTier) === "FAIL" && (
           <button
             onClick={async () => {
-              if (!confirm("Xác nhận chấm dứt thử việc với NV này?")) return;
+              if (!(await confirmDialog({ message: "Xác nhận chấm dứt thử việc với nhân viên này?", tone: "danger", confirmText: "Chấm dứt" }))) return;
               const res = await fetch(`/api/v1/recruitment/probation-evaluation/${data.id}/mark-failed`, { method: "POST" });
               if (res.ok) { onChanged(); onClose(); }
             }}
@@ -617,6 +667,13 @@ function EvalDetailModal({ data, isBOM, canEdit, onClose, onChanged }: {
       {tab === "approve" && (
         <ApproveModal
           evaluationId={data.id}
+          onClose={() => setTab("view")}
+          onDone={() => { setTab("view"); onChanged(); onClose(); }}
+        />
+      )}
+      {tab === "draft" && (
+        <DraftContractModal
+          evaluation={data}
           onClose={() => setTab("view")}
           onDone={() => { setTab("view"); onChanged(); onClose(); }}
         />
@@ -702,38 +759,141 @@ function ApproveModal({ evaluationId, onClose, onDone }: { evaluationId: string;
   );
 }
 
-// ============== SIGN CONTRACT MODAL ==============
-function SignContractModal({ evaluation, onClose, onDone }: { evaluation: Evaluation; onClose: () => void; onDone: () => void }) {
+// ============== DRAFT CONTRACT MODAL (soạn thảo văn bản → phát hành) ==============
+function DraftContractModal({ evaluation, onClose, onDone }: { evaluation: Evaluation; onClose: () => void; onDone: () => void }) {
   const tier = evaluation.selectedTier || evaluation.recommendedTier;
-  const [contractNumber, setContractNumber] = useState("");
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(true);
+  const [employeeCode, setEmployeeCode] = useState("");
   const [startDate, setStartDate] = useState("");
   const [baseSalary, setBaseSalary] = useState<string>("");
+  const [allowance, setAllowance] = useState<string>("");
+  const [kpi, setKpi] = useState<string>("");
+  const [jobTitle, setJobTitle] = useState("");
+  const [workLocation, setWorkLocation] = useState("");
+  const [terms, setTerms] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  // Tải nội dung HĐ pre-fill (HTML) + thông tin gợi ý
+  useEffect(() => {
+    fetch(`/api/v1/recruitment/probation-evaluation/${evaluation.id}/contract-prefill`)
+      .then((r) => r.json())
+      .then((res) => {
+        const s = res.data?.suggested || {};
+        setEmployeeCode(s.employeeCode || "");
+        setStartDate(s.startDate || "");
+        setBaseSalary(s.baseSalary ? String(s.baseSalary) : "");
+        setAllowance(s.allowance ? String(s.allowance) : "");
+        setKpi(s.kpi ? String(s.kpi) : "");
+        setJobTitle(s.jobTitle || "");
+        setWorkLocation(s.workLocation || "");
+        setTerms(s.terms || "");
+        if (editorRef.current && res.data?.html) editorRef.current.innerHTML = res.data.html;
+      })
+      .finally(() => setLoading(false));
+  }, [evaluation.id]);
+
+  const exec = (cmd: string) => { document.execCommand(cmd, false); editorRef.current?.focus(); };
+
+  // Số HĐLĐ cố định: <mã NV>/<năm ký>/HĐLĐ/IBS HI — không cho sửa.
+  const contractNumber = employeeCode && startDate ? `${employeeCode}/${new Date(startDate).getFullYear()}/HĐLĐ/IBS HI` : "";
+
+  const Money = ({ v, set }: { v: string; set: (s: string) => void }) => (
+    <div className="relative">
+      <input type="text" inputMode="numeric" value={v ? formatVND(Number(v)) : ""} onChange={(e) => set(e.target.value.replace(/[^\d]/g, ""))} placeholder="0"
+        className="w-full rounded-lg px-2 py-1.5 pr-6 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] pointer-events-none" style={{ color: "var(--ibs-text-dim)" }}>đ</span>
+    </div>
+  );
+
+  async function handleSubmit() {
+    if (!contractNumber.trim() || !startDate || !baseSalary) { setError("Cần số HĐ, ngày bắt đầu và lương chính"); return; }
+    setSaving(true); setError("");
+    const res = await fetch(`/api/v1/recruitment/probation-evaluation/${evaluation.id}/issue-contract`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contractNumber: contractNumber.trim(),
+        startDate: new Date(startDate).toISOString(),
+        baseSalary: Number(baseSalary), allowance: Number(allowance) || 0, kpi: Number(kpi) || 0,
+        jobTitle: jobTitle.trim() || null, workLocation: workLocation.trim() || null, terms: terms.trim() || null,
+        contractHtml: editorRef.current?.innerHTML || null,
+      }),
+    });
+    setSaving(false);
+    if (res.ok) onDone();
+    else { const d = await res.json(); setError(apiError(res.status, d.error)); }
+  }
+
+  const L = ({ children }: { children: React.ReactNode }) => <label className="text-[11px] font-medium block" style={{ color: "var(--ibs-text-dim)" }}>{children}</label>;
+  const fcls = "w-full rounded-lg px-2 py-1.5 text-[12px] border";
+  const fst = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" } as React.CSSProperties;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+      <div className="rounded-2xl w-full max-w-3xl p-6 max-h-[92vh] overflow-y-auto flex flex-col" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[16px] font-bold">Soạn thảo hợp đồng lao động — {TIER_LABELS[tier]}</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-3 p-2.5 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
+          ⓘ Thông tin đã điền sẵn từ Thư mời + hồ sơ NV — anh chỉ cần <strong>chỉnh sửa &amp; xác nhận</strong> rồi <strong>Phát hành</strong> (sinh file Word/PDF để in, trạng thái → Đợi ký hợp đồng).
+        </div>
+
+        {/* Thông tin hệ thống (đã điền sẵn) */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3 p-3 rounded-lg" style={{ background: "var(--ibs-bg)" }}>
+          <div className="col-span-2 md:col-span-1"><L>Số HĐLĐ (tự sinh)</L><input value={contractNumber} readOnly title="Số HĐ tự sinh theo mã NV/năm ký — không sửa" className={fcls} style={{ ...fst, opacity: 0.75, cursor: "not-allowed" }} /></div>
+          <div><L>Ngày bắt đầu *</L><DateInput value={startDate} onChange={(e) => setStartDate(e.target.value)} className={fcls} style={fst} /></div>
+          <div><L>Lương chính (BHXH) *</L><Money v={baseSalary} set={setBaseSalary} /></div>
+          <div><L>Phụ cấp</L><Money v={allowance} set={setAllowance} /></div>
+          <div><L>KPI</L><Money v={kpi} set={setKpi} /></div>
+          <div><L>Chức danh</L><input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} className={fcls} style={fst} /></div>
+        </div>
+
+        {/* Trình soạn thảo văn bản HĐ */}
+        <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>NỘI DUNG HỢP ĐỒNG (sửa trực tiếp như Word)</div>
+        <div className="flex gap-1 mb-1">
+          <button type="button" onMouseDown={(e) => { e.preventDefault(); exec("bold"); }} className="px-2 py-1 rounded text-[12px] font-bold border" style={{ borderColor: "var(--ibs-border)" }}>B</button>
+          <button type="button" onMouseDown={(e) => { e.preventDefault(); exec("italic"); }} className="px-2 py-1 rounded text-[12px] italic border" style={{ borderColor: "var(--ibs-border)" }}>I</button>
+          <button type="button" onMouseDown={(e) => { e.preventDefault(); exec("insertUnorderedList"); }} className="px-2 py-1 rounded text-[12px] border" style={{ borderColor: "var(--ibs-border)" }}>• List</button>
+        </div>
+        {loading && <div className="text-[12px] py-4 text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải nội dung hợp đồng…</div>}
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          className="rounded-lg border p-4 text-[12.5px] overflow-y-auto leading-relaxed"
+          style={{ background: "#fff", color: "#111", borderColor: "var(--ibs-border)", minHeight: 300, maxHeight: 380, display: loading ? "none" : "block" }}
+        />
+
+        {error && <div className="text-[12px] text-red-500 mt-2">{error}</div>}
+        <div className="flex gap-2 justify-end mt-4">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button onClick={handleSubmit} disabled={saving || loading} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: saving || loading ? 0.7 : 1 }}>
+            {saving ? "Đang phát hành..." : "Phát hành hợp đồng"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============== SIGN CONTRACT MODAL (Đợi ký → xác nhận đã ký) ==============
+function SignContractModal({ evaluation, onClose, onDone }: { evaluation: Evaluation; onClose: () => void; onDone: () => void }) {
   const [signedUrl, setSignedUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSubmit() {
-    if (!contractNumber.trim() || !startDate || !baseSalary || !signedUrl) {
-      setError("Cần điền đủ thông tin");
-      return;
-    }
+    if (!signedUrl) { setError("Cần upload file HĐ đã ký"); return; }
     setSaving(true);
     const res = await fetch(`/api/v1/recruitment/probation-evaluation/${evaluation.id}/sign-contract`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contractNumber: contractNumber.trim(),
-        startDate: new Date(startDate).toISOString(),
-        baseSalary: Number(baseSalary),
-        signedContractUrl: signedUrl,
-      }),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signedContractUrl: signedUrl }),
     });
     setSaving(false);
     if (res.ok) onDone();
-    else {
-      const data = await res.json();
-      setError(apiError(res.status, data.error));
-    }
+    else { const data = await res.json(); setError(apiError(res.status, data.error)); }
   }
 
   return (
@@ -743,64 +903,21 @@ function SignContractModal({ evaluation, onClose, onDone }: { evaluation: Evalua
           <div className="text-[16px] font-bold">Xác nhận đã ký HĐ chính thức</div>
           <button onClick={onClose}><X size={18} /></button>
         </div>
-
         <div className="text-[12px] mb-3 p-3 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
-          ⓘ Sau khi xác nhận: NV sẽ chuyển sang trạng thái <strong>ACTIVE</strong>, hệ thống tạo HĐLĐ mới và lưu vào hồ sơ M1. Tier: <strong>{TIER_LABELS[tier]}</strong>.
+          ⓘ Upload bản scan HĐ đã ký → NV chuyển sang <strong>Đang làm việc</strong>, hệ thống tạo HĐLĐ chính thức (số {evaluation.contractDraft?.contractNumber || ""}) vào hồ sơ M1.
         </div>
-
-        <div className="flex flex-col gap-3">
-          <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Số HĐLĐ *</label>
-            <input value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} placeholder="vd 045/2026/HĐLĐ/IBS HI"
-              className="w-full rounded-lg px-3 py-2 text-[13px] border"
-              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
-            />
-          </div>
-          <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày bắt đầu HĐ *</label>
-            <DateInput value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              className="w-full rounded-lg px-3 py-2 text-[13px] border"
-              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
-            />
-          </div>
-          <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Mức lương chính (VND/tháng) *</label>
-            <div className="relative">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={baseSalary ? formatVND(Number(baseSalary)) : ""}
-                onChange={(e) => {
-                  const raw = e.target.value.replace(/[^\d]/g, "");
-                  setBaseSalary(raw);
-                }}
-                placeholder="vd 8.000.000"
-                className="w-full rounded-lg px-3 py-2 pr-12 text-[13px] border"
-                style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold pointer-events-none" style={{ color: "var(--ibs-text-dim)" }}>
-                VNĐ
-              </span>
-            </div>
-            <div className="text-[10px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>
-              ⓘ Lương cơ bản thoả thuận với NV (chưa gồm phụ cấp). Đây sẽ là <strong>tham chiếu gốc</strong> cho M7 tính lương HC, BHXH, TNCN hàng tháng.
-            </div>
-          </div>
-          <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>File scan HĐ đã ký *</label>
-            <FileUpload
-              bucket={BUCKETS.HR_DOCUMENTS}
-              folder={`contracts/${evaluation.employee.code}`}
-              label="Upload file scan HĐ (PDF/ảnh)"
-              currentUrl={signedUrl || undefined}
-              onUploaded={(res) => setSignedUrl(res.url)}
-              onError={(msg) => alert(msg)}
-            />
-          </div>
+        <div>
+          <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>File scan HĐ đã ký *</label>
+          <FileUpload
+            bucket={BUCKETS.HR_DOCUMENTS}
+            folder={`contracts/${evaluation.employee.code}`}
+            label="Upload file scan HĐ (PDF/ảnh)"
+            currentUrl={signedUrl || undefined}
+            onUploaded={(res) => setSignedUrl(res.url)}
+            onError={(msg) => void alertDialog(msg)}
+          />
         </div>
-
         {error && <div className="text-[12px] text-red-500 mt-2">{error}</div>}
-
         <div className="flex gap-2 justify-end mt-4">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
           <button onClick={handleSubmit} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>

@@ -5,6 +5,7 @@ import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 import { hashSync } from "bcryptjs";
 import { randomBytes } from "crypto";
+import { uniqueCompanyEmail } from "@/lib/email-gen";
 
 const CreateEmployeeSchema = z.object({
   fullName: z.string().min(2).max(100),
@@ -125,17 +126,8 @@ export async function POST(request: NextRequest) {
   const num = parseInt(lastCode.replace("IBS-", ""), 10);
   const newCode = `IBS-${String(num + 1).padStart(3, "0")}`;
 
-  // Generate email from name — check uniqueness, add suffix if collision
-  const nameParts = data.fullName.toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")   // strip Vietnamese diacritics
-    .replace(/[^a-z0-9\s]/g, "").split(" ").filter(Boolean);
-  const emailBase = nameParts[nameParts.length - 1] + "." + nameParts[0].charAt(0);
-  let email = `${emailBase}@ibs.com.vn`;
-  let suffix = 2;
-  while (await prisma.user.findFirst({ where: { email } })) {
-    email = `${emailBase}${suffix}@ibs.com.vn`;
-    suffix++;
-  }
+  // Email công ty theo tên: <tên><chữ đầu họ+đệm>@ibs.com.vn (sonpt@…), tự thêm số nếu trùng.
+  const email = await uniqueCompanyEmail(data.fullName, async (e) => !!(await prisma.user.findFirst({ where: { email: e } })));
 
   // Secure random password (12-char hex) — force change on first login
   const defaultPassword = randomBytes(6).toString("hex"); // 12-char hex

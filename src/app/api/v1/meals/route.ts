@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
-import { MEAL_UNIT_PRICE } from "@/lib/constants";
+import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR } from "@/lib/constants";
 
 const RegisterSchema = z.object({
   departmentId: z.string().uuid(),
@@ -11,6 +11,9 @@ const RegisterSchema = z.object({
   lunchCount: z.number().int().min(0).default(0),
   dinnerCount: z.number().int().min(0).default(0),
   guestCount: z.number().int().min(0).default(0),
+  subcontractorCount: z.number().int().min(0).default(0),
+  subcontractorName: z.string().optional().nullable(),
+  guestUnitPrice: z.number().int().min(0).default(0),
   specialNote: z.string().optional().nullable(),
 });
 
@@ -33,29 +36,57 @@ export async function GET(request: NextRequest) {
       include: { department: { select: { id: true, name: true } } },
     });
 
-    // Aggregate per department
-    const deptMap: Record<string, { name: string; lunchCount: number; dinnerCount: number; guestCount: number }> = {};
+    // Aggregate per department — đơn giá theo đối tượng:
+    //   CBNV (trưa + tối OT) = 20k, Thầu phụ = 28k, Khách = đơn giá nhập tay (guestUnitPrice).
+    const deptMap: Record<string, { name: string; lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number; cost: number }> = {};
     for (const r of regs) {
       if (!deptMap[r.departmentId]) {
-        deptMap[r.departmentId] = { name: r.department.name, lunchCount: 0, dinnerCount: 0, guestCount: 0 };
+        deptMap[r.departmentId] = { name: r.department.name, lunchCount: 0, dinnerCount: 0, guestCount: 0, subcontractorCount: 0, cost: 0 };
       }
-      deptMap[r.departmentId].lunchCount += r.lunchCount;
-      deptMap[r.departmentId].dinnerCount += r.dinnerCount;
-      deptMap[r.departmentId].guestCount += r.guestCount;
+      const d = deptMap[r.departmentId];
+      d.lunchCount += r.lunchCount;
+      d.dinnerCount += r.dinnerCount;
+      d.guestCount += r.guestCount;
+      d.subcontractorCount += r.subcontractorCount;
+      d.cost += (r.lunchCount + r.dinnerCount) * MEAL_PRICE_EMPLOYEE
+              + r.subcontractorCount * MEAL_PRICE_SUBCONTRACTOR
+              + r.guestCount * (r.guestUnitPrice || MEAL_UNIT_PRICE);
+    }
+
+    // Cộng thêm các phiếu ĐĂNG KÝ BỔ SUNG đã được duyệt (APPROVED) trong tháng.
+    const suppApproved = await prisma.mealSupplementaryRequest.findMany({
+      where: { status: "APPROVED", date: { gte: startOfMonth, lte: endOfMonth } },
+      include: { department: { select: { id: true, name: true } } },
+    });
+    for (const s of suppApproved) {
+      if (!deptMap[s.departmentId]) {
+        deptMap[s.departmentId] = { name: s.department.name, lunchCount: 0, dinnerCount: 0, guestCount: 0, subcontractorCount: 0, cost: 0 };
+      }
+      const d = deptMap[s.departmentId];
+      if (s.personType === "SUBCONTRACTOR") {
+        d.subcontractorCount += s.quantity;
+        d.cost += s.quantity * MEAL_PRICE_SUBCONTRACTOR;
+      } else if (s.personType === "GUEST") {
+        d.guestCount += s.quantity;
+        d.cost += s.quantity * (s.guestUnitPrice || MEAL_UNIT_PRICE);
+      } else {
+        if (s.mealType === "DINNER") d.dinnerCount += s.quantity; else d.lunchCount += s.quantity;
+        d.cost += s.quantity * MEAL_PRICE_EMPLOYEE;
+      }
     }
 
     const data = Object.entries(deptMap)
       .map(([deptId, d]) => {
-        const totalMeals = d.lunchCount + d.dinnerCount + d.guestCount;
+        const totalMeals = d.lunchCount + d.dinnerCount + d.guestCount + d.subcontractorCount;
         return {
           departmentId: deptId,
           departmentName: d.name,
           lunchCount: d.lunchCount,
           dinnerCount: d.dinnerCount,
           guestCount: d.guestCount,
+          subcontractorCount: d.subcontractorCount,
           totalMeals,
-          totalCost: totalMeals * MEAL_UNIT_PRICE,
-          unitPrice: MEAL_UNIT_PRICE,
+          totalCost: d.cost,
         };
       })
       .sort((a, b) => b.totalCost - a.totalCost);
@@ -126,7 +157,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
   }
 
-  const { departmentId, date, lunchCount, dinnerCount, guestCount, specialNote } = parsed.data;
+  const { departmentId, date, lunchCount, dinnerCount, guestCount, subcontractorCount, subcontractorName, guestUnitPrice, specialNote } = parsed.data;
 
   // MANAGER can only register for their own department
   if (!canDo(userRole, "meals", "manageCosts")) {
@@ -140,8 +171,8 @@ export async function POST(request: NextRequest) {
 
   const reg = await prisma.mealRegistration.upsert({
     where: { departmentId_date: { departmentId, date: new Date(date) } },
-    create: { departmentId, date: new Date(date), lunchCount, dinnerCount, guestCount, specialNote, registeredBy },
-    update: { lunchCount, dinnerCount, guestCount, specialNote },
+    create: { departmentId, date: new Date(date), lunchCount, dinnerCount, guestCount, subcontractorCount, subcontractorName: subcontractorName || null, guestUnitPrice, specialNote, registeredBy },
+    update: { lunchCount, dinnerCount, guestCount, subcontractorCount, subcontractorName: subcontractorName || null, guestUnitPrice, specialNote },
     include: { department: { select: { id: true, name: true } } },
   });
 

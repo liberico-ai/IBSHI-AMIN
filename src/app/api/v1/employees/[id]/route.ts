@@ -25,7 +25,7 @@ export async function GET(
       position: true,
       team: true,
       user: { select: { email: true, isActive: true } },
-      contracts: { orderBy: { startDate: "desc" } },
+      contracts: { orderBy: { startDate: "desc" }, include: { addendums: { orderBy: { createdAt: "desc" } } } },
       certificates: { orderBy: { expiryDate: "asc" } },
       workHistory: { orderBy: { effectiveDate: "desc" } },
       leaveBalances: { where: { year: new Date().getFullYear() } },

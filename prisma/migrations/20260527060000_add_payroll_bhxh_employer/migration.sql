@@ -1,0 +1,1 @@
+ALTER TABLE "PayrollRecord" ADD COLUMN "bhxhEmployer" INTEGER NOT NULL DEFAULT 0;

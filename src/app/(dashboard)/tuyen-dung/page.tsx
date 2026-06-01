@@ -327,12 +327,17 @@ export default function TuyenDungPage() {
               body: JSON.stringify(payload),
             });
             fetchCandidates();
-            // Cập nhật modal in-place — KHÔNG đóng, để user thấy stage mới
-            setShowCandidateDetail((prev) =>
-              prev && prev.candidate.id === id
-                ? { ...prev, candidate: { ...prev.candidate, ...payload } as Candidate }
-                : prev
-            );
+            // Sau khi hẹn lịch PV (SCREENING → INTERVIEW) → ĐÓNG modal.
+            // User bấm vào tên ứng viên (giờ ở trạng thái Hẹn PV) thì mới mở modal đánh giá PV.
+            if (data.interviewDate && cs === "SCREENING") {
+              setShowCandidateDetail(null);
+            } else {
+              setShowCandidateDetail((prev) =>
+                prev && prev.candidate.id === id
+                  ? { ...prev, candidate: { ...prev.candidate, ...payload } as Candidate }
+                  : prev
+              );
+            }
           }}
         />
       )}
@@ -477,9 +482,14 @@ function NewCandidateModal({ requests, onClose, onSuccess }: {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError("");
+    const email = form.email.trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Vui lòng nhập email hợp lệ (bắt buộc — dùng để gửi thư mời nhận việc).");
+      return;
+    }
     setSaving(true);
-    const body: any = { recruitmentId: form.recruitmentId, fullName: form.fullName, phone: form.phone };
-    if (form.email) body.email = form.email;
+    const body: any = { recruitmentId: form.recruitmentId, fullName: form.fullName, phone: form.phone, email };
     if (form.referredBy) body.referredBy = form.referredBy;
     if (form.resumeUrl) body.resumeUrl = form.resumeUrl;
     const res = await fetch("/api/v1/recruitment/candidates", {
@@ -520,8 +530,9 @@ function NewCandidateModal({ requests, onClose, onSuccess }: {
               placeholder="0901234567" />
           </div>
           <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Email</label>
-            <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Email *</label>
+            <input type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+              placeholder="ungvien@email.com"
               className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
           </div>
           <div>

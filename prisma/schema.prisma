@@ -64,6 +64,8 @@ enum ContractStatus {
   EXPIRED
   TERMINATED
   RENEWED
+  PENDING_APPROVAL
+  REJECTED
 }
 
 enum CertificateStatus {
@@ -102,6 +104,8 @@ enum LeaveType {
   MATERNITY
   PATERNITY
   UNPAID
+  WORK_ACCIDENT
+  STUDY
 }
 
 enum ApprovalStatus {
@@ -192,6 +196,8 @@ model User {
   notifications Notification[]
   auditLogs     AuditLog[]
   mealRegistrations MealRegistration[] @relation("mealRegistrations")
+  mealSuppRequested MealSupplementaryRequest[] @relation("mealSuppRequester")
+  mealSuppApproved  MealSupplementaryRequest[] @relation("mealSuppApprover")
 }
 
 model Directorate {
@@ -225,6 +231,7 @@ model Department {
   kpiScores           KPIScore[]
   safetyBriefings     SafetyBriefing[]
   mealRegistrations   MealRegistration[]
+  mealSupplementaryRequests MealSupplementaryRequest[]
   mealCostReports     MealCostReport[]
   createdAt           DateTime             @default(now())
 }
@@ -277,6 +284,8 @@ model Employee {
   jobRole             String? // Chức vụ: Công nhân / Tổ trưởng / Nhân viên ...
   jobPosition         String? // Vị trí công việc: Thợ hàn / Thợ mài ...
   skillLevel          String? // Cấp bậc / Bậc thợ: "Bậc 5" ...
+  responsibilityAllowance Int @default(0) // Phụ cấp trách nhiệm (Tổ trưởng/Trưởng phòng) — CHỈ hiển thị, không vào Gross
+  farAllowance        Int @default(0) // Phụ cấp nhà xa >=20km (200k) — CHỈ hiển thị
   startDate           DateTime
   status              EmployeeStatus @default(ACTIVE)
   salaryGrade         Int? // 1-7
@@ -307,6 +316,7 @@ model Employee {
   disciplinaryActions DisciplinaryAction[]
   payrollRecords      PayrollRecord[]
   kpiOverrides        PayrollKpiOverride[]
+  payrollManualInputs PayrollManualInput[]
   stationeryRequests  StationeryRequest[]  @relation("stationeryRequester")
   roomBookings        RoomBooking[]        @relation("bookingRequester")
   bookingAttendees    BookingAttendee[]    @relation("bookingAttendee")
@@ -344,14 +354,57 @@ model Contract {
   insuranceSalary Int? // Mức lương đóng BHXH (có thể khác baseSalary)
   allowance      Int? // VND — Tổng phụ cấp (đầu vào cho M7 tính lương)
   allowances     Json? // {phone, fuel, housing, kpi, ...}
+  documentHtml   String? // Nội dung HĐ đã soạn (HTML) để tải lại Word/PDF
   status         ContractStatus @default(ACTIVE)
+  approvedBy     String?   // TP HCNS duyệt (cho HĐ thử việc cần duyệt)
+  approvedAt     DateTime?
+  rejectedReason String?
   fileUrl        String?
   expiringAlertSentAt DateTime? // null = chưa gửi alert hết hạn
   createdAt      DateTime       @default(now())
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  addendums ContractAddendum[]
 
   @@index([employeeId])
+}
+
+// Phụ lục hợp đồng — điều chỉnh các điều khoản trên HĐ đang hiệu lực (không tạo HĐ mới).
+//   Vòng đời: PENDING_APPROVAL → (TP HCNS duyệt) APPROVED → (upload scan đã ký) SIGNED → áp giá trị vào HĐ gốc.
+model ContractAddendum {
+  id              String   @id @default(uuid())
+  contractId      String
+  addendumNumber  String   // VD: "PL01-<contractNumber>"
+  effectiveDate   DateTime // ngày hiệu lực (nằm trong khoảng HĐ gốc)
+  // Snapshot cũ → mới (chỉ lưu trường có thay đổi)
+  oldJobRole      String?
+  newJobRole      String?
+  oldJobPosition  String?
+  newJobPosition  String?
+  oldBaseSalary   Int?
+  newBaseSalary   Int?
+  oldAllowance    Int?  // (legacy) tổng phụ cấp — không dùng nữa, để tương thích
+  newAllowance    Int?
+  oldKpi          Int?  // PC KPI cũ
+  newKpi          Int?  // PC KPI mới
+  oldFarAllowance      Int?  // PC nhà xa cũ
+  newFarAllowance      Int?
+  oldPositionAllowance Int?  // PC chức vụ cũ
+  newPositionAllowance Int?
+  documentHtml    String?  // nội dung phụ lục (HTML)
+  fileUrl         String?  // bản scan đã ký
+  status          String   @default("PENDING_APPROVAL") // PENDING_APPROVAL | APPROVED | SIGNED | REJECTED
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedReason  String?
+  signedAt        DateTime?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@index([status])
 }
 
 model Dependent {
@@ -414,6 +467,8 @@ model AttendanceRecord {
   workHours  Float            @default(0)
   status     AttendanceStatus @default(PRESENT)
   otHours    Float            @default(0)
+  paidLeaveDays  Float        @default(0) // ngày nghỉ phép CÓ LƯƠNG trong ngày (AL): 0 / 0.5 / 1 — từ dòng "nghỉ" file công
+  leaveCode  String?          // mã nghỉ gốc từ file công (AL/UL/SL/ML/L...) để tra cứu
   note       String?
   createdBy  String
   createdAt  DateTime         @default(now())
@@ -780,6 +835,7 @@ model PayrollRecord {
   standardDays        Int      @default(26)
   workDays            Float    @default(0)
   otHours             Float    @default(0)
+  otConvertedHours    Float    @default(0)
   baseSalary          Int
   pieceRateSalary     Int      @default(0)
   hazardAllowance     Int      @default(0)
@@ -791,9 +847,11 @@ model PayrollRecord {
   bhxh                Int      @default(0)
   bhyt                Int      @default(0)
   bhtn                Int      @default(0)
+  bhxhEmployer        Int      @default(0)
   tncn                Int      @default(0)
   deductions          Int      @default(0)
   netSalary           Int      @default(0)
+  detail              Json?     // snapshot chi tiết tính lương (OT theo loại, các khoản tiền, khấu trừ) — cho phiếu lương
   notes               String?
   createdAt           DateTime @default(now())
 
@@ -807,6 +865,25 @@ model PayrollRecord {
 // KPI / phụ cấp override theo từng kỳ lương (month, year).
 // Khi tính lương kỳ X, ưu tiên giá trị ở đây thay vì Contract.allowances.kpi
 // (vì KPI/phụ cấp có thể biến động theo tháng — kỳ trước ≠ kỳ sau).
+// Đầu vào nhập tay theo kỳ (lương sản phẩm/khoán + điều chỉnh) — kế toán nhập/import, cộng vào Gross.
+// Tách khỏi PayrollRecord (bị xoá-ghi lại mỗi lần tính) để không mất khi tính lại.
+model PayrollManualInput {
+  id         String   @id @default(uuid())
+  employeeId String
+  month      Int
+  year       Int
+  pieceRate  Int      @default(0) // Lương sản phẩm / khoán theo sản lượng
+  adjustment Int      @default(0) // Điều chỉnh/bổ sung tay (có thể âm)
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, month, year])
+  @@index([month, year])
+}
+
 model PayrollKpiOverride {
   id             String   @id @default(uuid())
   employeeId     String
@@ -931,6 +1008,7 @@ model Vehicle {
   model               String
   type                VehicleType
   seats               Int           @default(5)
+  owner               String?       // Chủ sở hữu (IBS HI / Lisemco / Địa Việt...)
   driverName          String?       // Lái xe phụ trách
   status              VehicleStatus @default(AVAILABLE)
   nextMaintenanceDate DateTime?     // Ngày bảo dưỡng tiếp theo
@@ -950,6 +1028,7 @@ model VehicleBooking {
   requestedBy    String
   startDate      DateTime
   endDate        DateTime
+  origin         String?        // Điểm đi
   destination    String
   purpose        VehiclePurpose @default(OTHER)
   passengers     Int            @default(1)
@@ -977,6 +1056,9 @@ model MealRegistration {
   lunchCount   Int       @default(0)
   dinnerCount  Int       @default(0)
   guestCount   Int       @default(0)
+  subcontractorCount Int  @default(0)
+  subcontractorName String?
+  guestUnitPrice Int      @default(0)
   specialNote  String?
   registeredBy String
   createdAt    DateTime  @default(now())
@@ -986,6 +1068,48 @@ model MealRegistration {
 
   @@unique([departmentId, date])
   @@index([departmentId])
+  @@index([date])
+}
+
+// Đăng ký suất ăn BỔ SUNG — đăng ký 24/7, cần TP HCNS duyệt. Mỗi lần là 1 phiếu riêng.
+model MealSupplementaryRequest {
+  id           String    @id @default(uuid())
+  departmentId String
+  date         DateTime
+  mealType     String    @default("LUNCH")    // LUNCH | DINNER
+  personType   String    @default("EMPLOYEE")  // EMPLOYEE | GUEST | SUBCONTRACTOR
+  quantity     Int       @default(1)
+  guestUnitPrice Int     @default(0)
+  subcontractorName String?
+  reason       String
+  specialNote  String?
+  status       String    @default("PENDING")   // PENDING | APPROVED | REJECTED
+  rejectedReason String?
+  requestedBy  String
+  approvedBy   String?
+  approvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  requester  User       @relation("mealSuppRequester", fields: [requestedBy], references: [id], onDelete: Restrict)
+  approver   User?      @relation("mealSuppApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([date])
+  @@index([departmentId])
+}
+
+// Chi phí mua thực phẩm theo ngày (sổ chợ nhà bếp): mỗi dòng = 1 mặt hàng mua trong ngày.
+model FoodPurchase {
+  id        String   @id @default(uuid())
+  date      DateTime
+  name      String
+  unit      String   @default("Kg")
+  quantity  Float    @default(0)
+  unitPrice Int      @default(0)
+  createdBy String
+  createdAt DateTime @default(now())
+
   @@index([date])
 }
 
@@ -1492,11 +1616,13 @@ model OfferLetter {
   id                  String    @id @default(uuid())
   candidateId         String
   letterNumber        String    @unique // VD: "703/2026/TM-IBSHI" — auto sinh khi gửi
-  position            String
+  position            String    // Vị trí làm việc (vd "Kỹ sư kỹ thuật") → Employee.jobPosition
+  jobRole             String?   // Chức vụ (Nhân viên / Tổ trưởng / Trưởng phòng...) → Employee.jobRole
   departmentName      String?
   workLocation        String    @default("Km 6 Quốc lộ 5, Phường Hồng Bàng, Thành phố Hải Phòng, Việt Nam")
-  officialSalary      Decimal   // Lương chính thức sau thử việc
-  probationarySalary  Decimal   // Lương thử việc (thường = 85% lương chính)
+  officialSalary      Decimal   // Lương chính thức sau thử việc (= tổng các thành phần bên dưới)
+  salaryBreakdown     Json?     // {baseSalary, farAllowance, kpiAllowance, positionAllowance} — chi tiết để dựng HĐ
+  probationarySalary  Decimal   // Lương thử việc (= 85% lương chính thức)
   probationDays       Int       @default(60)
   startDate           DateTime
   probationEndDate    DateTime  // = startDate + probationDays
@@ -1518,6 +1644,12 @@ model OfferLetter {
   acceptedAt          DateTime?
   declinedAt          DateTime?
   candidateNote       String?
+  // ── HĐ thử việc (soạn sau khi UV chấp nhận, TP HCNS duyệt trước khi onboard) ──
+  probationDraft         Json?     // {startDate,endDate,baseSalary,jobRole,jobPosition,workLocation,terms,html}
+  probationDraftStatus   String?   // null=chưa soạn | PENDING | APPROVED | REJECTED
+  probationApprovedBy    String?
+  probationApprovedAt    DateTime?
+  probationRejectReason  String?
   // ── Audit ──
   createdBy           String
   createdAt           DateTime  @default(now())
@@ -1584,7 +1716,9 @@ model ProbationEvaluation {
   recommendedTier     String    // "INDEFINITE" | "DEFINITE_24M" | "DEFINITE_12M" | "FAIL"
   selectedTier        String?   // tier TP chốt (có thể override suggest)
   comments            String?
-  status              String    @default("PENDING_DIRECTOR") // DRAFT | PENDING_DIRECTOR | APPROVED | REJECTED | SIGNED | FAILED
+  status              String    @default("PENDING_DIRECTOR") // DRAFT | PENDING_DIRECTOR | APPROVED | CONTRACT_ISSUED | SIGNED | REJECTED | FAILED
+  contractDraft       Json?     // nội dung HĐ soạn thảo: {contractNumber, contractType, startDate, endDate, baseSalary, allowance, kpi, jobTitle, workLocation, terms}
+  contractIssuedAt    DateTime? // thời điểm phát hành HĐ (chuyển sang Đợi ký)
   directorApprovedBy  String?
   directorApprovedAt  DateTime?
   directorRejectedAt  DateTime?
@@ -1820,6 +1954,7 @@ model StationeryItem {
   name           String                    // "Giấy A4", "Bút bi xanh", ...
   normalizedName String @unique            // lowercase + trim, dùng để fuzzy match
   unit           String                    // ĐVT: "ream", "cái", "hộp"
+  note           String?                   // Ghi chú (vd "màu đen", "25x37")
   currentStock  Float   @default(0)       // cache tồn kho hiện tại
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -1893,6 +2028,7 @@ model StationeryRequestItem {
   requestId String
   itemId    String
   quantity  Float
+  issuedQuantity Float @default(0)  // số đã cấp phát (cho phép cấp một phần khi hàng về thiếu)
   note      String?
 
   request StationeryRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)

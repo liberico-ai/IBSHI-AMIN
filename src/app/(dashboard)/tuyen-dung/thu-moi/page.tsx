@@ -5,6 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DateInput } from "@/components/shared/date-input";
 import { formatDate, formatVND, apiError } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import {
   Plus, RefreshCw, X, Check, Clock, ClipboardCheck, Send, FileText,
   ChevronRight, ThumbsUp, ThumbsDown, AlertCircle, Mail, Award,
@@ -287,22 +288,22 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
   candidate: Candidate; onBack: () => void; onCreated: () => void; onClose: () => void;
 }) {
   const [position, setPosition] = useState(candidate.recruitment.positionName);
+  const [jobRole, setJobRole] = useState("Nhân viên");
   const [department, setDepartment] = useState(candidate.recruitment.department.name);
-  const [officialSalary, setOfficialSalary] = useState("");
-  const [probSalary, setProbSalary] = useState("");
+  // Các thành phần lương — bỏ trống = 0
+  const [baseSalary, setBaseSalary] = useState("");
+  const [farAllowance, setFarAllowance] = useState("");
+  const [kpiAllowance, setKpiAllowance] = useState("");
+  const [positionAllowance, setPositionAllowance] = useState("");
   const [probDays, setProbDays] = useState("60");
   const [startDate, setStartDate] = useState("");
   const [benefits, setBenefits] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Auto-suggest probationary = 85% official khi nhập official salary
-  useEffect(() => {
-    if (officialSalary && !probSalary) {
-      const s = Math.round((Number(officialSalary) * 0.85) / 1000) * 1000;
-      setProbSalary(s.toString());
-    }
-  }, [officialSalary]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Lương chính thức = tổng các thành phần; lương thử việc = 85% (làm tròn nghìn)
+  const officialSalary = (Number(baseSalary) || 0) + (Number(farAllowance) || 0) + (Number(kpiAllowance) || 0) + (Number(positionAllowance) || 0);
+  const probSalary = Math.round((officialSalary * 0.85) / 1000) * 1000;
 
   const probationEnd = useMemo(() => {
     if (!startDate || !probDays) return null;
@@ -312,8 +313,8 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
   }, [startDate, probDays]);
 
   async function handleSubmit(submit: boolean) {
-    if (!officialSalary || !probSalary || !startDate || !position) {
-      setError("Cần điền đủ vị trí, lương, ngày bắt đầu");
+    if (officialSalary <= 0 || !startDate || !position) {
+      setError("Cần điền vị trí, ít nhất 1 khoản lương, và ngày bắt đầu");
       return;
     }
     if (!candidate.email) {
@@ -328,9 +329,16 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
       body: JSON.stringify({
         candidateId: candidate.id,
         position,
+        jobRole,
         departmentName: department,
-        officialSalary: Number(officialSalary),
-        probationarySalary: Number(probSalary),
+        officialSalary: officialSalary,
+        probationarySalary: probSalary,
+        salaryBreakdown: {
+          baseSalary: Number(baseSalary) || 0,
+          farAllowance: Number(farAllowance) || 0,
+          kpiAllowance: Number(kpiAllowance) || 0,
+          positionAllowance: Number(positionAllowance) || 0,
+        },
         probationDays: Number(probDays),
         startDate: new Date(startDate).toISOString(),
         benefits: benefits || null,
@@ -352,13 +360,21 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
         Số thư mời sẽ được tự động sinh khi lưu (vd: 703/2026/TM-IBSHI). Lương thử việc gợi ý = <strong>85% lương chính thức</strong>.
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         <div>
-          <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Vị trí công việc *</label>
-          <input value={position} onChange={(e) => setPosition(e.target.value)}
+          <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Vị trí làm việc *</label>
+          <input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Kỹ sư kỹ thuật"
             className="w-full rounded-lg px-3 py-2 text-[13px] border"
             style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
           />
+        </div>
+        <div>
+          <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Chức vụ *</label>
+          <select value={jobRole} onChange={(e) => setJobRole(e.target.value)}
+            className="w-full rounded-lg px-3 py-2 text-[13px] border"
+            style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+            {["Nhân viên", "Tổ trưởng", "Phó phòng", "Trưởng phòng", "Công nhân", "Giám đốc"].map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
         </div>
         <div>
           <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Bộ phận / Phòng ban</label>
@@ -369,32 +385,37 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-        <div>
-          <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Mức lương chính thức (sau thử việc) *</label>
-          <div className="relative">
-            <input type="text" inputMode="numeric"
-              value={officialSalary ? formatVND(Number(officialSalary)) : ""}
-              onChange={(e) => setOfficialSalary(e.target.value.replace(/[^\d]/g, ""))}
-              placeholder="9.000.000"
-              className="w-full rounded-lg px-3 py-2 pr-12 text-[13px] border"
-              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold pointer-events-none" style={{ color: "var(--ibs-text-dim)" }}>VNĐ</span>
+      {/* Các thành phần lương — bỏ trống = không có khoản đó */}
+      <div className="text-[12px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>Cơ cấu lương chính thức (bỏ trống = 0)</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        {([
+          ["Lương cơ bản", baseSalary, setBaseSalary, "8.000.000"],
+          ["Phụ cấp nhà xa", farAllowance, setFarAllowance, "200.000"],
+          ["Phụ cấp KPI", kpiAllowance, setKpiAllowance, "0"],
+          ["Phụ cấp chức vụ", positionAllowance, setPositionAllowance, "0"],
+        ] as [string, string, (s: string) => void, string][]).map(([lbl, val, set, ph]) => (
+          <div key={lbl}>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>{lbl}</label>
+            <div className="relative">
+              <input type="text" inputMode="numeric" value={val ? formatVND(Number(val)) : ""}
+                onChange={(e) => set(e.target.value.replace(/[^\d]/g, ""))} placeholder={ph}
+                className="w-full rounded-lg px-2 py-2 pr-6 text-[13px] border"
+                style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold pointer-events-none" style={{ color: "var(--ibs-text-dim)" }}>đ</span>
+            </div>
           </div>
+        ))}
+      </div>
+
+      {/* Tổng tự tính */}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div className="p-3 rounded-lg border" style={{ background: "rgba(0,180,216,0.06)", borderColor: "rgba(0,180,216,0.3)" }}>
+          <div className="text-[11px] uppercase font-semibold" style={{ color: "var(--ibs-text-dim)" }}>Tổng thu nhập</div>
+          <div className="text-[18px] font-bold mt-0.5" style={{ color: "var(--ibs-accent)" }}>{formatVND(officialSalary)} đ</div>
         </div>
-        <div>
-          <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Mức lương thử việc *</label>
-          <div className="relative">
-            <input type="text" inputMode="numeric"
-              value={probSalary ? formatVND(Number(probSalary)) : ""}
-              onChange={(e) => setProbSalary(e.target.value.replace(/[^\d]/g, ""))}
-              placeholder="7.650.000"
-              className="w-full rounded-lg px-3 py-2 pr-12 text-[13px] border"
-              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold pointer-events-none" style={{ color: "var(--ibs-text-dim)" }}>VNĐ</span>
-          </div>
+        <div className="p-3 rounded-lg border" style={{ background: "rgba(245,158,11,0.06)", borderColor: "rgba(245,158,11,0.3)" }}>
+          <div className="text-[11px] uppercase font-semibold" style={{ color: "var(--ibs-text-dim)" }}>Lương thử việc (85%)</div>
+          <div className="text-[18px] font-bold mt-0.5" style={{ color: "#f59e0b" }}>{formatVND(probSalary)} đ</div>
         </div>
       </div>
 
@@ -453,12 +474,12 @@ function OfferDetailModal({ data, canEdit, canApprove, onClose, onChanged }: {
   const [busy, setBusy] = useState(false);
 
   async function handleResend() {
-    if (!confirm("Gửi lại email cho UV?")) return;
+    if (!(await confirmDialog("Gửi lại email cho ứng viên?"))) return;
     setBusy(true);
     const res = await fetch(`/api/v1/recruitment/offer-letters/${data.id}/resend`, { method: "POST" });
     setBusy(false);
     if (res.ok) { onChanged(); onClose(); }
-    else { const d = await res.json(); alert(apiError(res.status, d.error)); }
+    else { const d = await res.json(); await alertDialog(apiError(res.status, d.error)); }
   }
 
   return (

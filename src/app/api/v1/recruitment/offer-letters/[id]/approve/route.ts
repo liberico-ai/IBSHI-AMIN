@@ -60,14 +60,28 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   });
 
   // ── 2. Upload to MinIO ──
-  await ensureBucket(BUCKETS.HR_DOCUMENTS);
   const safeNum = offer.letterNumber.replace(/\//g, "_");
   const objectName = `offer-letters/${safeNum}_${Date.now()}.pdf`;
-  const minio = getMinioClient();
-  await minio.putObject(BUCKETS.HR_DOCUMENTS, objectName, pdfBuf, pdfBuf.length, {
-    "Content-Type": "application/pdf",
-  });
-  const pdfUrl = getFileUrl(BUCKETS.HR_DOCUMENTS, objectName);
+  let pdfUrl: string;
+  try {
+    await ensureBucket(BUCKETS.HR_DOCUMENTS);
+    const minio = getMinioClient();
+    await minio.putObject(BUCKETS.HR_DOCUMENTS, objectName, pdfBuf, pdfBuf.length, {
+      "Content-Type": "application/pdf",
+    });
+    pdfUrl = getFileUrl(BUCKETS.HR_DOCUMENTS, objectName);
+  } catch (e: any) {
+    console.error("[offer-letter approve] MinIO upload failed:", e);
+    return NextResponse.json(
+      {
+        error: {
+          code: "STORAGE_ERROR",
+          message: `Không lưu được file PDF lên kho lưu trữ (MinIO). Vui lòng kiểm tra dịch vụ lưu trữ rồi thử lại. Chi tiết: ${e.message || e}`,
+        },
+      },
+      { status: 503 }
+    );
+  }
 
   // ── 3. Send email ──
   const sentAt = new Date();

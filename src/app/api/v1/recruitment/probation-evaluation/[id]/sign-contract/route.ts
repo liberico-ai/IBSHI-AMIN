@@ -3,12 +3,10 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
-import { tierToContractType, calcContractEndDate } from "@/lib/probation-eval";
 
+// Xác nhận đã ký HĐ: từ CONTRACT_ISSUED (đã soạn + phát hành) → upload bản scan đã ký →
+// tạo Contract chính thức + Employee.status = ACTIVE + đánh dấu SIGNED.
 const SignSchema = z.object({
-  contractNumber: z.string().min(3, "Cần số HĐ"),
-  startDate: z.string().datetime(),
-  baseSalary: z.number().int().min(0),
   signedContractUrl: z.string().min(1, "Cần upload file scan HĐ đã ký"),
 });
 
@@ -27,10 +25,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
   }
 
-  const hr = await prisma.employee.findFirst({
-    where: { userId: (session.user as any).id },
-    select: { id: true },
-  });
+  const hr = await prisma.employee.findFirst({ where: { userId: (session.user as any).id }, select: { id: true } });
   if (!hr) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy hồ sơ HCNS" } }, { status: 404 });
 
   const evalRec = await prisma.probationEvaluation.findUnique({
@@ -38,38 +33,51 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     include: { employee: { select: { id: true, fullName: true, userId: true } } },
   });
   if (!evalRec) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
-  if (evalRec.status !== "APPROVED") {
-    return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ ký được sau khi BGĐ duyệt" } }, { status: 409 });
+  if (evalRec.status !== "CONTRACT_ISSUED") {
+    return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ xác nhận ký sau khi đã phát hành (soạn thảo) HĐ" } }, { status: 409 });
   }
+  const d: any = evalRec.contractDraft;
+  if (!d) return NextResponse.json({ error: { code: "NO_DRAFT", message: "Thiếu nội dung HĐ đã soạn" } }, { status: 409 });
 
-  const tier = evalRec.selectedTier || evalRec.recommendedTier;
-  const contractType = tierToContractType(tier);
-  if (!contractType) {
-    return NextResponse.json({ error: { code: "INVALID_TIER", message: "Tier hiện tại là FAIL, không thể ký HĐ" } }, { status: 400 });
-  }
+  const startDate = d.startDate ? new Date(d.startDate) : new Date();
+  const endDate = d.endDate ? new Date(d.endDate) : null;
+  // Tổng thu nhập = lương chính + phụ cấp + KPI (đưa vào allowance để engine M7 dùng)
+  const allowanceTotal = (d.allowance || 0) + (d.kpi || 0);
 
-  const startDate = new Date(parsed.data.startDate);
-  const endDate = calcContractEndDate(tier, startDate);
-
-  // Transaction: create Contract + update Employee.status + update Evaluation status
   const result = await prisma.$transaction(async (tx) => {
+    // Khi ký HĐ chính thức → HĐ thử việc cũ (ACTIVE) phải chuyển sang EXPIRED ("Hết hạn"),
+    // ngày kết thúc thực = ngày trước khi HĐ mới bắt đầu (nếu hợp lệ).
+    const probEnd = new Date(startDate); probEnd.setDate(probEnd.getDate() - 1);
+    const oldProb = await tx.contract.findMany({
+      where: { employeeId: evalRec.employeeId, contractType: "PROBATION", status: "ACTIVE" },
+      select: { id: true, startDate: true, endDate: true },
+    });
+    for (const p of oldProb) {
+      const setEnd = probEnd >= new Date(p.startDate) && (!p.endDate || new Date(p.endDate) > probEnd);
+      await tx.contract.update({
+        where: { id: p.id },
+        data: { status: "EXPIRED", ...(setEnd ? { endDate: probEnd } : {}) },
+      });
+    }
+
     const contract = await tx.contract.create({
       data: {
         employeeId: evalRec.employeeId,
-        contractNumber: parsed.data.contractNumber,
-        contractType,
+        contractNumber: d.contractNumber,
+        contractType: d.contractType,
         startDate,
         endDate,
-        baseSalary: parsed.data.baseSalary,
+        baseSalary: d.baseSalary,
+        insuranceSalary: d.baseSalary,
+        allowance: allowanceTotal,
+        allowances: { kpi: d.kpi || 0, phone: 0, fuel: 0, housing: 0 },
+        position: d.jobTitle ?? undefined,
         status: "ACTIVE",
         fileUrl: parsed.data.signedContractUrl,
       },
     });
 
-    await tx.employee.update({
-      where: { id: evalRec.employeeId },
-      data: { status: "ACTIVE" },
-    });
+    await tx.employee.update({ where: { id: evalRec.employeeId }, data: { status: "ACTIVE" } });
 
     const updatedEval = await tx.probationEvaluation.update({
       where: { id: params.id },
@@ -83,17 +91,15 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         contractEndDate: endDate,
       },
     });
-
     return { contract, evaluation: updatedEval };
   });
 
-  // Notify NV chính thức
   if (evalRec.employee.userId) {
     await prisma.notification.create({
       data: {
         userId: evalRec.employee.userId,
-        title: "Chúc mừng bạn đã chính thức trở thành NV",
-        message: `HĐLĐ số ${parsed.data.contractNumber} đã được ký. Loại: ${tier}.`,
+        title: "Chúc mừng bạn đã chính thức trở thành nhân viên",
+        message: `HĐLĐ số ${d.contractNumber} đã được ký kết. Loại HĐ: ${d.contractType}.`,
         type: "SYSTEM",
         referenceType: "contract",
         referenceId: result.contract.id,

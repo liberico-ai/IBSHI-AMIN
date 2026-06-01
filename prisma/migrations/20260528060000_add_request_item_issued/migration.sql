@@ -1,0 +1,1 @@
+ALTER TABLE "StationeryRequestItem" ADD COLUMN "issuedQuantity" DOUBLE PRECISION NOT NULL DEFAULT 0;

@@ -53,7 +53,11 @@ export const INSURANCE_RATES = {
   EMPLOYER_TOTAL: 0.215, // BHXH cty đóng = 21.5% × Lương chính
 } as const;
 
-export const MEAL_UNIT_PRICE = 35000; // VND/suất
+export const MEAL_UNIT_PRICE = 35000; // VND/suất (mặc định cũ, dùng fallback)
+// Đơn giá suất ăn theo đối tượng
+export const MEAL_PRICE_EMPLOYEE = 20000;      // Cán bộ nhân viên
+export const MEAL_PRICE_SUBCONTRACTOR = 28000; // Thầu phụ
+// Khách: nhập tay đơn giá khi đăng ký (guestUnitPrice trên từng phiếu)
 
 export const SALARY_CONFIG = {
   STANDARD_WORK_DAYS: 26,

@@ -55,7 +55,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ data: updated });
   }
 
-  // ACCEPTED — full workflow: update offer + candidate ACCEPTED + tạo Employee
+  // ACCEPTED — update offer + candidate ACCEPTED + tạo Employee (PROBATION)
   try {
     const { updatedOffer, created } = await prisma.$transaction(async (tx) => {
       const u = await tx.offerLetter.update({ where: { id: params.id }, data });
@@ -64,15 +64,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return { updatedOffer: u, created: c };
     });
 
-    // Notify HR_ADMIN/BOM (ngoài transaction)
     await notifyEmployeeCreated(prisma, created.id, offer.candidate.fullName, created.code).catch(() => {});
 
-    return NextResponse.json({
-      data: {
-        ...updatedOffer,
-        createdEmployee: created,
-      },
-    });
+    return NextResponse.json({ data: { ...updatedOffer, createdEmployee: created } });
   } catch (err: any) {
     console.error("Mark ACCEPTED + create employee failed:", err);
     return NextResponse.json({

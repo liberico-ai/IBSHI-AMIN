@@ -11,14 +11,8 @@ export function normalizeItemName(name: string): string {
 //   BOM (BGĐ) → duyệt mọi thứ.
 //   HR_ADMIN + Position level MANAGER + Department chứa "HCNS" → TP HCNS.
 export async function isStationeryApprover(userId: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { employee: { include: { position: true, department: true } } },
-  });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
   if (!user) return false;
-  if (user.role === "BOM") return true;
-  if (user.role !== "HR_ADMIN") return false;
-  const emp = user.employee;
-  if (!emp) return false;
-  return emp.position?.level === "MANAGER" && (emp.department?.name?.toLowerCase().includes("hcns") ?? false);
+  // HCNS (HR_ADMIN) và BGĐ (BOM) được quản lý/cấp phát VPP.
+  return user.role === "HR_ADMIN" || user.role === "BOM";
 }

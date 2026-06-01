@@ -10,9 +10,12 @@ const createContractSchema = z.object({
   position: z.string().optional().nullable(),
   startDate: z.string().min(1, "Ngày bắt đầu không được để trống"),
   endDate: z.string().optional().nullable(),
-  baseSalary: z.number().int().positive("Lương cơ bản phải > 0"),
-  insuranceSalary: z.number().int().min(0).optional().nullable(),
+  baseSalary: z.number().int().positive("Lương cơ bản phải > 0").max(2_000_000_000, "Lương cơ bản vượt quá giới hạn cho phép (tối đa 2 tỷ)"),
+  insuranceSalary: z.number().int().min(0).max(2_000_000_000, "Lương đóng BHXH vượt quá giới hạn cho phép (tối đa 2 tỷ)").optional().nullable(),
+  allowance: z.number().int().min(0).max(2_000_000_000, "Phụ cấp vượt quá giới hạn cho phép").optional().nullable(),
   allowances: z.record(z.string(), z.number()).optional().nullable(),
+  documentHtml: z.string().optional().nullable(),   // nội dung HĐ đã soạn (để tải lại Word/PDF)
+  skillLevel: z.string().optional().nullable(),      // bậc thợ — cập nhật vào hồ sơ NV
   fileUrl: z.string().optional().nullable(),
 });
 
@@ -46,7 +49,7 @@ export async function POST(
     );
   }
 
-  const { contractNumber, contractType, position, startDate, endDate, baseSalary, insuranceSalary, allowances, fileUrl } = parsed.data;
+  const { contractNumber, contractType, position, startDate, endDate, baseSalary, insuranceSalary, allowance, allowances, documentHtml, skillLevel, fileUrl } = parsed.data;
 
   // Check duplicate contract number
   const existing = await prisma.contract.findFirst({ where: { contractNumber } });
@@ -57,31 +60,72 @@ export async function POST(
     );
   }
 
-  const contract = await prisma.contract.create({
-    data: {
-      employeeId,
-      contractNumber,
-      contractType: contractType as any,
-      position: position || null,
-      startDate: new Date(startDate),
-      endDate: endDate ? new Date(endDate) : null,
-      baseSalary,
-      insuranceSalary: insuranceSalary ?? null,
-      allowances: (allowances as any) ?? undefined,
-      fileUrl: fileUrl || null,
-      status: "ACTIVE",
-    },
-  });
+  try {
+    const newStart = new Date(startDate);
+    // Ngày kết thúc tự gán cho HĐ cũ = ngày bắt đầu HĐ mới − 1 ngày.
+    const supersedeEnd = new Date(newStart);
+    supersedeEnd.setDate(supersedeEnd.getDate() - 1);
 
-  await prisma.auditLog.create({
-    data: {
-      userId: (session.user as any).id,
-      action: "CREATE",
-      entityType: "Contract",
-      entityId: contract.id,
-      newValue: JSON.stringify({ contractNumber, contractType, baseSalary }),
-    },
-  });
+    const contract = await prisma.$transaction(async (tx) => {
+      // 1 NV chỉ có 1 HĐ đang hiệu lực: HĐ cũ (ACTIVE/EXPIRING_SOON) → RENEWED (lịch sử).
+      const oldActive = await tx.contract.findMany({
+        where: { employeeId, status: { in: ["ACTIVE", "EXPIRING_SOON"] } },
+        select: { id: true, startDate: true, endDate: true },
+      });
+      for (const old of oldActive) {
+        // Chỉ đặt ngày kết thúc nếu hợp lệ (không sớm hơn ngày bắt đầu HĐ cũ) và HĐ cũ chưa có ngày KT, hoặc KT muộn hơn.
+        const setEnd = supersedeEnd >= new Date(old.startDate) && (!old.endDate || new Date(old.endDate) > supersedeEnd);
+        await tx.contract.update({
+          where: { id: old.id },
+          data: { status: "RENEWED", ...(setEnd ? { endDate: supersedeEnd } : {}) },
+        });
+      }
 
-  return NextResponse.json({ data: contract }, { status: 201 });
+      const created = await tx.contract.create({
+        data: {
+          employeeId,
+          contractNumber,
+          contractType: contractType as any,
+          position: position || null,
+          startDate: newStart,
+          endDate: endDate ? new Date(endDate) : null,
+          baseSalary,
+          insuranceSalary: insuranceSalary ?? null,
+          allowance: allowance ?? null,
+          allowances: (allowances as any) ?? undefined,
+          documentHtml: documentHtml || null,
+          fileUrl: fileUrl || null,
+          status: "ACTIVE",
+        },
+      });
+
+      // Cập nhật thông tin công việc lên hồ sơ NV (hiển thị ở Thông tin cá nhân).
+      const empData: any = {};
+      if (position) empData.jobRole = position;            // Chức vụ
+      if (skillLevel != null && skillLevel !== "") empData.skillLevel = skillLevel; // Bậc thợ
+      if (Object.keys(empData).length > 0) {
+        await tx.employee.update({ where: { id: employeeId }, data: empData });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: (session.user as any).id,
+          action: "CREATE",
+          entityType: "Contract",
+          entityId: created.id,
+          newValue: JSON.stringify({ contractNumber, contractType, baseSalary, supersededCount: oldActive.length }),
+        },
+      });
+
+      return created;
+    });
+
+    return NextResponse.json({ data: contract }, { status: 201 });
+  } catch (err: any) {
+    console.error("[contracts.POST] create failed:", err?.message || err);
+    return NextResponse.json(
+      { error: { code: "CREATE_FAILED", message: "Không lưu được hợp đồng. Kiểm tra lại dữ liệu (đặc biệt mức lương)." } },
+      { status: 400 }
+    );
+  }
 }

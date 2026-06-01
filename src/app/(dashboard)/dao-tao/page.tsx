@@ -9,6 +9,7 @@ import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 import { DateInput } from "@/components/shared/date-input";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 type Department = { id: string; name: string };
 
@@ -269,7 +270,7 @@ function CertificateManager({ canManage }: { canManage: boolean }) {
   }, [filterStatus]);
 
   async function handleDelete(id: string) {
-    if (!confirm("Hủy hiệu lực chứng chỉ này?")) return;
+    if (!(await confirmDialog("Hủy hiệu lực chứng chỉ này?"))) return;
     await fetch(`/api/v1/certificates/${id}`, { method: "DELETE" });
     fetchCerts();
   }
