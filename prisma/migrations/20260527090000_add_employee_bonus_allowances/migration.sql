@@ -1,0 +1,2 @@
+ALTER TABLE "Employee" ADD COLUMN "responsibilityAllowance" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Employee" ADD COLUMN "farAllowance" INTEGER NOT NULL DEFAULT 0;

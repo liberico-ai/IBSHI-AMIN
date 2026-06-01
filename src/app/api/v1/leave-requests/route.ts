@@ -5,7 +5,7 @@ import { z } from "zod";
 import { isInPast } from "@/lib/validation";
 
 const CreateLeaveSchema = z.object({
-  leaveType: z.enum(["ANNUAL", "SICK", "PERSONAL", "WEDDING", "FUNERAL", "MATERNITY", "PATERNITY", "UNPAID"]),
+  leaveType: z.enum(["ANNUAL", "SICK", "PERSONAL", "WEDDING", "FUNERAL", "MATERNITY", "PATERNITY", "UNPAID", "WORK_ACCIDENT", "STUDY"]),
   startDate: z.string().transform((s) => new Date(s)),
   endDate: z.string().transform((s) => new Date(s)),
   reason: z.string().min(5, "Lý do phải ít nhất 5 ký tự"),
@@ -89,12 +89,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy nhân viên" } }, { status: 404 });
   }
 
-  // Calculate total days (exclude weekends)
+  // Tính số ngày nghỉ: tính cả 2 đầu mút (30/5→30/5 = 1 ngày, 30/5→31/5 = 2 ngày),
+  // chỉ KHÔNG tính Chủ Nhật (IBS làm việc cả Thứ 7).
   let totalDays = 0;
   const cur = new Date(startDate);
   while (cur <= endDate) {
-    const day = cur.getDay();
-    if (day !== 0 && day !== 6) totalDays += 1;
+    if (cur.getDay() !== 0) totalDays += 1; // 0 = Chủ Nhật
     cur.setDate(cur.getDate() + 1);
   }
 
@@ -119,14 +119,43 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Check annual leave balance
+  // Phép năm cộng dồn theo tháng: đến tháng N chỉ được nghỉ tối đa số ngày đã tích luỹ.
+  //   accrued = (quota/12) × tháng hiện tại  (vd quota 12 → tháng 6 = 6 ngày).
   if (leaveType === "ANNUAL") {
-    const balance = await prisma.leaveBalance.findFirst({
-      where: { employeeId: employee.id, year: new Date().getFullYear() },
-    });
-    if (balance && balance.remainingDays < totalDays) {
+    // NV thử việc chưa có phép năm
+    if (employee.status === "PROBATION") {
       return NextResponse.json(
-        { error: { code: "INSUFFICIENT_LEAVE", message: `Không đủ phép năm. Còn ${balance.remainingDays} ngày.` } },
+        { error: { code: "PROBATION_NO_LEAVE", message: "Nhân viên thử việc chưa có phép năm." } },
+        { status: 400 }
+      );
+    }
+    const year = new Date().getFullYear();
+    const month = new Date().getMonth() + 1;
+    const balance = await prisma.leaveBalance.findFirst({ where: { employeeId: employee.id, year } });
+    const quota = balance?.totalDays ?? 12;
+    const accrued = Math.floor((quota / 12) * month);
+
+    // Tổng ngày phép năm đã đăng ký trong năm (đang chờ duyệt + đã duyệt) — không tính đơn bị từ chối.
+    const booked = await prisma.leaveRequest.aggregate({
+      where: {
+        employeeId: employee.id,
+        leaveType: "ANNUAL",
+        status: { in: ["PENDING", "APPROVED"] },
+        startDate: { gte: new Date(year, 0, 1), lte: new Date(year, 11, 31, 23, 59, 59) },
+      },
+      _sum: { totalDays: true },
+    });
+    const used = booked._sum.totalDays ?? 0;
+
+    if (used + totalDays > accrued) {
+      const remain = Math.max(0, accrued - used);
+      return NextResponse.json(
+        {
+          error: {
+            code: "LEAVE_ACCRUAL_EXCEEDED",
+            message: `Số ngày quá quy định. Bạn chỉ được phép nghỉ phép tối đa ${remain} ngày.`,
+          },
+        },
         { status: 400 }
       );
     }

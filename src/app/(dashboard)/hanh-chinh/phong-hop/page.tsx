@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { apiError } from "@/lib/utils";
 import { X, Calendar, ClipboardList, ChevronDown, ChevronRight } from "lucide-react";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 
 type Room = { id: string; code: string; name: string; capacity: number; equipment: string[] };
 type Booking = {
@@ -110,7 +111,7 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
     else if (idx < slotStart) { setSlotStart(idx); setSlotEnd(idx + 1); }
     else {
       for (let i = slotStart; i <= idx; i++) {
-        if (bookedSlots.has(i)) { alert(`Khung ${slotToTime(i)} đã bận, chọn khoảng khác`); return; }
+        if (bookedSlots.has(i)) { void alertDialog(`Khung ${slotToTime(i)} đã bận, chọn khoảng khác`); return; }
       }
       setSlotEnd(idx + 1);
     }
@@ -235,7 +236,7 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null } | null 
   useEffect(() => { load(); }, []);
 
   async function cancel(id: string) {
-    if (!confirm("Huỷ phiếu này?")) return;
+    if (!(await confirmDialog("Huỷ phiếu này?"))) return;
     await fetch(`/api/v1/room-bookings/${id}/cancel`, { method: "POST" });
     load();
   }

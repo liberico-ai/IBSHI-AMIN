@@ -6,6 +6,7 @@
 
 import { hash } from "bcryptjs";
 import type { Prisma } from "@prisma/client";
+import { uniqueCompanyEmail } from "@/lib/email-gen";
 
 export interface CreatedEmployee {
   id: string;
@@ -24,13 +25,16 @@ export async function createEmployeeFromCandidate(
   });
   if (!candidate) throw new Error("Candidate not found");
 
-  // Mã NV kế tiếp
-  const lastEmp = await tx.employee.findFirst({
-    orderBy: { code: "desc" },
-    select: { code: true },
-  });
-  const lastNum = lastEmp ? parseInt(lastEmp.code.replace("IBS-", ""), 10) : 0;
-  const newCode = `IBS-${String(lastNum + 1).padStart(3, "0")}`;
+  // Mã NV kế tiếp — theo dãy 190xxx (erpCode), lấy MAX của các mã dạng 19xxxx rồi +1.
+  const allEmps = await tx.employee.findMany({ select: { code: true } });
+  let maxNum = 0;
+  for (const e of allEmps) {
+    if (/^19\d{4}$/.test(e.code)) {
+      const n = parseInt(e.code, 10);
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  const newCode = maxNum > 0 ? String(maxNum + 1) : "190001";
 
   // Vị trí mặc định trong phòng ban (ưu tiên WORKER, fallback any)
   let defaultPosition = await tx.position.findFirst({
@@ -48,19 +52,18 @@ export async function createEmployeeFromCandidate(
     throw new Error("Không tìm thấy chức vụ nào trong hệ thống. Vui lòng tạo chức vụ trước.");
   }
 
-  // Email + temp password
+  // Email công ty theo tên (<tên><chữ đầu họ+đệm>@ibs.com.vn) + temp password
   const tempPassword = "123456";
   const tempHash = await hash(tempPassword, 10);
-  const baseEmail = candidate.email ?? `${newCode.toLowerCase().replace("-", "")}@ibs.vn`;
-  const existing = await tx.user.findFirst({ where: { email: baseEmail } });
-  const finalEmail = existing
-    ? `${newCode.toLowerCase().replace("-", "")}${Date.now()}@ibs.vn`
-    : baseEmail;
+  const finalEmail = await uniqueCompanyEmail(candidate.fullName, async (email) => {
+    return !!(await tx.user.findFirst({ where: { email } }));
+  });
 
   // User
   const newUser = await tx.user.create({
     data: {
       employeeCode: newCode,
+      erpCode: newCode, // = mã 190xxx để chấm công M3 import khớp đúng NV
       email: finalEmail,
       passwordHash: tempHash,
       role: "EMPLOYEE",
@@ -68,6 +71,15 @@ export async function createEmployeeFromCandidate(
       forcePasswordChange: true,
     },
   });
+
+  // Lấy Thư mời mới nhất của UV để biết Chức vụ (jobRole) + Vị trí làm việc (jobPosition)
+  const offer = await tx.offerLetter.findFirst({
+    where: { candidateId },
+    orderBy: { createdAt: "desc" },
+    select: { jobRole: true, position: true, probationarySalary: true, probationEndDate: true, startDate: true },
+  });
+  const jobPosition = offer?.position || candidate.recruitment.positionName || null; // vd "Kỹ sư kỹ thuật"
+  const jobRole = offer?.jobRole || "Nhân viên";                                     // chức vụ (mặc định Nhân viên)
 
   // Employee — placeholder fields, HCNS sẽ update hồ sơ sau
   const newEmp = await tx.employee.create({
@@ -82,6 +94,8 @@ export async function createEmployeeFromCandidate(
       address: "",
       departmentId: candidate.recruitment.departmentId,
       positionId: defaultPosition.id,
+      jobRole,           // Chức vụ: Nhân viên / Tổ trưởng / Trưởng phòng...
+      jobPosition,       // Vị trí làm việc: theo vị trí tuyển
       startDate: new Date(),
       status: "PROBATION",
       dependents: 0,
@@ -94,22 +108,16 @@ export async function createEmployeeFromCandidate(
       employeeId: newEmp.id,
       eventType: "JOINED",
       toDepartment: candidate.recruitment.department.name,
-      toPosition: defaultPosition.name,
+      toPosition: jobPosition || defaultPosition.name, // vị trí tuyển (vd "Kỹ sư kỹ thuật")
       effectiveDate: new Date(),
-      note: `Tuyển dụng từ ứng viên #${candidate.id}. Mật khẩu tạm: ${tempPassword}`,
     },
   });
 
-  // LeaveBalance — 12 ngày phép cho NV mới
-  await tx.leaveBalance.create({
-    data: {
-      employeeId: newEmp.id,
-      year: new Date().getFullYear(),
-      totalDays: 12,
-      usedDays: 0,
-      remainingDays: 12,
-    },
-  });
+  // HĐ thử việc KHÔNG tạo tự động ở đây — HCNS bấm "Tạo HĐ thử việc" ở tab Onboard để soạn,
+  // rồi TP HCNS duyệt (xem flow probation contract).
+
+  // NV mới vào ở trạng thái THỬ VIỆC → chưa có phép năm. Quỹ phép sẽ được cấp khi
+  // chuyển sang Đang làm (cron leave-balance-init / khi xác nhận ký HĐ chính thức).
 
   // HSE Induction — PENDING (sẽ cập nhật khi NV hoàn thành khoá HSE)
   await tx.hSEInduction.create({

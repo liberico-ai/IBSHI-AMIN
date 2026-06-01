@@ -5,9 +5,45 @@ import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
+import { parseLeaveCode, isLeaveToken } from "@/lib/attendance-codes";
 import { ChevronLeft, ChevronRight, Plus, Check, X, RefreshCw, CalendarDays, Clock, Download, Upload } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
+
+// Chọn ĐÚNG sheet chứa bảng công khi file có nhiều sheet (vd file Trực tiếp có sheet đầu "foxz" rỗng,
+// dữ liệu thật ở sheet "TH công"). Tiêu chí: sheet có hàng header ≥20 cột ngày (1-31 hoặc Excel serial)
+// VÀ nhiều dòng mã NV nhất. Tránh nhầm sheet "Khuôn mặt"/"Hàng ngày" (1 dòng/ngày, không có header cột ngày).
+function pickAttendanceSheet(XLSX: any, wb: any, year: number, month: number): unknown[][] {
+  const codeOfRow = (r: any[]): boolean => {
+    const c0 = String(r?.[0] ?? "").trim(), c1 = String(r?.[1] ?? "").trim(), c2 = String(r?.[2] ?? "").trim();
+    return (/^\d{4,}$/.test(c0) && !!c1) || (/^\d{1,3}$/.test(c0) && /^\d{4,}$/.test(c1) && !!c2) || (!c0 && /^\d{4,}$/.test(c1) && !!c2);
+  };
+  const hasDayHeader = (rows: any[][]): boolean => {
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const r = rows[i] || []; let n = 0;
+      for (const cell of r) {
+        const v = Number(cell);
+        if (Number.isFinite(v) && v >= 1 && v <= 31 && Number.isInteger(v)) n++;
+        else if (Number.isFinite(v) && v >= 40000 && v <= 60000) {
+          const dt = new Date(Math.round((v - 25569) * 86400 * 1000));
+          if (dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1) n++;
+        }
+      }
+      if (n >= 20) return true;
+    }
+    return false;
+  };
+  let bestRows: unknown[][] = [], bestScore = -1;
+  for (const sn of wb.SheetNames as string[]) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "" }) as any[][];
+    if (!hasDayHeader(rows)) continue;
+    const nv = rows.reduce((s, r) => s + (codeOfRow(r) ? 1 : 0), 0);
+    if (nv > bestScore) { bestScore = nv; bestRows = rows; }
+  }
+  // Fallback: nếu không sheet nào có header cột ngày → dùng sheet đầu (giữ hành vi cũ)
+  if (bestScore < 0) return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" }) as unknown[][];
+  return bestRows;
+}
 
 type LeaveRequest = {
   id: string; leaveType: string; startDate: string; endDate: string;
@@ -83,10 +119,9 @@ function OfficeAttendanceCard({
       const XLSX = await import("xlsx");
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data, { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+      const rows: unknown[][] = pickAttendanceSheet(XLSX, wb, year, month);
 
-      type Rec = { employeeCode: string; date: string; workHours: number; otHours: number };
+      type Rec = { employeeCode: string; date: string; workHours: number; otHours: number; paidLeaveDays?: number; leaveCode?: string | null };
       const records: Rec[] = [];
 
       // Step 1: Find the header row mapping day → column index.
@@ -167,6 +202,14 @@ function OfficeAttendanceCard({
             if (hasData) { otRow = cand; break; }
           }
         }
+        // 3) DÒNG NGHỈ (dòng 3) = blockRow ≠ otRow có chứa mã nghỉ (AL/UL/SL/ML/L)
+        let leaveRow: unknown[] | undefined;
+        for (const cand of blockRows) {
+          if (cand === otRow) continue;
+          let hasLeave = false;
+          dayColMap.forEach((colIdx) => { if (isLeaveToken((cand as any)?.[colIdx])) hasLeave = true; });
+          if (hasLeave) { leaveRow = cand; break; }
+        }
         i = j - 1; // bỏ qua cả block; i++ của vòng lặp sẽ nhảy tới NV kế tiếp
 
         dayColMap.forEach((colIdx, d) => {
@@ -174,10 +217,12 @@ function OfficeAttendanceCard({
           // OT chỉ chấp nhận chuỗi số thuần (tránh "0.5UL" / "0.5AL" — đây là mã nghỉ, không phải OT).
           const otStr = String(otRow?.[colIdx] ?? "").trim();
           const oh = otRow && /^-?\d+(\.\d+)?$/.test(otStr) ? parseFloat(otStr) : 0;
-          if (wh === 0 && oh === 0) return;
+          // Nghỉ phép có lương (AL) từ dòng nghỉ
+          const lv = parseLeaveCode(leaveRow?.[colIdx]);
+          if (wh === 0 && oh === 0 && lv.paidLeaveDays === 0 && !lv.code) return;
           const dt = new Date(year, month - 1, d);
           if (dt.getMonth() !== month - 1) return;
-          records.push({ employeeCode: code, date: `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`, workHours: wh, otHours: oh });
+          records.push({ employeeCode: code, date: `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`, workHours: wh, otHours: oh, paidLeaveDays: lv.paidLeaveDays, leaveCode: lv.code });
         });
       }
 
@@ -397,10 +442,9 @@ function AttendanceGridCard({
       const XLSX = await import("xlsx");
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data, { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+      const rows: unknown[][] = pickAttendanceSheet(XLSX, wb, year, month);
 
-      type Rec = { employeeCode: string; date: string; workHours: number; otHours: number; status?: string };
+      type Rec = { employeeCode: string; date: string; workHours: number; otHours: number; status?: string; paidLeaveDays?: number; leaveCode?: string | null };
       const records: Rec[] = [];
 
       // Step 1: Find day header row → map day number to column index
@@ -475,20 +519,23 @@ function AttendanceGridCard({
         if (!code) continue;
         const workRow = rows[i] as unknown[];
 
-        // Gom các dòng nối tiếp (OT / trống) cho tới dòng NV kế tiếp.
+        // Gom các dòng nối tiếp (OT / nghỉ / trống) cho tới dòng NV kế tiếp.
         let otRow: unknown[] | undefined;
+        let leaveRow: unknown[] | undefined;
         let j = i + 1;
         for (; j < rows.length; j++) {
           const nextCode = codeOfRow(rows[j] as unknown[]);
           if (nextCode && nextCode !== code) break; // KHÁC NV → dừng. Cùng mã hoặc không có mã → dòng nối tiếp (OT/trống/note).
+          const cand = rows[j] as unknown[];
+          // dòng nghỉ = có mã nghỉ (AL/UL/SL/ML/L)
+          if (!leaveRow) { let hasLeave = false; dayColMap.forEach((colIdx) => { if (isLeaveToken(cand?.[colIdx])) hasLeave = true; }); if (hasLeave) leaveRow = cand; }
           if (!otRow) {
-            const cand = rows[j] as unknown[];
             let hasData = false;
             dayColMap.forEach((colIdx) => {
               const s = String(cand?.[colIdx] ?? "").trim();
               if (/^-?\d+(\.\d+)?$/.test(s) && parseFloat(s) > 0) hasData = true;
             });
-            if (hasData) otRow = cand;
+            if (hasData && cand !== leaveRow) otRow = cand;
           }
         }
         i = j - 1; // bỏ qua cả block
@@ -498,10 +545,11 @@ function AttendanceGridCard({
           // OT chỉ chấp nhận chuỗi số thuần (tránh "0.5UL" / "0.5AL" — đây là mã nghỉ, không phải OT).
           const otStr = String(otRow?.[colIdx] ?? "").trim();
           const oh = otRow && /^-?\d+(\.\d+)?$/.test(otStr) ? parseFloat(otStr) : 0;
-          if (wh === 0 && oh === 0 && !status) return;
+          const lv = parseLeaveCode(leaveRow?.[colIdx]);
+          if (wh === 0 && oh === 0 && !status && lv.paidLeaveDays === 0 && !lv.code) return;
           const dt = new Date(year, month - 1, d);
           if (dt.getMonth() !== month - 1) return;
-          records.push({ employeeCode: code, date: `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`, workHours: wh, otHours: oh, status });
+          records.push({ employeeCode: code, date: `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`, workHours: wh, otHours: oh, status, paidLeaveDays: lv.paidLeaveDays, leaveCode: lv.code });
         });
       }
 

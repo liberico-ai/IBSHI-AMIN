@@ -11,9 +11,9 @@ const ItemSchema = z.object({
 });
 
 const CreateSchema = z.object({
-  requesterEmployeeId: z.string().uuid(),
-  reason: z.string().min(1),
-  fileUrl: z.string().min(1), // bắt buộc đính kèm file Đề nghị VPP
+  requesterEmployeeId: z.string().uuid().optional(),  // bỏ trống = NV đang đăng nhập tự yêu cầu
+  reason: z.string().optional().nullable(),
+  fileUrl: z.string().optional().nullable(),           // không còn bắt buộc file đề nghị
   items: z.array(ItemSchema).min(1),
 });
 
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     orderBy: { createdAt: "desc" },
     include: {
       requester: { select: { id: true, code: true, fullName: true, department: { select: { name: true } }, position: { select: { name: true } } } },
-      items: { include: { item: { select: { id: true, name: true, unit: true, currentStock: true } } } },
+      items: { include: { item: { select: { id: true, name: true, unit: true, note: true, currentStock: true } } } },
     },
   });
   return NextResponse.json({ data, canApprove });
@@ -40,31 +40,29 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!["HR_ADMIN", "BOM"].includes((session.user as any).role))
-    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const body = CreateSchema.parse(await request.json());
   const userId = (session.user as any).id;
 
-  // Validate đủ tồn cho mỗi item (Q1 chọn A: báo lỗi nếu xuất quá tồn)
+  // Người yêu cầu: nếu không truyền → NV của user đang đăng nhập (user phòng ban tự tạo)
+  let requesterEmployeeId = body.requesterEmployeeId;
+  if (!requesterEmployeeId) {
+    const me = await prisma.employee.findFirst({ where: { userId }, select: { id: true } });
+    if (!me) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy hồ sơ nhân viên của bạn" } }, { status: 404 });
+    requesterEmployeeId = me.id;
+  }
+
+  // HCNS không quản lý tồn kho → KHÔNG chặn theo tồn. Chỉ kiểm tra item tồn tại.
   for (const it of body.items) {
-    const item = await prisma.stationeryItem.findUnique({ where: { id: it.itemId } });
-    if (!item) return NextResponse.json({ error: { code: "ITEM_NOT_FOUND", message: "Item không tồn tại" } }, { status: 400 });
-    if (item.currentStock < it.quantity) {
-      return NextResponse.json({
-        error: {
-          code: "INSUFFICIENT_STOCK",
-          message: `"${item.name}" chỉ còn ${item.currentStock} ${item.unit} (yêu cầu ${it.quantity})`,
-        },
-      }, { status: 400 });
-    }
+    const item = await prisma.stationeryItem.findUnique({ where: { id: it.itemId }, select: { id: true } });
+    if (!item) return NextResponse.json({ error: { code: "ITEM_NOT_FOUND", message: "VPP không tồn tại" } }, { status: 400 });
   }
 
   const req = await prisma.stationeryRequest.create({
     data: {
-      requesterEmployeeId: body.requesterEmployeeId,
-      reason: body.reason,
-      fileUrl: body.fileUrl,
+      requesterEmployeeId,
+      reason: body.reason || "",
+      fileUrl: body.fileUrl || "",
       createdById: userId,
       items: { create: body.items.map((it) => ({ itemId: it.itemId, quantity: it.quantity, note: it.note ?? null })) },
     },

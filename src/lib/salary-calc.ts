@@ -32,6 +32,9 @@ export interface SalaryInput {
   leaveDays: number;         // phép + lễ (hưởng theo Lương BHXH/CC)
   ot: OTHours;
   dependentsCount: number;
+  bonusAllowance?: number;   // Bổ sung lương (trách nhiệm + nhà xa) — số phẳng, cộng vào Gross/Net
+  pieceRate?: number;        // Lương sản phẩm/khoán (nhập theo kỳ) — chịu thuế
+  adjustment?: number;       // Điều chỉnh/bổ sung tay theo kỳ (có thể âm) — chịu thuế
 }
 
 export interface SalaryOutput {
@@ -40,6 +43,7 @@ export interface SalaryOutput {
   leaveDays: number;
   effectiveDays: number;     // đi làm + phép + lễ (mốc xét 14 công + bù)
   otHoursTotal: number;
+  otConvertedHours: number;  // Σ giờ OT × hệ số (quy đổi thuần, để báo cáo)
   otFillHours: number;       // giờ OT dùng để bù cho đủ CC (1×)
   otPaidHours: number;       // giờ OT được nhân hệ số (dôi ra)
   // Các khoản tiền
@@ -52,6 +56,7 @@ export interface SalaryOutput {
   bhxhEmployee: number;      // 10,5% × Lương BHXH (nếu ≥14 công)
   bhxhEmployer: number;      // phần công ty đóng (audit)
   personalDeduction: number;
+  otTaxExempt: number;       // phần OT miễn thuế (chênh vượt trên mức lương thường)
   taxableIncome: number;
   taxableIncomeAfter: number;
   tncn: number;
@@ -93,31 +98,30 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
     { rate: SALARY_CONFIG.OT_RATE_WEEKDAY, hours: input.ot.weekday },
   ];
   const otHoursTotal = otTypes.reduce((s, o) => s + o.hours, 0);
+  // Quy đổi thuần (báo cáo): mọi giờ OT × hệ số, không liên quan logic bù công
+  const otConvertedHours = otTypes.reduce((s, o) => s + o.hours * o.rate, 0);
 
   const effectiveDays = input.workDaysActual + input.leaveDays;
-  const shortfallHours = Math.max(0, (CC - effectiveDays) * 8);
 
-  // Bù: trừ shortfall từ giờ hệ số cao nhất trước; phần dôi mỗi loại × hệ số
-  let fillRemaining = Math.min(shortfallHours, otHoursTotal);
-  const otFillHours = fillRemaining;
+  // OT trả ĐỦ HỆ SỐ cho mọi giờ (KHÔNG bù-công) — khớp bảng lương kế toán (chốt 2026-05-27).
+  const otFillHours = 0;
   let otPayMultiplied = 0;
   for (const o of otTypes) {
-    let h = o.hours;
-    if (fillRemaining > 0) {
-      const used = Math.min(h, fillRemaining);
-      fillRemaining -= used;
-      h -= used;
-    }
-    otPayMultiplied += h * hourlyRateFull * o.rate;
+    otPayMultiplied += o.hours * hourlyRateFull * o.rate;
   }
-  const otPaidHours = otHoursTotal - otFillHours;
+  const otPaidHours = otHoursTotal;
+
+  // Các khoản nhập tay theo kỳ + bổ sung — số phẳng, cộng vào thu nhập (chịu thuế)
+  const bonusAllowance = input.bonusAllowance || 0;   // trách nhiệm + nhà xa
+  const pieceRate = input.pieceRate || 0;             // lương sản phẩm/khoán
+  const adjustment = input.adjustment || 0;           // điều chỉnh tay (có thể âm)
 
   // Các khoản tiền (làm tròn từng khoản về đồng)
   const salaryWorkActual = Math.round(input.workDaysActual * dailyRateFull);
   const leavePay = Math.round(input.leaveDays * dailyRateInsurance);
-  const fillPay = Math.round(otFillHours * hourlyRateFull); // 1×
+  const fillPay = 0; // không còn bù-công
   const salaryOT = Math.round(otPayMultiplied);
-  const grossSalary = salaryWorkActual + leavePay + fillPay + salaryOT;
+  const grossSalary = salaryWorkActual + leavePay + salaryOT + bonusAllowance + pieceRate + adjustment;
 
   // BHXH — chỉ trừ khi đủ ≥14 công (gồm phép + lễ)
   const bhxhBase = Math.min(input.insuranceSalary, SALARY_CONFIG.INSURANCE_SALARY_CAP);
@@ -125,8 +129,12 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const bhxhEmployee = eligibleBHXH ? Math.round(bhxhBase * INSURANCE_RATES.EMPLOYEE_TOTAL) : 0;
   const bhxhEmployer = eligibleBHXH ? Math.round(bhxhBase * INSURANCE_RATES.EMPLOYER_TOTAL) : 0;
 
-  // TNCN — miễn phần OT (đã nhân hệ số)
-  const taxableIncome = Math.max(0, grossSalary - salaryOT);
+  // TNCN — chỉ miễn PHẦN VƯỢT của OT (theo luật): chênh trên mức lương giờ thường.
+  // Mỗi giờ OT hưởng hệ số: phần 1× (= giờ × đơn giá giờ) vẫn chịu thuế, chỉ phần (hệ số − 1) được miễn.
+  // Giờ OT dùng để bù (1×) không có phần vượt → không miễn.
+  const otPaidBase = Math.round(otPaidHours * hourlyRateFull); // phần 1× của giờ OT đã nhân hệ số (chịu thuế)
+  const otTaxExempt = Math.max(0, salaryOT - otPaidBase);      // phần vượt → miễn thuế
+  const taxableIncome = Math.max(0, grossSalary - otTaxExempt);
   const personalDeduction =
     SALARY_CONFIG.PERSONAL_DEDUCTION + input.dependentsCount * SALARY_CONFIG.DEPENDENT_DEDUCTION;
   const taxableIncomeAfter = Math.max(0, taxableIncome - personalDeduction - bhxhEmployee);
@@ -141,6 +149,7 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
     leaveDays: input.leaveDays,
     effectiveDays,
     otHoursTotal,
+    otConvertedHours,
     otFillHours,
     otPaidHours,
     salaryWorkActual,
@@ -151,6 +160,7 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
     bhxhEmployee,
     bhxhEmployer,
     personalDeduction,
+    otTaxExempt,
     taxableIncome,
     taxableIncomeAfter,
     tncn,

@@ -1,0 +1,2 @@
+ALTER TABLE "AttendanceRecord" ADD COLUMN "paidLeaveDays" DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE "AttendanceRecord" ADD COLUMN "leaveCode" TEXT;

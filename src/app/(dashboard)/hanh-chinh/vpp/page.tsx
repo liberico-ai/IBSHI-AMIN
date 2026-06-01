@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { PageHeader, Button, Badge } from "@/components/ui";
 import { apiError } from "@/lib/utils";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { Plus, Upload, Check, X, ChevronDown, ChevronRight, FileText, Package } from "lucide-react";
 
 type Supplier = { id: string; name: string };
-type Item = { id: string; name: string; unit: string; currentStock: number };
+type Item = { id: string; name: string; unit: string; note?: string | null; currentStock: number };
 type StockIn = {
   id: string; importDate: string; notes?: string;
   supplier: { id: string; name: string };
@@ -43,12 +44,12 @@ export default function VppPage() {
 
   return (
     <div>
-      <PageHeader title="M10.3 — Văn phòng phẩm" subtitle="Quản lý tồn kho VPP, nhập kho, phiếu yêu cầu xuất VPP" />
+      <PageHeader title="M10.3 — Văn phòng phẩm" subtitle="Danh sách VPP, tạo yêu cầu VPP, phiếu yêu cầu xuất VPP" />
 
       <div className="flex gap-2 mb-4">
         {[
-          { k: "stock", label: "Tồn kho", icon: Package },
-          { k: "stockIn", label: "Nhập VPP", icon: Upload },
+          { k: "stock", label: "Danh sách VPP", icon: Package },
+          { k: "stockIn", label: "Danh sách yêu cầu VPP", icon: FileText },
           { k: "requests", label: "Phiếu xuất VPP", icon: FileText },
         ].map((t) => {
           const Icon = t.icon;
@@ -76,6 +77,7 @@ function StockTab() {
   const [items, setItems] = useState<Item[]>([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
+  const [showRequest, setShowRequest] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -94,79 +96,272 @@ function StockTab() {
           style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}
         />
         <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{items.length} mặt hàng</span>
+        <button onClick={() => setShowRequest(true)}
+          className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
+          style={{ background: "var(--ibs-accent)" }}>
+          <Plus size={14} /> Tạo yêu cầu VPP
+        </button>
       </div>
       <div className="rounded-xl border overflow-hidden" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <table className="w-full text-[13px]">
           <thead style={{ background: "rgba(0,180,216,0.05)" }}>
             <tr>
               <th className="px-4 py-3 text-left font-semibold">Tên VPP</th>
-              <th className="px-4 py-3 text-left font-semibold">ĐVT</th>
-              <th className="px-4 py-3 text-right font-semibold">Tồn kho hiện tại</th>
+              <th className="px-4 py-3 text-left font-semibold">Đơn vị tính</th>
+              <th className="px-4 py-3 text-left font-semibold">Ghi chú</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr><td colSpan={3} className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</td></tr>
             ) : items.length === 0 ? (
-              <tr><td colSpan={3} className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Chưa có VPP nào trong kho</td></tr>
+              <tr><td colSpan={3} className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Chưa có VPP nào</td></tr>
             ) : items.map((it) => (
               <tr key={it.id} className="border-t" style={{ borderColor: "var(--ibs-border)" }}>
                 <td className="px-4 py-2.5 font-medium">{it.name}</td>
                 <td className="px-4 py-2.5" style={{ color: "var(--ibs-text-dim)" }}>{it.unit}</td>
-                <td className="px-4 py-2.5 text-right font-semibold" style={{ color: it.currentStock > 0 ? "var(--ibs-success)" : "var(--ibs-text-dim)" }}>
-                  {fmt(it.currentStock)}
-                </td>
+                <td className="px-4 py-2.5 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{it.note || "—"}</td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+      {showRequest && <RequestVPPModal onClose={() => setShowRequest(false)} onSuccess={() => setShowRequest(false)} />}
+    </div>
+  );
+}
+
+// Modal tạo yêu cầu VPP cho user phòng ban: trái = danh sách VPP (tích chọn), phải = đã chọn + nhập số lượng.
+function RequestVPPModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [items, setItems] = useState<Item[]>([]);
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState<Record<string, { name: string; unit: string; quantity: string }>>({});
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch(`/api/v1/stationery/items${q ? `?q=${encodeURIComponent(q)}` : ""}`)
+      .then((r) => r.json()).then((res) => setItems(res.data || []));
+  }, [q]);
+
+  const toggle = (it: Item) => setSelected((prev) => {
+    const next = { ...prev };
+    if (next[it.id]) delete next[it.id];
+    else next[it.id] = { name: it.name, unit: it.unit, quantity: "1" };
+    return next;
+  });
+  const setQty = (id: string, v: string) => setSelected((prev) => ({ ...prev, [id]: { ...prev[id], quantity: v.replace(/[^\d.]/g, "") } }));
+  const selectedEntries = Object.entries(selected);
+
+  async function save() {
+    const payload = selectedEntries.filter(([, s]) => Number(s.quantity) > 0).map(([id, s]) => ({ itemId: id, quantity: Number(s.quantity) }));
+    if (payload.length === 0) { setError("Vui lòng chọn ít nhất 1 VPP và nhập số lượng > 0"); return; }
+    setSaving(true); setError("");
+    const res = await fetch("/api/v1/stationery/requests", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: payload, reason: reason || null }),
+    });
+    setSaving(false);
+    if (res.ok) setDone(true);
+    else { const d = await res.json(); setError(apiError(res.status, d.error)); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="rounded-2xl w-full max-w-3xl p-6 max-h-[92vh] overflow-hidden flex flex-col" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[16px] font-bold">Tạo yêu cầu Văn phòng phẩm</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {done ? (
+          <div className="py-10 text-center">
+            <div className="text-[14px] font-semibold mb-1" style={{ color: "var(--ibs-success)" }}>✅ Đã gửi yêu cầu VPP</div>
+            <div className="text-[12px] mb-4" style={{ color: "var(--ibs-text-dim)" }}>Yêu cầu đang chờ HCNS duyệt.</div>
+            <button onClick={onSuccess} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)" }}>Xong</button>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+              {/* TRÁI: danh sách VPP để tích chọn */}
+              <div className="flex flex-col min-h-0">
+                <div className="text-[12px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>Danh sách VPP</div>
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm VPP..."
+                  className="px-3 py-2 rounded-lg border text-[13px] mb-2" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
+                <div className="rounded-lg border overflow-y-auto" style={{ borderColor: "var(--ibs-border)", maxHeight: 340 }}>
+                  {items.length === 0 ? <div className="px-3 py-6 text-center text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không có VPP</div> :
+                    items.map((it) => (
+                      <label key={it.id} className="flex items-center gap-2 px-3 py-2 border-b cursor-pointer text-[13px]" style={{ borderColor: "rgba(51,65,85,0.2)" }}>
+                        <input type="checkbox" checked={!!selected[it.id]} onChange={() => toggle(it)} style={{ accentColor: "var(--ibs-accent)" }} />
+                        <span className="flex-1">{it.name}</span>
+                        <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{it.unit}</span>
+                      </label>
+                    ))}
+                </div>
+              </div>
+
+              {/* PHẢI: đã chọn + nhập số lượng */}
+              <div className="flex flex-col min-h-0">
+                <div className="text-[12px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>Đã chọn — nhập số lượng ({selectedEntries.length})</div>
+                <div className="rounded-lg border overflow-y-auto flex-1" style={{ borderColor: "var(--ibs-border)", maxHeight: 300 }}>
+                  {selectedEntries.length === 0 ? <div className="px-3 py-6 text-center text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Tích chọn VPP ở danh sách bên trái</div> :
+                    selectedEntries.map(([id, s]) => (
+                      <div key={id} className="flex items-center gap-2 px-3 py-2 border-b text-[13px]" style={{ borderColor: "rgba(51,65,85,0.2)" }}>
+                        <span className="flex-1 min-w-0 truncate">{s.name}</span>
+                        <input value={s.quantity} onChange={(e) => setQty(id, e.target.value)} inputMode="numeric"
+                          className="w-16 px-2 py-1 rounded border text-[13px] text-right" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
+                        <span className="text-[11px] w-8" style={{ color: "var(--ibs-text-dim)" }}>{s.unit}</span>
+                        <button onClick={() => toggle({ id, name: s.name, unit: s.unit, currentStock: 0 } as Item)} style={{ color: "var(--ibs-danger)" }}><X size={14} /></button>
+                      </div>
+                    ))}
+                </div>
+                <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Lý do (tuỳ chọn)..."
+                  className="px-3 py-2 rounded-lg border text-[13px] mt-2" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
+              </div>
+            </div>
+
+            {error && <div className="text-[12px] text-red-500 mt-2">{error}</div>}
+            <div className="flex gap-2 justify-end mt-4">
+              <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+              <button onClick={save} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.7 : 1 }}>
+                {saving ? "Đang lưu..." : "Lưu yêu cầu"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 function StockInTab() {
-  const [history, setHistory] = useState<StockIn[]>([]);
-  const [showNew, setShowNew] = useState(false);
+  const [requests, setRequests] = useState<any[]>([]);
+  const [canApprove, setCanApprove] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [issuing, setIssuing] = useState(false);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [qty, setQty] = useState<Record<string, string>>({});
 
   function load() {
     setLoading(true);
-    fetch("/api/v1/stationery/stock-in?limit=50").then((r) => r.json())
-      .then((res) => setHistory(res.data || [])).finally(() => setLoading(false));
+    fetch("/api/v1/stationery/requests").then((r) => r.json())
+      .then((res) => { setRequests(res.data || []); setCanApprove(!!res.canApprove); setSelected({}); setQty({}); })
+      .finally(() => setLoading(false));
   }
   useEffect(() => { load(); }, []);
 
+  // Cộng dồn VPP còn thiếu (quantity − đã cấp) từ các yêu cầu chưa hoàn thành
+  const pending = requests.filter((r) => ["PENDING_APPROVAL", "APPROVED"].includes(r.status));
+  const aggMap = new Map<string, { id: string; name: string; unit: string; note?: string | null; remaining: number; requesters: Set<string> }>();
+  for (const r of pending) {
+    for (const it of r.items) {
+      const rem = (it.quantity || 0) - (it.issuedQuantity || 0);
+      if (rem <= 0) continue;
+      const cur = aggMap.get(it.item.id) || { id: it.item.id, name: it.item.name, unit: it.item.unit, note: it.item.note, remaining: 0, requesters: new Set<string>() };
+      cur.remaining += rem;
+      cur.requesters.add(r.requester?.fullName || "—");
+      aggMap.set(it.item.id, cur);
+    }
+  }
+  const agg = Array.from(aggMap.values()).filter((a) => a.remaining > 0).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+
+  const toggle = (it: typeof agg[number]) => setSelected((prev) => {
+    const next = { ...prev };
+    if (next[it.id]) delete next[it.id];
+    else { next[it.id] = true; setQty((q) => ({ ...q, [it.id]: q[it.id] ?? String(it.remaining) })); }
+    return next;
+  });
+  const checkedCount = agg.filter((a) => selected[a.id]).length;
+
+  async function issueSelected() {
+    const items = agg.filter((a) => selected[a.id]).map((a) => {
+      let n = Number(qty[a.id] ?? a.remaining);
+      if (!(n > 0)) n = 0;
+      if (n > a.remaining) n = a.remaining; // không cấp quá số yêu cầu
+      return { itemId: a.id, quantity: n };
+    }).filter((x) => x.quantity > 0);
+    if (items.length === 0) { await alertDialog("Chọn ít nhất 1 VPP và nhập số lượng cấp > 0"); return; }
+    setIssuing(true);
+    const res = await fetch("/api/v1/stationery/requests/issue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) });
+    setIssuing(false);
+    if (res.ok) load();
+    else { const d = await res.json(); await alertDialog(apiError(res.status, d.error)); }
+  }
+
+  async function issueAll() {
+    if (!(await confirmDialog({ title: "Cấp phát toàn bộ", tone: "default", confirmText: "Cấp phát", message: `Cấp phát TOÀN BỘ ${agg.length} loại VPP (${pending.length} yêu cầu)? Danh sách sẽ trống sau khi cấp.` }))) return;
+    setIssuing(true);
+    const res = await fetch("/api/v1/stationery/requests/issue-all", { method: "POST" });
+    setIssuing(false);
+    if (res.ok) load();
+    else { const d = await res.json(); await alertDialog(apiError(res.status, d.error)); }
+  }
+
   return (
     <div>
-      <div className="flex justify-between mb-4">
-        <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{history.length} phiếu nhập gần nhất</span>
-        <Button variant="accent" size="sm" onClick={() => setShowNew(true)}>
-          <Plus size={14} /> Nhập kho mới
-        </Button>
+      <div className="flex justify-between items-center mb-4 gap-2">
+        <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
+          {agg.length} loại VPP chờ cấp (đã cộng dồn){checkedCount > 0 ? ` · đã chọn ${checkedCount}` : ""}
+        </span>
+        {canApprove && agg.length > 0 && (
+          <div className="flex gap-2">
+            <button onClick={issueSelected} disabled={issuing || checkedCount === 0}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold border disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}>
+              <Check size={14} /> Cấp phát{checkedCount > 0 ? ` (${checkedCount})` : ""}
+            </button>
+            <button onClick={issueAll} disabled={issuing}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ background: "var(--ibs-accent)" }}>
+              <Check size={14} /> Cấp phát toàn bộ
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-        {loading ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
-          : history.length === 0 ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Chưa có phiếu nhập nào</div>
-          : history.map((h) => (
-            <div key={h.id} className="px-4 py-3 border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }}>
-              <div className="flex justify-between mb-2">
-                <div>
-                  <span className="font-semibold">{h.supplier.name}</span>
-                  <span className="ml-3 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{new Date(h.importDate).toLocaleDateString("vi-VN")}</span>
-                </div>
-                <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{h.items.length} mặt hàng</span>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>
-                {h.items.map((it, i) => <div key={i}>• {it.item.name}: <span className="font-medium">{fmt(it.quantity)} {it.item.unit}</span></div>)}
-              </div>
-              {h.notes && <div className="mt-2 text-[12px] italic" style={{ color: "var(--ibs-text-dim)" }}>Ghi chú: {h.notes}</div>}
-            </div>
-          ))}
+      <div className="rounded-xl border overflow-hidden" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <table className="w-full text-[13px]">
+          <thead style={{ background: "rgba(0,180,216,0.05)" }}>
+            <tr>
+              <th className="px-3 py-3 w-10"></th>
+              <th className="px-4 py-3 text-left font-semibold">Tên VPP</th>
+              <th className="px-4 py-3 text-left font-semibold">ĐVT</th>
+              <th className="px-4 py-3 text-right font-semibold">SL yêu cầu</th>
+              <th className="px-4 py-3 text-right font-semibold">SL cấp phát</th>
+              <th className="px-4 py-3 text-left font-semibold">Phòng/Người yêu cầu</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</td></tr>
+            ) : agg.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Chưa có yêu cầu VPP nào chờ cấp</td></tr>
+            ) : agg.map((it) => {
+              const checked = !!selected[it.id];
+              return (
+                <tr key={it.id} className="border-t" style={{ borderColor: "var(--ibs-border)", background: checked ? "rgba(0,180,216,0.04)" : undefined }}>
+                  <td className="px-3 py-2.5 text-center">
+                    <input type="checkbox" checked={checked} onChange={() => toggle(it)} style={{ accentColor: "var(--ibs-accent)", width: 16, height: 16 }} />
+                  </td>
+                  <td className="px-4 py-2.5 font-medium">{it.name}{it.note ? <span className="text-[11px] ml-1" style={{ color: "var(--ibs-text-dim)" }}>({it.note})</span> : null}</td>
+                  <td className="px-4 py-2.5" style={{ color: "var(--ibs-text-dim)" }}>{it.unit}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold">{fmt(it.remaining)}</td>
+                  <td className="px-4 py-2.5 text-right">
+                    {checked ? (
+                      <input value={qty[it.id] ?? String(it.remaining)} onChange={(e) => setQty((q) => ({ ...q, [it.id]: e.target.value.replace(/[^\d.]/g, "") }))}
+                        inputMode="numeric" className="w-20 px-2 py-1 rounded border text-[13px] text-right"
+                        style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
+                    ) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}
+                  </td>
+                  <td className="px-4 py-2.5 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{Array.from(it.requesters).join(", ")}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
-
-      {showNew && <StockInModal onClose={() => setShowNew(false)} onSuccess={() => { setShowNew(false); load(); }} />}
     </div>
   );
 }
@@ -341,11 +536,11 @@ function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
     load();
   }
   async function complete(id: string) {
-    if (!confirm("Xác nhận đã cấp VPP cho NV? Sẽ trừ vào tồn kho.")) return;
+    if (!(await confirmDialog("Xác nhận đã cấp VPP cho nhân viên?"))) return;
     const res = await fetch(`/api/v1/stationery/requests/${id}/complete`, { method: "POST" });
     if (!res.ok) {
       const d = await res.json();
-      alert("Lỗi: " + apiError(res.status, d.error));
+      await alertDialog("Lỗi: " + apiError(res.status, d.error));
       return;
     }
     load();
@@ -356,94 +551,169 @@ function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
     setExpanded(n);
   }
 
+  // Phiếu đã cấp → gom theo NGÀY bấm nút Cấp phát (completedAt). Mỗi nhóm = 1 đợt cấp phát.
+  const others = requests.filter((r) => r.status !== "COMPLETED");
+  const dateGroups = useMemo(() => {
+    const map = new Map<string, Request[]>();
+    for (const r of requests.filter((x) => x.status === "COMPLETED")) {
+      const d = new Date(r.completedAt || r.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, reqs]) => ({ key, label: key.split("-").reverse().join("/"), reqs }));
+  }, [requests]);
+
   return (
     <div>
       <div className="flex justify-between mb-4">
         <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
           {requests.length} phiếu — {canApprove ? "Xem tất cả (quyền duyệt)" : "Chỉ phiếu bạn tạo"}
         </span>
-        <Button variant="accent" size="sm" onClick={() => setShowNew(true)}>
+        <button onClick={() => setShowNew(true)}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
+          style={{ background: "var(--ibs-accent)" }}>
           <Plus size={14} /> Tạo phiếu xuất
-        </Button>
+        </button>
       </div>
 
-      <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-        {loading ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
-          : requests.length === 0 ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Chưa có phiếu xuất nào</div>
-          : requests.map((r) => {
-            const st = STATUS_BADGE[r.status] || { label: r.status, variant: "default" as const };
-            const isOwner = me?.id === r.createdById;
-            return (
-              <div key={r.id} className="border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }}>
-                <div className="px-4 py-3 flex items-center justify-between gap-4">
-                  <button onClick={() => toggle(r.id)} className="flex items-center gap-2 flex-1 text-left min-w-0">
-                    {expanded.has(r.id) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    <div className="min-w-0">
-                      <div className="font-semibold truncate">
-                        {r.requester.fullName}
-                        <span className="ml-2 text-[12px] font-normal" style={{ color: "var(--ibs-text-dim)" }}>
-                          ({r.requester.code} — {r.requester.department.name})
-                        </span>
-                      </div>
-                      <div className="text-[11px] truncate" style={{ color: "var(--ibs-text-dim)" }}>
-                        {new Date(r.createdAt).toLocaleString("vi-VN")} · {r.items.length} mặt hàng · Lý do: {r.reason}
+      {loading ? (
+        <div className="rounded-xl border px-4 py-8 text-center" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Đang tải...</div>
+      ) : requests.length === 0 ? (
+        <div className="rounded-xl border px-4 py-8 text-center" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Chưa có phiếu xuất nào</div>
+      ) : (
+        <>
+          {/* Yêu cầu đang chờ duyệt / chờ cấp */}
+          {others.length > 0 && (
+            <div className="rounded-xl border mb-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+              <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ibs-text-dim)", borderBottom: "1px solid var(--ibs-border)" }}>Đang xử lý</div>
+              {others.map((r) => {
+                const st = STATUS_BADGE[r.status] || { label: r.status, variant: "default" as const };
+                const isOwner = me?.id === r.createdById;
+                return (
+                  <div key={r.id} className="border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }}>
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <button onClick={() => toggle(r.id)} className="flex items-center gap-2 flex-1 text-left min-w-0">
+                        {expanded.has(r.id) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">
+                            {r.requester.fullName}
+                            <span className="ml-2 text-[12px] font-normal" style={{ color: "var(--ibs-text-dim)" }}>
+                              ({r.requester.code} — {r.requester.department.name})
+                            </span>
+                          </div>
+                          <div className="text-[11px] truncate" style={{ color: "var(--ibs-text-dim)" }}>
+                            {new Date(r.createdAt).toLocaleString("vi-VN")} · {r.items.length} mặt hàng{r.reason ? ` · Lý do: ${r.reason}` : ""}
+                          </div>
+                        </div>
+                      </button>
+
+                      <Badge variant={st.variant}>{st.label}</Badge>
+
+                      <div className="flex gap-2 shrink-0 items-center">
+                        {r.fileUrl && <a href={r.fileUrl} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 File</a>}
+                        {r.status === "PENDING_APPROVAL" && canApprove && r.createdById !== me?.id && (
+                          <>
+                            <Button size="sm" onClick={() => approve(r.id)} style={{ background: "var(--success)" }}>
+                              <Check size={12} /> Duyệt
+                            </Button>
+                            <Button variant="danger" size="sm" onClick={() => reject(r.id)}>
+                              <X size={12} /> Từ chối
+                            </Button>
+                          </>
+                        )}
+                        {r.status === "APPROVED" && (isOwner || me?.role === "BOM") && (
+                          <Button variant="accent" size="sm" onClick={() => complete(r.id)}>
+                            <Check size={12} /> Hoàn thành
+                          </Button>
+                        )}
                       </div>
                     </div>
-                  </button>
 
-                  <Badge variant={st.variant}>{st.label}</Badge>
-
-                  <div className="flex gap-2 shrink-0 items-center">
-                    {r.fileUrl && <a href={r.fileUrl} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 File</a>}
-                    {r.status === "PENDING_APPROVAL" && canApprove && r.createdById !== me?.id && (
-                      <>
-                        <Button size="sm" onClick={() => approve(r.id)} style={{ background: "var(--success)" }}>
-                          <Check size={12} /> Duyệt
-                        </Button>
-                        <Button variant="danger" size="sm" onClick={() => reject(r.id)}>
-                          <X size={12} /> Từ chối
-                        </Button>
-                      </>
-                    )}
-                    {r.status === "APPROVED" && (isOwner || me?.role === "BOM") && (
-                      <Button variant="accent" size="sm" onClick={() => complete(r.id)}>
-                        <Check size={12} /> Hoàn thành
-                      </Button>
+                    {expanded.has(r.id) && (
+                      <div className="px-4 pb-3 pl-10" style={{ background: "rgba(0,0,0,0.03)" }}>
+                        <table className="w-full text-[12px]">
+                          <thead>
+                            <tr style={{ color: "var(--ibs-text-dim)" }}>
+                              <th className="px-2 py-1 text-left">VPP</th>
+                              <th className="px-2 py-1 text-right">SL</th>
+                              <th className="px-2 py-1 text-left">ĐVT</th>
+                              <th className="px-2 py-1 text-left">Ghi chú</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {r.items.map((it, i) => (
+                              <tr key={i} className="border-t" style={{ borderColor: "var(--ibs-border)" }}>
+                                <td className="px-2 py-1">{it.item.name}</td>
+                                <td className="px-2 py-1 text-right font-semibold">{fmt(it.quantity)}</td>
+                                <td className="px-2 py-1">{it.item.unit}</td>
+                                <td className="px-2 py-1" style={{ color: "var(--ibs-text-dim)" }}>{it.note || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {r.rejectedReason && <div className="mt-2 text-[12px]" style={{ color: "var(--ibs-danger)" }}>❌ Lý do từ chối: {r.rejectedReason}</div>}
+                      </div>
                     )}
                   </div>
-                </div>
+                );
+              })}
+            </div>
+          )}
 
-                {expanded.has(r.id) && (
-                  <div className="px-4 pb-3 pl-10" style={{ background: "rgba(0,0,0,0.03)" }}>
-                    <table className="w-full text-[12px]">
-                      <thead>
-                        <tr style={{ color: "var(--ibs-text-dim)" }}>
-                          <th className="px-2 py-1 text-left">VPP</th>
-                          <th className="px-2 py-1 text-right">SL</th>
-                          <th className="px-2 py-1 text-left">ĐVT</th>
-                          <th className="px-2 py-1 text-right">Tồn hiện tại</th>
-                          <th className="px-2 py-1 text-left">Ghi chú</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {r.items.map((it, i) => (
-                          <tr key={i} className="border-t" style={{ borderColor: "var(--ibs-border)" }}>
-                            <td className="px-2 py-1">{it.item.name}</td>
-                            <td className="px-2 py-1 text-right font-semibold">{fmt(it.quantity)}</td>
-                            <td className="px-2 py-1">{it.item.unit}</td>
-                            <td className="px-2 py-1 text-right">{fmt(it.item.currentStock)}</td>
-                            <td className="px-2 py-1" style={{ color: "var(--ibs-text-dim)" }}>{it.note || "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {r.rejectedReason && <div className="mt-2 text-[12px]" style={{ color: "var(--ibs-danger)" }}>❌ Lý do từ chối: {r.rejectedReason}</div>}
+          {/* Lịch sử cấp phát — gom theo ngày bấm nút Cấp phát */}
+          {dateGroups.map((g) => {
+            const totalItems = g.reqs.reduce((s, r) => s + r.items.length, 0);
+            return (
+              <div key={g.key} className="rounded-xl border mb-3" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                <button onClick={() => toggle(g.key)} className="w-full px-4 py-3 flex items-center gap-2 text-left">
+                  {expanded.has(g.key) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  <Package size={15} style={{ color: "var(--ibs-accent)" }} />
+                  <span className="font-semibold">Cấp phát vật tư ngày {g.label}</span>
+                  <span className="ml-auto text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{g.reqs.length} nhân viên · {totalItems} mặt hàng</span>
+                </button>
+
+                {expanded.has(g.key) && (
+                  <div className="px-4 pb-4" style={{ borderTop: "1px solid var(--ibs-border)" }}>
+                    {g.reqs.map((r) => (
+                      <div key={r.id} className="pt-3">
+                        <div className="font-semibold text-[13px]">
+                          {r.requester.fullName}
+                          <span className="ml-2 text-[12px] font-normal" style={{ color: "var(--ibs-text-dim)" }}>
+                            ({r.requester.code} — {r.requester.department.name})
+                          </span>
+                        </div>
+                        <table className="w-full text-[12px] mt-1">
+                          <thead>
+                            <tr style={{ color: "var(--ibs-text-dim)" }}>
+                              <th className="px-2 py-1 text-left">VPP</th>
+                              <th className="px-2 py-1 text-right">SL</th>
+                              <th className="px-2 py-1 text-left">ĐVT</th>
+                              <th className="px-2 py-1 text-left">Ghi chú</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {r.items.map((it, i) => (
+                              <tr key={i} className="border-t" style={{ borderColor: "var(--ibs-border)" }}>
+                                <td className="px-2 py-1">{it.item.name}</td>
+                                <td className="px-2 py-1 text-right font-semibold">{fmt(it.quantity)}</td>
+                                <td className="px-2 py-1">{it.item.unit}</td>
+                                <td className="px-2 py-1" style={{ color: "var(--ibs-text-dim)" }}>{it.note || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             );
           })}
-      </div>
+        </>
+      )}
 
       {showNew && <RequestModal onClose={() => setShowNew(false)} onSuccess={() => { setShowNew(false); load(); }} />}
     </div>

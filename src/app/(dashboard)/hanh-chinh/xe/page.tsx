@@ -8,6 +8,7 @@ import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench } from "lucid
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
+import { alertDialog } from "@/lib/confirm-dialog";
 
 // Vietnamese number formatting helpers
 function fmtInt(raw: string): string {
@@ -26,7 +27,7 @@ function parseVNFloat(s: string): number { return parseFloat(s.replace(/\./g, ""
 
 type Vehicle = {
   id: string; licensePlate: string; model: string; type: string;
-  seats: number; driverName?: string; status: string;
+  seats: number; driverName?: string; status: string; owner?: string;
   nextMaintenanceDate?: string; currentMileage: number;
 };
 type FuelLog = {
@@ -42,7 +43,7 @@ type MaintenanceRecord = {
 type VehicleBooking = {
   id: string; vehicleId: string; startDate: string; endDate: string;
   startDatetime?: string; endDatetime?: string;
-  destination: string; purpose: string; passengers: number; status: string;
+  origin?: string | null; destination: string; purpose: string; passengers: number; status: string;
   approvedAt?: string; actualKm?: number; returnTime?: string; notes?: string;
   vehicle: { licensePlate: string; model: string };
   requester: { code: string; fullName: string; department: { name: string } };
@@ -170,7 +171,7 @@ export default function XePage() {
     { key: "vehicle", header: "Xe", render: (b) => <div><div className="font-mono font-semibold">{b.vehicle.licensePlate}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{b.vehicle.model}</div></div> },
     { key: "startDate", header: "Từ", render: (b) => <span className="text-[12px]">{formatDateTime(b.startDate)}</span> },
     { key: "endDate", header: "Đến", render: (b) => <span className="text-[12px]">{formatDateTime(b.endDate)}</span> },
-    { key: "destination", header: "Điểm đến", render: (b) => <div><div>{b.destination}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{VEHICLE_PURPOSE_LABELS[b.purpose] ?? b.purpose}</div></div> },
+    { key: "destination", header: "Hành trình", render: (b) => <div><div>{b.origin ? `${b.origin} → ` : ""}{b.destination}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{VEHICLE_PURPOSE_LABELS[b.purpose] ?? b.purpose}</div></div> },
     { key: "passengers", header: "Hành khách", render: (b) => <span className="text-[12px]">{b.passengers} người</span> },
     { key: "status", header: "Trạng thái", render: (b) => {
       const s = BOOKING_STATUS[b.status] || { label: b.status, color: "#6b7280" };
@@ -252,7 +253,7 @@ export default function XePage() {
             label: `${b.vehicle.licensePlate} — ${b.requester.fullName} → ${b.destination}`,
             color: BOOKING_STATUS[b.status]?.color,
           }))}
-          onDayClick={(dateStr, evs) => alert(`${dateStr}\n${evs.map((e) => e.label).join("\n")}`)}
+          onDayClick={(dateStr, evs) => void alertDialog({ title: dateStr, message: (<div className="space-y-1">{evs.map((e, i) => (<div key={i}>{e.label}</div>))}</div>) })}
         />
       )}
 
@@ -282,8 +283,8 @@ export default function XePage() {
                   <div className="flex gap-4 text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
                     <span>{VEHICLE_TYPE_LABELS[v.type] || v.type}</span>
                     <span>{v.seats} chỗ</span>
-                    <span>{v.currentMileage.toLocaleString("vi-VN")} km</span>
                   </div>
+                  {v.owner && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Chủ sở hữu: <span style={{ color: "var(--ibs-text)" }}>{v.owner}</span></div>}
                   {v.driverName && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Lái xe: <span style={{ color: "var(--ibs-text)" }}>{v.driverName}</span></div>}
                   {v.nextMaintenanceDate && <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Bảo dưỡng: <span style={{ color: "var(--ibs-warning)" }}>{formatDate(v.nextMaintenanceDate)}</span></div>}
                 </div>
@@ -712,7 +713,7 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
   const plusHour = `${pad((now.getHours() + 1) % 24)}:${pad(now.getMinutes())}`;
 
   const [form, setForm] = useState({
-    vehicleId: "", destination: "", purpose: "", passengers: "1",
+    vehicleId: "", origin: "Trụ sở Công ty", destination: "", purpose: "", passengers: "1",
     startDatePart: todayStr, startTimePart: nowTime,
     endDatePart: todayStr, endTimePart: plusHour,
   });
@@ -725,7 +726,7 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
     const endDate = `${form.endDatePart}T${form.endTimePart}`;
     const res = await fetch("/api/v1/vehicles/bookings", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vehicleId: form.vehicleId, destination: form.destination, purpose: form.purpose, passengers: parseInt(form.passengers), startDate, endDate }),
+      body: JSON.stringify({ vehicleId: form.vehicleId, origin: form.origin, destination: form.destination, purpose: form.purpose, passengers: parseInt(form.passengers), startDate, endDate }),
     });
     setSaving(false);
     if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
@@ -773,10 +774,18 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
                 className={inputCls} style={inputStyle} />
             </div>
           </div>
-          <div>
-            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Điểm đến *</label>
-            <input required value={form.destination} onChange={(e) => setForm({ ...form, destination: e.target.value })}
-              className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Điểm đi *</label>
+              <input required value={form.origin} onChange={(e) => setForm({ ...form, origin: e.target.value })}
+                placeholder="Trụ sở Công ty"
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Điểm đến *</label>
+              <input required value={form.destination} onChange={(e) => setForm({ ...form, destination: e.target.value })}
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -805,7 +814,7 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
 }
 
 function NewVehicleModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const [form, setForm] = useState({ licensePlate: "", model: "", type: "CAR", seats: "5" });
+  const [form, setForm] = useState({ licensePlate: "", model: "", type: "CAR", seats: "5", owner: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -849,6 +858,11 @@ function NewVehicleModal({ onClose, onSuccess }: { onClose: () => void; onSucces
               <input type="number" min="1" value={form.seats} onChange={(e) => setForm({ ...form, seats: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
+          </div>
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Chủ sở hữu</label>
+            <input value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })}
+              placeholder="VD: IBS HI / Lisemco / Địa Việt" className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
           </div>
           {error && <div className="text-[12px] text-red-500">{error}</div>}
           <div className="flex gap-2 justify-end mt-2">

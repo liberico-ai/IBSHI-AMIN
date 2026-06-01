@@ -28,16 +28,37 @@ type LeaveRequest = {
 
 const LEAVE_TYPE_LABELS: Record<string, string> = {
   ANNUAL: "Phép năm",
-  SICK: "Nghỉ ốm",
-  PERSONAL: "Việc cá nhân",
   WEDDING: "Cưới hỏi",
-  FUNERAL: "Tang lễ",
+  SICK: "Ốm",
   MATERNITY: "Thai sản",
-  PATERNITY: "Nghỉ vợ sinh",
+  FUNERAL: "Ma chay",
+  WORK_ACCIDENT: "Tai nạn lao động",
+  STUDY: "Học tập",
   UNPAID: "Không lương",
+  // Loại cũ (giữ để hiển thị đơn cũ, không còn trong danh sách tạo mới)
+  PERSONAL: "Việc cá nhân",
+  PATERNITY: "Nghỉ vợ sinh",
 };
 
-const LEAVE_TYPE_OPTIONS = Object.entries(LEAVE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
+// Danh sách loại nghỉ cho NV chọn khi tạo đơn (theo bộ mã chuẩn IBSHI).
+const LEAVE_TYPE_OPTIONS = ["ANNUAL", "WEDDING", "SICK", "MATERNITY", "FUNERAL", "WORK_ACCIDENT", "STUDY", "UNPAID"]
+  .map((value) => ({ value, label: LEAVE_TYPE_LABELS[value] }));
+
+// Loại nghỉ → ký hiệu chấm công (căn cứ Bảng công). Bộ mã chuẩn IBSHI:
+//   AL Phép năm · ML Cưới hỏi · SL Ốm · MT Thai sản · CL Ma chay · WL Tai nạn LĐ · UL Không lương · L Lễ · HT Học tập
+const LEAVE_CODE_MAP: Record<string, string> = {
+  ANNUAL: "AL",
+  WEDDING: "ML",
+  SICK: "SL",
+  MATERNITY: "MT",
+  FUNERAL: "CL",
+  WORK_ACCIDENT: "WL",
+  STUDY: "HT",
+  UNPAID: "UL",
+  PERSONAL: "UL",
+  PATERNITY: "UL",
+};
+function leaveCodeOf(t: string): string { return LEAVE_CODE_MAP[t] || "UL"; }
 
 const STATUS_OPTIONS = [
   { value: "", label: "Tất cả trạng thái" },
@@ -157,6 +178,43 @@ function NewLeaveDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess
   );
 }
 
+// ── Reject Dialog (nhập lý do từ chối) ────────────────────────────────────────
+function RejectDialog({ request, onClose, onConfirm }: { request: LeaveRequest; onClose: () => void; onConfirm: (reason: string) => void }) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const inputCls = "w-full px-3 py-2 rounded-lg text-[13px] outline-none";
+  const inputStyle = { background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" };
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+      <div className="w-full max-w-[460px] rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <h3 className="text-[15px] font-semibold">Từ chối đơn nghỉ phép</h3>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="text-[13px] rounded-lg p-3" style={{ background: "var(--ibs-bg)", color: "var(--ibs-text-muted)" }}>
+            <div><b>{request.employee.fullName}</b> · {LEAVE_TYPE_LABELS[request.leaveType] || request.leaveType}</div>
+            <div className="text-[12px] mt-1">{formatDate(new Date(request.startDate))} → {formatDate(new Date(request.endDate))} · {request.totalDays} ngày</div>
+            <div className="text-[12px] mt-1">Lý do xin nghỉ: {request.reason}</div>
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>Lý do từ chối *</label>
+            <textarea required rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
+              placeholder="Nhập lý do từ chối để nhân viên nắm được..." className={`${inputCls} resize-none`} style={inputStyle} />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2 rounded-lg text-[13px] font-medium" style={{ border: "1px solid var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Hủy</button>
+            <button type="button" disabled={saving || !reason.trim()} onClick={() => { setSaving(true); onConfirm(reason.trim()); }}
+              className="flex-1 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: (saving || !reason.trim()) ? "rgba(220,38,38,0.5)" : "var(--ibs-danger)" }}>
+              {saving ? "Đang xử lý..." : "Xác nhận từ chối"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function NghiPhepPage() {
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
@@ -165,6 +223,7 @@ export default function NghiPhepPage() {
   const [showNew, setShowNew] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
+  const [rejectTarget, setRejectTarget] = useState<LeaveRequest | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me")
@@ -231,22 +290,23 @@ export default function NghiPhepPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function handleAction(id: string, action: "APPROVE" | "REJECT") {
+  async function handleAction(id: string, action: "APPROVE" | "REJECT", note?: string) {
     setActionLoading(id + action);
     try {
       const res = await fetch(`/api/v1/leave-requests/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, note }),
       });
       if (res.ok) {
         const json = await res.json();
         setRequests((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, status: json.data.status } : r))
+          prev.map((r) => (r.id === id ? { ...r, status: json.data.status, rejectedReason: json.data.rejectedReason } : r))
         );
       }
     } finally {
       setActionLoading(null);
+      setRejectTarget(null);
     }
   }
 
@@ -334,7 +394,10 @@ export default function NghiPhepPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-[13px]">
-                      {LEAVE_TYPE_LABELS[r.leaveType] || r.leaveType}
+                      <div>{LEAVE_TYPE_LABELS[r.leaveType] || r.leaveType}</div>
+                      <span className="inline-block mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded" title="Ký hiệu chấm công" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>
+                        {leaveCodeOf(r.leaveType)}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-[13px]">
                       <span className="flex items-center gap-1" style={{ color: "var(--ibs-text-muted)" }}>
@@ -371,7 +434,7 @@ export default function NghiPhepPage() {
                           status={r.status}
                           loading={actionLoading === r.id + "APPROVE" || actionLoading === r.id + "REJECT"}
                           onApprove={() => handleAction(r.id, "APPROVE")}
-                          onReject={() => handleAction(r.id, "REJECT")}
+                          onReject={() => setRejectTarget(r)}
                         />
                       )}
                     </td>
@@ -396,6 +459,14 @@ export default function NghiPhepPage() {
             setRequests((prev) => [item, ...prev]);
             setShowNew(false);
           }}
+        />
+      )}
+
+      {rejectTarget && (
+        <RejectDialog
+          request={rejectTarget}
+          onClose={() => setRejectTarget(null)}
+          onConfirm={(reason) => handleAction(rejectTarget.id, "REJECT", reason)}
         />
       )}
     </div>

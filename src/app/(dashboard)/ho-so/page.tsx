@@ -13,17 +13,44 @@ import { DateInput } from "@/components/shared/date-input";
 type Employee = {
   id: string; code: string; fullName: string; gender: string; status: string;
   startDate: string;
+  idNumber?: string | null; taxCode?: string | null; address?: string | null;
+  insuranceNumber?: string | null; dateOfBirth?: string | null;
   department: { id: string; name: string };
   position: { name: string };
   jobRole?: string | null;
-  contracts: { contractType: string; status: string; baseSalary: number }[];
+  contracts: { contractType: string; status: string; baseSalary: number; endDate?: string | null }[];
 };
+
+// HĐ đang hiệu lực (hoặc mới nhất) + số ngày còn lại tới hạn.
+function activeContract(e: Employee) { return e.contracts?.find((c) => c.status === "ACTIVE") || e.contracts?.[0] || null; }
+function contractDaysLeft(e: Employee): number | null {
+  const c = activeContract(e);
+  if (!c?.endDate) return null; // vô thời hạn / chưa có HĐ
+  return Math.ceil((new Date(c.endDate).getTime() - Date.now()) / 86400000);
+}
+function isExpiringSoon(e: Employee): boolean {
+  if (!["ACTIVE", "PROBATION"].includes(e.status)) return false;
+  const d = contractDaysLeft(e);
+  return d !== null && d <= 45; // còn ≤ 45 ngày (gồm cả đã quá hạn)
+}
+
+// Các trường hồ sơ cơ bản còn THIẾU (NV mới tạo có giá trị placeholder). Trả về danh sách nhãn thiếu.
+function missingFields(e: Employee): string[] {
+  const m: string[] = [];
+  const id = (e.idNumber || "").trim();
+  if (!id || /^0+$/.test(id)) m.push("CCCD");
+  if (!(e.taxCode || "").trim()) m.push("MST");
+  const addr = (e.address || "").trim();
+  if (!addr || /chưa cập nhật/i.test(addr)) m.push("Địa chỉ");
+  if (!(e.insuranceNumber || "").trim()) m.push("Số BHXH");
+  return m;
+}
 type Dept = { id: string; code: string; name: string };
 type Position = { id: string; name: string; level: string; departmentId: string | null };
 
 const CONTRACT_TYPE_LABELS: Record<string, string> = {
   DEFINITE_12M: "12 tháng", DEFINITE_24M: "24 tháng", DEFINITE_36M: "36 tháng",
-  INDEFINITE: "Không XH", PROBATION: "Thử việc",
+  INDEFINITE: "Không XĐ", PROBATION: "Thử việc",
 };
 
 export default function EmployeesPage() {
@@ -35,6 +62,8 @@ export default function EmployeesPage() {
   const [deptFilter, setDeptFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [view, setView] = useState<"all" | "incomplete" | "expiring">("all");
+  const incompleteOnly = view === "incomplete";
 
   function fetchEmployees() {
     setLoading(true);
@@ -51,11 +80,25 @@ export default function EmployeesPage() {
     [allEmployees]
   );
 
+  // Đếm NV chưa cập nhật thông tin cơ bản (chỉ tính NV đang làm/thử việc)
+  const incompleteCount = useMemo(
+    () => allEmployees.filter((e) => ["ACTIVE", "PROBATION"].includes(e.status) && missingFields(e).length > 0).length,
+    [allEmployees]
+  );
+
+  // Đếm NV sắp hết hạn HĐ (HĐ đang hiệu lực còn ≤ 45 ngày)
+  const expiringCount = useMemo(
+    () => allEmployees.filter((e) => isExpiringSoon(e)).length,
+    [allEmployees]
+  );
+
   const filtered = useMemo(() => allEmployees.filter((emp) => {
     if (deptFilter && emp.department?.name !== deptFilter) return false;
     if (statusFilter && emp.status !== statusFilter) return false;
+    if (view === "incomplete" && !(["ACTIVE", "PROBATION"].includes(emp.status) && missingFields(emp).length > 0)) return false;
+    if (view === "expiring" && !isExpiringSoon(emp)) return false;
     return true;
-  }), [allEmployees, deptFilter, statusFilter]);
+  }), [allEmployees, deptFilter, statusFilter, view]);
 
   async function handleExport() {
     const { default: ExcelJS } = await import("exceljs");
@@ -119,14 +162,42 @@ export default function EmployeesPage() {
       key: "contractType", header: "Loại HĐ",
       render: (row) => {
         const emp = row as unknown as Employee;
-        const ct = emp.contracts?.[0];
+        const ct = activeContract(emp);
         if (!ct) return <span style={{ color: "var(--ibs-text-dim)" }}>—</span>;
-        return <span>{CONTRACT_TYPE_LABELS[ct.contractType] || ct.contractType}</span>;
+        const d = contractDaysLeft(emp);
+        const expiring = ["ACTIVE", "PROBATION"].includes(emp.status) && d !== null && d <= 45;
+        return (
+          <div>
+            <span>{CONTRACT_TYPE_LABELS[ct.contractType] || ct.contractType}</span>
+            {expiring && (
+              <span className="block text-[11px] font-semibold" style={{ color: "var(--ibs-danger)" }}>
+                {d! < 0 ? `Quá hạn ${-d!} ngày` : `Còn ${d} ngày`}
+              </span>
+            )}
+          </div>
+        );
       },
     },
     {
       key: "status", header: "Trạng thái",
       render: (row) => <StatusBadge status={(row as unknown as Employee).status} />,
+    },
+    {
+      key: "missing", header: "Thiếu TT",
+      render: (row) => {
+        const emp = row as unknown as Employee;
+        if (!["ACTIVE", "PROBATION"].includes(emp.status)) return <span style={{ color: "var(--ibs-text-dim)" }}>—</span>;
+        const miss = missingFields(emp);
+        if (miss.length === 0) return <span title="Đã đủ thông tin cơ bản" style={{ color: "var(--ibs-success)" }}>✓</span>;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {miss.map((m) => (
+              <span key={m} className="text-[10px] px-1.5 py-0.5 rounded font-semibold whitespace-nowrap"
+                style={{ background: "rgba(245,158,11,0.15)", color: "var(--ibs-warning)" }}>{m}</span>
+            ))}
+          </div>
+        );
+      },
     },
     {
       key: "id", header: "", width: "70px",
@@ -150,6 +221,37 @@ export default function EmployeesPage() {
   return (
     <div>
       <PageTitle title="M1 - Hồ sơ nhân sự" description="Quản lý hồ sơ CBNV — IBS Heavy Industry JSC" />
+
+      {/* Tab: Tất cả / Chưa cập nhật thông tin / Sắp hết hạn HĐ */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <button onClick={() => setView("all")}
+          className="px-4 py-2 rounded-lg text-[13px] font-semibold border transition-colors"
+          style={{ background: view === "all" ? "var(--ibs-accent)" : "var(--ibs-bg-card)", color: view === "all" ? "#fff" : "var(--ibs-text-muted)", borderColor: "var(--ibs-border)" }}>
+          Tất cả nhân sự
+        </button>
+        <button onClick={() => setView("incomplete")}
+          className="px-4 py-2 rounded-lg text-[13px] font-semibold border transition-colors flex items-center gap-1.5"
+          style={{ background: view === "incomplete" ? "var(--ibs-warning)" : "var(--ibs-bg-card)", color: view === "incomplete" ? "#fff" : (incompleteCount > 0 ? "var(--ibs-warning)" : "var(--ibs-text-muted)"), borderColor: incompleteCount > 0 ? "var(--ibs-warning)" : "var(--ibs-border)" }}>
+          ⚠ Chưa cập nhật thông tin
+          {incompleteCount > 0 && (
+            <span className="inline-flex items-center justify-center min-w-[20px] h-[20px] px-1.5 rounded-full text-[11px] font-bold"
+              style={{ background: view === "incomplete" ? "rgba(255,255,255,0.25)" : "var(--ibs-warning)", color: "#fff" }}>
+              {incompleteCount}
+            </span>
+          )}
+        </button>
+        <button onClick={() => setView("expiring")}
+          className="px-4 py-2 rounded-lg text-[13px] font-semibold border transition-colors flex items-center gap-1.5"
+          style={{ background: view === "expiring" ? "var(--ibs-danger)" : "var(--ibs-bg-card)", color: view === "expiring" ? "#fff" : (expiringCount > 0 ? "var(--ibs-danger)" : "var(--ibs-text-muted)"), borderColor: expiringCount > 0 ? "var(--ibs-danger)" : "var(--ibs-border)" }}>
+          ⏳ Sắp hết hạn HĐ
+          {expiringCount > 0 && (
+            <span className="inline-flex items-center justify-center min-w-[20px] h-[20px] px-1.5 rounded-full text-[11px] font-bold"
+              style={{ background: view === "expiring" ? "rgba(255,255,255,0.25)" : "var(--ibs-danger)", color: "#fff" }}>
+              {expiringCount}
+            </span>
+          )}
+        </button>
+      </div>
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}

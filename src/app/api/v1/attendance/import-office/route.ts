@@ -9,6 +9,8 @@ type RecordInput = {
   workHours: number;
   otHours: number;
   status?: string;
+  paidLeaveDays?: number;   // ngày nghỉ phép có lương (AL) trong ngày: 0/0.5/1
+  leaveCode?: string | null; // mã nghỉ gốc (AL/UL/SL/ML/L)
 };
 
 export async function POST(request: NextRequest) {
@@ -73,15 +75,22 @@ export async function POST(request: NextRequest) {
           if (!employeeId) return;
 
           const date = new Date(r.date);
-          // Derive status from workHours nếu caller không truyền.
-          // Ngưỡng 7h: file công thường ghi 7.5–7.95h cho ngày làm đủ (do giờ vào/ra)
-          // → coi >= 7h là PRESENT (cả ngày). < 7 nhưng > 0 = HALF_DAY. 0 = vắng không phép.
-          const status = r.status ?? (r.workHours >= 7 ? "PRESENT" : r.workHours > 0 ? "HALF_DAY" : "ABSENT_UNAPPROVED");
+          const paidLeaveDays = r.paidLeaveDays ?? 0;
+          // Derive status:
+          //   >=7h → PRESENT; >0 → HALF_DAY; nếu không làm nhưng có nghỉ phép có lương → ABSENT_APPROVED(_HALF);
+          //   còn lại = vắng không phép. (Ngưỡng 7h vì file ghi 7.5–7.95h cho ngày đủ.)
+          const status = r.status ?? (
+            r.workHours >= 7 ? "PRESENT"
+            : r.workHours > 0 ? "HALF_DAY"
+            : paidLeaveDays >= 1 ? "ABSENT_APPROVED"
+            : paidLeaveDays > 0 ? "ABSENT_APPROVED_HALF"
+            : "ABSENT_UNAPPROVED"
+          );
 
           await prisma.attendanceRecord.upsert({
             where: { employeeId_date: { employeeId, date } },
-            create: { employeeId, date, status: status as any, workHours: r.workHours, otHours: r.otHours, createdBy },
-            update: { status: status as any, workHours: r.workHours, otHours: r.otHours },
+            create: { employeeId, date, status: status as any, workHours: r.workHours, otHours: r.otHours, paidLeaveDays, leaveCode: r.leaveCode ?? null, createdBy },
+            update: { status: status as any, workHours: r.workHours, otHours: r.otHours, paidLeaveDays, leaveCode: r.leaveCode ?? null },
           });
           created++;
         })
