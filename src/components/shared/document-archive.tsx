@@ -6,7 +6,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { DateInput } from "@/components/shared/date-input";
 import { formatDate, apiError } from "@/lib/utils";
 import { BUCKETS } from "@/lib/minio-constants";
-import { getPresignedUrl } from "@/lib/use-presigned-url";
+import { viewUrl } from "@/lib/use-presigned-url";
 
 type Doc = {
   id: string;
@@ -98,17 +98,16 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
         const url = d.scanFileUrl || d.scanUrl;
         if (!url) return <span style={{ color: "var(--ibs-text-dim)" }}>—</span>;
         return (
-          <button
-            onClick={async () => {
-              const signed = await getPresignedUrl(url);
-              window.open(signed, "_blank", "noopener,noreferrer");
-            }}
+          <a
+            href={viewUrl(url)}
+            target="_blank"
+            rel="noopener noreferrer"
             className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-md font-semibold"
             style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}
           >
             <FileText size={11} /> Xem
             <ExternalLink size={10} />
-          </button>
+          </a>
         );
       },
     },

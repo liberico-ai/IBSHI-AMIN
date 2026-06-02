@@ -80,9 +80,11 @@ export async function PUT(
       return NextResponse.json({ data: result });
     } catch (err: any) {
       const code = err?.code;
-      if (code === "PERIOD_NOT_FOUND") return NextResponse.json({ error: { code } }, { status: 404 });
-      if (code === "PERIOD_ALREADY_APPROVED") return NextResponse.json({ error: { code } }, { status: 409 });
-      throw err;
+      if (code === "PERIOD_NOT_FOUND") return NextResponse.json({ error: { code, message: "Không tìm thấy kỳ lương" } }, { status: 404 });
+      if (code === "PERIOD_ALREADY_APPROVED") return NextResponse.json({ error: { code, message: "Kỳ lương đã được duyệt, không thể tính lại" } }, { status: 409 });
+      if (code === "NO_ATTENDANCE_DATA") return NextResponse.json({ error: { code, message: err.message } }, { status: 400 });
+      console.error("[payroll calculate] Error:", err);
+      return NextResponse.json({ error: { code: "CALCULATE_FAILED", message: err?.message || "Lỗi khi tính lương" } }, { status: 500 });
     }
   }
 

@@ -26,7 +26,7 @@ import {
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 import { DateInput } from "@/components/shared/date-input";
-import { usePresignedUrl } from "@/lib/use-presigned-url";
+import { viewUrl } from "@/lib/use-presigned-url";
 
 type Employee = {
   id: string;
@@ -327,7 +327,7 @@ function ViewContractDialog({
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const base = `/api/v1/employees/${employeeId}/contracts/${contractId}`;
-  const signedScan = usePresignedUrl(scanUrl);
+  const signedScan = scanUrl ? viewUrl(scanUrl) : null;
 
   useEffect(() => {
     fetch(`${base}/html`)
@@ -366,12 +366,10 @@ function ViewContractDialog({
                   <span>📎 Bản scan đã ký</span>
                   <a href={signedScan || "#"} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)", opacity: signedScan ? 1 : 0.5, pointerEvents: signedScan ? "auto" : "none" }}>Mở tab mới ↗</a>
                 </div>
-                {!signedScan ? (
-                  <div className="p-4 text-[12px] text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải bản scan…</div>
-                ) : isImg ? (
-                  <img src={signedScan} alt="Bản scan" className="w-full h-auto block" style={{ maxHeight: "none" }} />
+                {isImg ? (
+                  <img src={signedScan!} alt="Bản scan" className="w-full h-auto block" style={{ maxHeight: "none" }} />
                 ) : isPdf ? (
-                  <iframe src={signedScan} className="w-full" style={{ height: 600, border: 0 }} title="Bản scan PDF" />
+                  <iframe src={signedScan!} className="w-full" style={{ height: 600, border: 0 }} title="Bản scan PDF" />
                 ) : (
                   <div className="p-4 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
                     Định dạng <b>.{ext}</b> không hỗ trợ xem inline. Bấm "Mở tab mới ↗" để tải về.
@@ -1622,7 +1620,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                             </div>
                             <div className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-muted)" }}>{changes.join(" · ") || "—"}</div>
                             {a.rejectedReason && <div className="text-[11px] mt-0.5" style={{ color: "var(--ibs-danger)" }}>Lý do từ chối: {a.rejectedReason}</div>}
-                            {a.fileUrl && <a href={a.fileUrl} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 Xem bản scan đã ký</a>}
+                            {a.fileUrl && <a href={viewUrl(a.fileUrl)} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 Xem bản scan đã ký</a>}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded" style={{ color: badge.c, background: badge.bg }}>{badge.label}</span>

@@ -56,7 +56,7 @@ export const INSURANCE_RATES = {
 export const MEAL_UNIT_PRICE = 35000; // VND/suất (mặc định cũ, dùng fallback)
 // Đơn giá suất ăn theo đối tượng
 export const MEAL_PRICE_EMPLOYEE = 20000;      // Cán bộ nhân viên
-export const MEAL_PRICE_SUBCONTRACTOR = 28000; // Thầu phụ
+export const MEAL_PRICE_SUBCONTRACTOR = 20000; // Thầu phụ
 // Khách: nhập tay đơn giá khi đăng ký (guestUnitPrice trên từng phiếu)
 
 export const SALARY_CONFIG = {

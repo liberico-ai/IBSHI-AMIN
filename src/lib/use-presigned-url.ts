@@ -46,3 +46,14 @@ export async function getPresignedUrl(url: string): Promise<string> {
     return url;
   }
 }
+
+/**
+ * Trả về URL proxy của backend: vĩnh viễn (miễn user còn login),
+ * không expire, dùng được cho <img>, <iframe>, <a href>.
+ * Bucket gốc vẫn private — file được stream qua /api/v1/files/view.
+ */
+export function viewUrl(originalUrl?: string | null, download = false): string {
+  if (!originalUrl) return "";
+  const dl = download ? "&download=1" : "";
+  return `/api/v1/files/view?url=${encodeURIComponent(originalUrl)}${dl}`;
+}

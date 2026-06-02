@@ -6,6 +6,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, Download } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
+import { alertDialog } from "@/lib/confirm-dialog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type PayrollPeriod = {
@@ -814,12 +815,17 @@ export default function LuongPage() {
 
   async function handleCalculate(id: string) {
     setCalculatingId(id);
-    await fetch(`/api/v1/payroll/${id}`, {
+    const res = await fetch(`/api/v1/payroll/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "CALCULATE" }),
     });
     setCalculatingId(null);
+    if (!res.ok) {
+      const json = await res.json().catch(() => null);
+      await alertDialog(apiError(res.status, json?.error) || "Tính lương thất bại");
+      return;
+    }
     fetchPeriods();
   }
 

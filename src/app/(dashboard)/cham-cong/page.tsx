@@ -231,6 +231,15 @@ function OfficeAttendanceCard({
         return;
       }
 
+      // Defensive: chặn record có giờ làm bất thường (1 ngày max 24h).
+      // Lỗi này thường do parse Excel nhầm cột (mã NV / Excel-date-serial → workHours).
+      const badRecords = records.filter((r) => r.workHours < 0 || r.otHours < 0 || r.workHours > 24 || r.otHours > 24);
+      if (badRecords.length > 0) {
+        const sample = badRecords.slice(0, 3).map((r) => `${r.employeeCode} ${r.date} (work=${r.workHours}, ot=${r.otHours})`).join("; ");
+        setImportMsg({ ok: false, text: `Phát hiện ${badRecords.length}/${records.length} dòng có giờ làm bất thường (>24h). File có thể bị nhầm cột. Mẫu: ${sample}` });
+        return;
+      }
+
       const res = await fetch("/api/v1/attendance/import-office", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -555,6 +564,14 @@ function AttendanceGridCard({
 
       if (records.length === 0) {
         setImportMsg({ ok: false, text: `Không tìm thấy dữ liệu hợp lệ. File có ${rows.length} dòng. Mở Console (F12) để xem cấu trúc.` });
+        return;
+      }
+
+      // Defensive: chặn record có giờ làm bất thường (1 ngày max 24h)
+      const badRecords = records.filter((r) => r.workHours < 0 || r.otHours < 0 || r.workHours > 24 || r.otHours > 24);
+      if (badRecords.length > 0) {
+        const sample = badRecords.slice(0, 3).map((r) => `${r.employeeCode} ${r.date} (work=${r.workHours}, ot=${r.otHours})`).join("; ");
+        setImportMsg({ ok: false, text: `Phát hiện ${badRecords.length}/${records.length} dòng có giờ làm bất thường (>24h). File có thể bị nhầm cột. Mẫu: ${sample}` });
         return;
       }
 

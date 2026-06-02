@@ -51,3 +51,6 @@ docs/Bao-gia-subscription*
 docs/Ban-giao-he-thong-*
 docs/Các tính năng bàn giao.docx
 docs/~$*
+
+# debug/audit/cleanup scripts one-off — đặt prefix _ để dễ nhận biết
+scripts/_*
