@@ -41,9 +41,15 @@ function vnDow(d: Date): string {
 }
 const fmtNum = (n: number) => n.toLocaleString("vi-VN");
 
+const today = () => new Date().toISOString().slice(0, 10);
+
 export default function NhaAnPage() {
   const [tab, setTab] = useState<"registrations" | "supplementary" | "feedback" | "cost" | "food">("registrations");
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(today());
+  const [dateTo, setDateTo] = useState(today());
+  // Backward-compat: selectedDate = dateFrom (dùng cho UI hiển thị "ngày X" khi chọn 1 ngày)
+  const selectedDate = dateFrom;
+  const isRange = dateFrom !== dateTo;
   const [registrations, setRegistrations] = useState<MealReg[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [feedbacks, setFeedbacks] = useState<MealFeedback[]>([]);
@@ -93,14 +99,14 @@ export default function NhaAnPage() {
 
   function fetchRegs() {
     setLoading(true);
-    fetch(`/api/v1/meals?date=${selectedDate}`)
+    fetch(`/api/v1/meals?from=${dateFrom}&to=${dateTo}`)
       .then((r) => r.json()).then((res) => setRegistrations(res.data || []))
       .finally(() => setLoading(false));
   }
 
   function fetchSupplementary() {
     setSuppLoading(true);
-    fetch("/api/v1/meals/supplementary")
+    fetch(`/api/v1/meals/supplementary?from=${dateFrom}&to=${dateTo}`)
       .then((r) => r.json())
       .then((res) => { setSuppReqs(res.data || []); setSuppCanApprove(!!res.canApprove); })
       .finally(() => setSuppLoading(false));
@@ -138,7 +144,7 @@ export default function NhaAnPage() {
   }
 
   function fetchFeedbacks() {
-    fetch(`/api/v1/meals/feedback?date=${selectedDate}`)
+    fetch(`/api/v1/meals/feedback?from=${dateFrom}&to=${dateTo}`)
       .then((r) => r.json()).then((res) => { setFeedbacks(res.data || []); setFeedbackMeta(res.meta || null); });
   }
 
@@ -150,21 +156,20 @@ export default function NhaAnPage() {
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepartments(res.data || []));
   }, []);
 
-  useEffect(() => { fetchRegs(); fetchFeedbacks(); fetchSupplementary(); }, [selectedDate]);
+  useEffect(() => { fetchRegs(); fetchFeedbacks(); fetchSupplementary(); }, [dateFrom, dateTo]);
 
   const totalLunch  = registrations.reduce((s, r) => s + r.lunchCount, 0);
   const totalDinner = registrations.reduce((s, r) => s + r.dinnerCount, 0);
   const totalGuest  = registrations.reduce((s, r) => s + r.guestCount, 0);
   const totalSub    = registrations.reduce((s, r) => s + (r.subcontractorCount || 0), 0);
 
-  // ── Tổng hợp gộp (đăng ký thường + bổ sung đã duyệt) cho ngày đang chọn ──
-  const approvedSuppToday = suppReqs.filter((s) =>
-    s.status === "APPROVED" && new Date(s.date).toISOString().slice(0, 10) === selectedDate
-  );
-  const suppLunch = approvedSuppToday.filter((s) => s.personType === "EMPLOYEE" && s.mealType !== "DINNER").reduce((sum, s) => sum + s.quantity, 0);
-  const suppDinner = approvedSuppToday.filter((s) => s.personType === "EMPLOYEE" && s.mealType === "DINNER").reduce((sum, s) => sum + s.quantity, 0);
-  const suppGuest = approvedSuppToday.filter((s) => s.personType === "GUEST").reduce((sum, s) => sum + s.quantity, 0);
-  const suppSub = approvedSuppToday.filter((s) => s.personType === "SUBCONTRACTOR").reduce((sum, s) => sum + s.quantity, 0);
+  // ── Tổng hợp gộp (đăng ký thường + bổ sung đã duyệt) cho khoảng ngày đang chọn ──
+  // suppReqs đã được API filter theo from-to, chỉ cần lọc thêm status=APPROVED
+  const approvedSuppInRange = suppReqs.filter((s) => s.status === "APPROVED");
+  const suppLunch = approvedSuppInRange.filter((s) => s.personType === "EMPLOYEE" && s.mealType !== "DINNER").reduce((sum, s) => sum + s.quantity, 0);
+  const suppDinner = approvedSuppInRange.filter((s) => s.personType === "EMPLOYEE" && s.mealType === "DINNER").reduce((sum, s) => sum + s.quantity, 0);
+  const suppGuest = approvedSuppInRange.filter((s) => s.personType === "GUEST").reduce((sum, s) => sum + s.quantity, 0);
+  const suppSub = approvedSuppInRange.filter((s) => s.personType === "SUBCONTRACTOR").reduce((sum, s) => sum + s.quantity, 0);
 
   const combinedLunch = totalLunch + suppLunch;
   const combinedDinner = totalDinner + suppDinner;
@@ -187,14 +192,42 @@ export default function NhaAnPage() {
       </div>
       <PageTitle title="Nhà ăn" description="Đăng ký suất ăn hàng ngày theo phòng ban" />
 
-      {/* Date picker + tabs toolbar */}
-      <div className="flex items-center gap-4 mb-4 flex-wrap">
+      {/* Date range picker + tabs toolbar */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="flex items-center gap-2">
-          <label className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Ngày:</label>
-          <DateInput value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
-            className="rounded-lg px-3 py-1.5 text-[13px] border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          <label className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Từ:</label>
+          <DateInput
+            value={dateFrom}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDateFrom(v);
+              if (v > dateTo) setDateTo(v); // auto đẩy "đến" theo nếu "từ" lớn hơn
+            }}
+            max={dateTo}
+            className="rounded-lg px-3 py-1.5 text-[13px] border"
+            style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
+          />
+          <label className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>đến:</label>
+          <DateInput
+            value={dateTo}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDateTo(v);
+              if (v < dateFrom) setDateFrom(v);
+            }}
+            min={dateFrom}
+            className="rounded-lg px-3 py-1.5 text-[13px] border"
+            style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
+          />
         </div>
-        <button onClick={() => { fetchRegs(); fetchFeedbacks(); }} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
+        <button
+          onClick={() => { const t = today(); setDateFrom(t); setDateTo(t); }}
+          className="px-3 py-1.5 rounded-lg text-[13px] font-semibold border"
+          style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }}
+        >
+          Hôm nay
+        </button>
+        <button onClick={() => { fetchRegs(); fetchFeedbacks(); fetchSupplementary(); }} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
         {tab === "registrations" && (
           <div className="flex items-center gap-2 ml-auto">
             <button onClick={() => setShowSupplementary(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}>
@@ -229,30 +262,46 @@ export default function NhaAnPage() {
       </div>
 
       {tab === "registrations" && <>
-        {/* Summary — per meal category */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-            <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>Bữa trưa</div>
-            <div className="text-[32px] font-bold" style={{ color: "var(--ibs-accent)" }}>{totalLunch}</div>
-            <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>suất ăn</div>
-          </div>
-          <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-            <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>Bữa tối OT</div>
-            <div className="text-[32px] font-bold" style={{ color: "#8b5cf6" }}>{totalDinner}</div>
-            <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>suất ăn</div>
-          </div>
-          <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-            <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>Suất khách</div>
-            <div className="text-[32px] font-bold" style={{ color: "var(--ibs-warning)" }}>{totalGuest}</div>
-            <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>suất ăn</div>
-          </div>
-        </div>
+        {/* Tổng hợp số suất ăn cuối cùng — gộp đăng ký thường + bổ sung đã duyệt */}
+        <CombinedMealSummary
+          dateFrom={dateFrom} dateTo={dateTo}
+          lunch={combinedLunch} dinner={combinedDinner} guest={combinedGuest} sub={combinedSub} total={combinedTotal}
+          baseLunch={totalLunch} baseDinner={totalDinner} baseGuest={totalGuest} baseSub={totalSub}
+          suppLunch={suppLunch} suppDinner={suppDinner} suppGuest={suppGuest} suppSub={suppSub}
+          hasSupp={hasSupp}
+        />
 
-        {/* Registration table per department */}
-        {registrations.length > 0 ? (
+        {/* Registration table per department — gom theo phòng ban khi xem nhiều ngày */}
+        {registrations.length > 0 ? (() => {
+          // Gom: 1 phòng ban × nhiều ngày → cộng dồn counts
+          type AggRow = {
+            departmentId: string;
+            departmentName: string;
+            lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number;
+            subcontractorNames: string[];
+            notes: string[];
+            singleDayId?: string; // chỉ có khi range = 1 ngày → cho phép xoá
+          };
+          const aggMap = new Map<string, AggRow>();
+          for (const r of registrations) {
+            let agg = aggMap.get(r.departmentId);
+            if (!agg) {
+              agg = { departmentId: r.departmentId, departmentName: r.department.name, lunchCount: 0, dinnerCount: 0, guestCount: 0, subcontractorCount: 0, subcontractorNames: [], notes: [] };
+              aggMap.set(r.departmentId, agg);
+            }
+            agg.lunchCount += r.lunchCount;
+            agg.dinnerCount += r.dinnerCount;
+            agg.guestCount += r.guestCount;
+            agg.subcontractorCount += r.subcontractorCount || 0;
+            if (r.subcontractorName && !agg.subcontractorNames.includes(r.subcontractorName)) agg.subcontractorNames.push(r.subcontractorName);
+            if (r.specialNote) agg.notes.push(r.specialNote);
+            if (!isRange) agg.singleDayId = r.id;
+          }
+          const aggRows = Array.from(aggMap.values()).sort((a, b) => a.departmentName.localeCompare(b.departmentName));
+          return (
           <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
             <div className="px-5 py-3 border-b text-[14px] font-semibold" style={{ borderColor: "var(--ibs-border)" }}>
-              Đăng ký suất ăn ngày {formatDate(selectedDate)}
+              Đăng ký suất ăn {isRange ? `từ ${dateFrom.split("-").reverse().join("/")} đến ${dateTo.split("-").reverse().join("/")}` : `ngày ${formatDate(selectedDate)}`}
             </div>
             <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
@@ -264,19 +313,19 @@ export default function NhaAnPage() {
                   <th className="text-right px-4 py-2.5 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>KHÁCH</th>
                   <th className="text-right px-4 py-2.5 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>THẦU PHỤ</th>
                   <th className="text-right px-4 py-2.5 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>TỔNG</th>
-                  {isHRAdmin && <th className="px-5 py-2.5" />}
+                  {isHRAdmin && !isRange && <th className="px-5 py-2.5" />}
                 </tr>
               </thead>
               <tbody>
-                {registrations.map((r) => (
-                  <tr key={r.id} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
-                    <td className="px-5 py-2.5 font-medium">{r.department.name}</td>
+                {aggRows.map((r) => (
+                  <tr key={r.departmentId} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
+                    <td className="px-5 py-2.5 font-medium">{r.departmentName}</td>
                     <td className="px-4 py-2.5 text-right" style={{ color: "var(--ibs-accent)" }}>{r.lunchCount}</td>
                     <td className="px-4 py-2.5 text-right" style={{ color: "#8b5cf6" }}>{r.dinnerCount}</td>
                     <td className="px-4 py-2.5 text-right" style={{ color: "var(--ibs-warning)" }}>{r.guestCount}</td>
-                    <td className="px-4 py-2.5 text-right" style={{ color: "#10b981" }}>{r.subcontractorCount || 0}</td>
-                    <td className="px-4 py-2.5 text-right font-semibold">{r.lunchCount + r.dinnerCount + r.guestCount + (r.subcontractorCount || 0)}</td>
-                    {isHRAdmin && (
+                    <td className="px-4 py-2.5 text-right" style={{ color: "#10b981" }}>{r.subcontractorCount}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold">{r.lunchCount + r.dinnerCount + r.guestCount + r.subcontractorCount}</td>
+                    {isHRAdmin && !isRange && (
                       <td className="px-5 py-2.5 text-right">
                         <button onClick={() => handleDelete(r.departmentId)} className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>Xóa</button>
                       </td>
@@ -290,57 +339,49 @@ export default function NhaAnPage() {
                   <td className="px-4 py-2.5 text-right font-bold" style={{ color: "var(--ibs-warning)" }}>{totalGuest}</td>
                   <td className="px-4 py-2.5 text-right font-bold" style={{ color: "#10b981" }}>{totalSub}</td>
                   <td className="px-4 py-2.5 text-right font-bold">{totalLunch + totalDinner + totalGuest + totalSub}</td>
-                  {isHRAdmin && <td />}
+                  {isHRAdmin && !isRange && <td />}
                 </tr>
               </tbody>
             </table>
             </div>
-            {registrations.some((r) => r.subcontractorName) && (
+            {aggRows.some((r) => r.subcontractorNames.length > 0) && (
               <div className="px-5 py-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
                 <div className="text-[11px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>THẦU PHỤ</div>
-                {registrations.filter((r) => r.subcontractorName).map((r) => (
-                  <div key={r.id} className="text-[12px] mb-1">
-                    <span className="font-medium">{r.department.name}:</span>{" "}
-                    <span style={{ color: "#10b981" }}>{r.subcontractorName}</span>
+                {aggRows.filter((r) => r.subcontractorNames.length > 0).map((r) => (
+                  <div key={r.departmentId} className="text-[12px] mb-1">
+                    <span className="font-medium">{r.departmentName}:</span>{" "}
+                    <span style={{ color: "#10b981" }}>{r.subcontractorNames.join(", ")}</span>
                     <span style={{ color: "var(--ibs-text-dim)" }}> ({r.subcontractorCount} suất)</span>
                   </div>
                 ))}
               </div>
             )}
-            {registrations.some((r) => r.specialNote) && (
+            {aggRows.some((r) => r.notes.length > 0) && (
               <div className="px-5 py-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
                 <div className="text-[11px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>GHI CHÚ ĐẶC BIỆT</div>
-                {registrations.filter((r) => r.specialNote).map((r) => (
-                  <div key={r.id} className="text-[12px] mb-1">
-                    <span className="font-medium">{r.department.name}:</span>{" "}
-                    <span style={{ color: "var(--ibs-text-dim)" }}>{r.specialNote}</span>
+                {aggRows.filter((r) => r.notes.length > 0).map((r) => (
+                  <div key={r.departmentId} className="text-[12px] mb-1">
+                    <span className="font-medium">{r.departmentName}:</span>{" "}
+                    <span style={{ color: "var(--ibs-text-dim)" }}>{r.notes.join(" · ")}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
-        ) : (
+          );
+        })() : (
           !loading && (
             <div className="rounded-xl border flex items-center justify-center py-16" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-              <div className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có đăng ký suất ăn cho ngày này</div>
+              <div className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Không có đăng ký suất ăn cho {isRange ? "khoảng ngày này" : "ngày này"}</div>
             </div>
           )
         )}
-
-        {/* Tổng hợp số suất ăn cuối cùng — gộp đăng ký thường + bổ sung đã duyệt */}
-        <CombinedMealSummary
-          date={selectedDate}
-          lunch={combinedLunch} dinner={combinedDinner} guest={combinedGuest} sub={combinedSub} total={combinedTotal}
-          baseLunch={totalLunch} baseDinner={totalDinner} baseGuest={totalGuest} baseSub={totalSub}
-          suppLunch={suppLunch} suppDinner={suppDinner} suppGuest={suppGuest} suppSub={suppSub}
-          hasSupp={hasSupp}
-        />
       </>}
 
       {tab === "supplementary" && <>
         {/* Tổng hợp số suất ăn ngày đang chọn — gộp đăng ký thường + bổ sung đã duyệt */}
         <CombinedMealSummary
-          date={selectedDate}
+          dateFrom={dateFrom} dateTo={dateTo}
           lunch={combinedLunch} dinner={combinedDinner} guest={combinedGuest} sub={combinedSub} total={combinedTotal}
           baseLunch={totalLunch} baseDinner={totalDinner} baseGuest={totalGuest} baseSub={totalSub}
           suppLunch={suppLunch} suppDinner={suppDinner} suppGuest={suppGuest} suppSub={suppSub}
@@ -349,7 +390,7 @@ export default function NhaAnPage() {
 
         <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
           <div className="px-5 py-3 border-b text-[14px] font-semibold flex items-center justify-between" style={{ borderColor: "var(--ibs-border)" }}>
-            <span>Đăng ký suất ăn bổ sung</span>
+            <span>Đăng ký suất ăn bổ sung — {isRange ? `${dateFrom.split("-").reverse().join("/")} → ${dateTo.split("-").reverse().join("/")}` : `Ngày ${dateFrom.split("-").reverse().join("/")}`}</span>
             <span className="text-[12px] font-normal" style={{ color: "var(--ibs-text-dim)" }}>
               {suppCanApprove ? "Tất cả phiếu (quyền duyệt TP HCNS)" : "Chỉ phiếu bạn tạo"}
             </span>
@@ -357,7 +398,7 @@ export default function NhaAnPage() {
           {suppLoading ? (
             <div className="py-12 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
           ) : suppReqs.length === 0 ? (
-            <div className="py-12 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có phiếu đăng ký bổ sung nào</div>
+            <div className="py-12 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Không có phiếu đăng ký bổ sung nào trong khoảng này</div>
           ) : (
             <div className="divide-y" style={{ borderColor: "var(--ibs-border)" }}>
               {suppReqs.map((s) => {
@@ -1148,13 +1189,17 @@ function FeedbackModal({ employeeId, selectedDate, onClose, onSuccess }: {
 
 // ── Panel tổng hợp gộp đăng ký thường + bổ sung đã duyệt ─────────────────────
 function CombinedMealSummary(props: {
-  date: string;
+  dateFrom: string; dateTo: string;
   lunch: number; dinner: number; guest: number; sub: number; total: number;
   baseLunch: number; baseDinner: number; baseGuest: number; baseSub: number;
   suppLunch: number; suppDinner: number; suppGuest: number; suppSub: number;
   hasSupp: boolean;
 }) {
-  const { date, lunch, dinner, guest, sub, total, baseLunch, baseDinner, baseGuest, baseSub, suppLunch, suppDinner, suppGuest, suppSub, hasSupp } = props;
+  const { dateFrom, dateTo, lunch, dinner, guest, sub, total, baseLunch, baseDinner, baseGuest, baseSub, suppLunch, suppDinner, suppGuest, suppSub, hasSupp } = props;
+  const isRange = dateFrom !== dateTo;
+  const rangeLabel = isRange
+    ? `Từ ${dateFrom.split("-").reverse().join("/")} đến ${dateTo.split("-").reverse().join("/")}`
+    : `Ngày ${dateFrom.split("-").reverse().join("/")}`;
   const cell = (label: string, value: number, color: string, baseVal: number, suppVal: number) => (
     <div className="rounded-xl border p-4" style={{ background: "rgba(255,255,255,0.6)", borderColor: "var(--ibs-border)" }}>
       <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>{label}</div>
@@ -1165,10 +1210,10 @@ function CombinedMealSummary(props: {
     </div>
   );
   return (
-    <div className="mt-6 rounded-xl border-2 p-4" style={{ background: "rgba(0,180,216,0.05)", borderColor: "var(--ibs-accent)" }}>
+    <div className="mb-5 rounded-xl border-2 p-4" style={{ background: "rgba(0,180,216,0.05)", borderColor: "var(--ibs-accent)" }}>
       <div className="flex items-center justify-between mb-3">
         <div className="text-[14px] font-bold" style={{ color: "var(--ibs-accent)" }}>
-          📊 Tổng hợp số suất ăn cuối cùng — Ngày {date.split("-").reverse().join("/")}
+          📊 Tổng hợp số suất ăn cuối cùng — {rangeLabel}
         </div>
         <div className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>
           Tổng: <span className="font-bold text-[16px]" style={{ color: "var(--ibs-accent)" }}>{total}</span> suất

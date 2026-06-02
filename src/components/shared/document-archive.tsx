@@ -13,6 +13,8 @@ type Doc = {
   docDate?: string | null;
   docNumber?: string | null;
   subject?: string | null;
+  fromEntity?: string | null;  // incoming
+  toEntity?: string | null;    // outgoing
   scanFileUrl?: string;
   scanUrl?: string;
   receivedAt?: string;
@@ -89,6 +91,15 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
       key: "subject",
       header: "Tiêu đề",
       render: (d) => <span className="font-medium">{d.subject || "—"}</span>,
+    },
+    {
+      key: "entity",
+      header: "Đơn vị chuyển",
+      width: "200px",
+      render: (d) => {
+        const v = kind === "incoming" ? d.fromEntity : d.toEntity;
+        return v ? <span className="text-[12px]">{v}</span> : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>;
+      },
     },
     {
       key: "scan",
@@ -170,7 +181,7 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--ibs-text-dim)" }} />
           <input
             type="text"
-            placeholder="Tìm theo mã hoặc tiêu đề..."
+            placeholder="Tìm theo mã, tiêu đề hoặc đơn vị..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="w-full pl-9 pr-3 py-2 rounded-lg text-[13px]"
@@ -245,6 +256,7 @@ function AddModal({
   const [docDate, setDocDate] = useState(new Date().toISOString().slice(0, 10));
   const [docNumber, setDocNumber] = useState("");
   const [subject, setSubject] = useState("");
+  const [entity, setEntity] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -283,10 +295,17 @@ function AddModal({
     const scanFileUrl = upJson.data?.url;
 
     setSaving(true);
+    const entityField = kind === "incoming" ? "fromEntity" : "toEntity";
     const res = await fetch(`/api/v1/documents/${kind}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ docDate, docNumber: docNumber.trim() || null, subject: subject.trim(), scanFileUrl }),
+      body: JSON.stringify({
+        docDate,
+        docNumber: docNumber.trim() || null,
+        subject: subject.trim(),
+        [entityField]: entity.trim() || null,
+        scanFileUrl,
+      }),
     });
     const json = await res.json();
     setSaving(false);
@@ -360,6 +379,20 @@ function AddModal({
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Trích yếu nội dung công văn"
+              className="w-full px-3 py-2 rounded-lg text-[13px]"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+              Đơn vị chuyển
+            </label>
+            <input
+              type="text"
+              value={entity}
+              onChange={(e) => setEntity(e.target.value)}
+              placeholder={kind === "incoming" ? "Đơn vị gửi đến (VD: Sở LĐ-TBXH Hải Phòng)" : "Đơn vị nhận (VD: BHXH TP. Hải Phòng)"}
               className="w-full px-3 py-2 rounded-lg text-[13px]"
               style={inputStyle}
             />

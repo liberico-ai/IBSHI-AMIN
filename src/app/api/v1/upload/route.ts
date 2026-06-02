@@ -37,10 +37,30 @@ export async function POST(request: NextRequest) {
 
     // Routing: HR_DOCUMENTS → MinIO RIÊNG (bucket "ibshi"); các bucket khác → MinIO local
     if (isHrBucket(bucket)) {
+      // Pre-check env vars để báo lỗi rõ ràng
+      if (!process.env.HR_MINIO_ENDPOINT || !process.env.HR_MINIO_ACCESS_KEY || !process.env.HR_MINIO_SECRET_KEY) {
+        const missing = [
+          !process.env.HR_MINIO_ENDPOINT && "HR_MINIO_ENDPOINT",
+          !process.env.HR_MINIO_ACCESS_KEY && "HR_MINIO_ACCESS_KEY",
+          !process.env.HR_MINIO_SECRET_KEY && "HR_MINIO_SECRET_KEY",
+        ].filter(Boolean).join(", ");
+        return NextResponse.json({
+          error: { code: "HR_MINIO_NOT_CONFIGURED", message: `Server chưa cấu hình HR MinIO. Thiếu biến môi trường: ${missing}` },
+        }, { status: 503 });
+      }
       const hrClient = getHrMinioClient();
-      // Bucket "ibshi" do anh tạo sẵn nên không cần makeBucket; gắn "hr-documents/" prefix để phân biệt với loại file khác trong tương lai.
       const hrObjectName = `${BUCKETS.HR_DOCUMENTS}/${objectName}`;
-      await hrClient.putObject(HR_BUCKET, hrObjectName, buffer, buffer.length, { "Content-Type": contentType });
+      try {
+        await hrClient.putObject(HR_BUCKET, hrObjectName, buffer, buffer.length, { "Content-Type": contentType });
+      } catch (e: any) {
+        console.error("[upload HR] putObject failed:", e);
+        return NextResponse.json({
+          error: {
+            code: "HR_MINIO_UPLOAD_FAILED",
+            message: `Upload lên HR MinIO (${process.env.HR_MINIO_ENDPOINT}) thất bại: ${e?.code || ""} ${e?.message || e}`.trim(),
+          },
+        }, { status: 502 });
+      }
       const url = getHrFileUrl(hrObjectName);
       return NextResponse.json({ data: { url, bucket: HR_BUCKET, objectName: hrObjectName, fileName: file.name } });
     }
@@ -52,12 +72,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ data: { url, bucket, objectName, fileName: file.name } });
   } catch (error: any) {
     console.error("Upload error:", error);
-    // If MinIO is not available, return a placeholder URL (dev mode)
     if (error.code === "ECONNREFUSED" || error.message?.includes("connect")) {
       return NextResponse.json({
-        error: { code: "MINIO_UNAVAILABLE", message: `Máy chủ lưu trữ file (MinIO) chưa khởi động tại ${process.env.MINIO_ENDPOINT || "localhost"}:${process.env.MINIO_PORT || "9000"}. Vui lòng khởi động MinIO trước khi upload.` }
+        error: { code: "MINIO_UNAVAILABLE", message: `Không kết nối được máy chủ lưu trữ file (MinIO). Chi tiết: ${error.code || error.message}` },
       }, { status: 503 });
     }
-    return NextResponse.json({ error: { code: "UPLOAD_FAILED", message: "Upload thất bại" } }, { status: 500 });
+    return NextResponse.json({
+      error: { code: "UPLOAD_FAILED", message: `Upload thất bại: ${error?.code || ""} ${error?.message || error}`.trim() },
+    }, { status: 500 });
   }
 }

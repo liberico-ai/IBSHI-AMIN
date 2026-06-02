@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
     where.OR = [
       { docNumber: { contains: q, mode: "insensitive" } },
       { subject: { contains: q, mode: "insensitive" } },
+      { fromEntity: { contains: q, mode: "insensitive" } },
     ];
   }
   if (from || to) {
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { docDate, docNumber, subject, scanFileUrl } = body || {};
+  const { docDate, docNumber, subject, fromEntity, scanFileUrl } = body || {};
   if (!scanFileUrl) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Vui lòng upload file scan công văn" } }, { status: 400 });
   }
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest) {
       docDate: docDate ? new Date(docDate) : null,
       docNumber: docNumber?.trim() || null,
       subject: subject.trim(),
+      fromEntity: fromEntity?.trim() || null,
       scanFileUrl,
       status: "RECEIVED",
     },

@@ -17,9 +17,15 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const dateStr = searchParams.get("date");
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
 
   const where: any = {};
-  if (dateStr) {
+  if (from || to) {
+    const f = from ? new Date(new Date(from).setHours(0, 0, 0, 0)) : undefined;
+    const t = to ? new Date(new Date(to).setHours(23, 59, 59, 999)) : undefined;
+    where.date = { ...(f && { gte: f }), ...(t && { lte: t }) };
+  } else if (dateStr) {
     const d = new Date(dateStr);
     where.date = {
       gte: new Date(new Date(d).setHours(0, 0, 0, 0)),
