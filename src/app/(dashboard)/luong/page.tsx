@@ -6,6 +6,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, Download } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
+import { alertDialog } from "@/lib/confirm-dialog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type PayrollPeriod = {
@@ -814,12 +815,17 @@ export default function LuongPage() {
 
   async function handleCalculate(id: string) {
     setCalculatingId(id);
-    await fetch(`/api/v1/payroll/${id}`, {
+    const res = await fetch(`/api/v1/payroll/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "CALCULATE" }),
     });
     setCalculatingId(null);
+    if (!res.ok) {
+      const json = await res.json().catch(() => null);
+      await alertDialog(apiError(res.status, json?.error) || "Tính lương thất bại");
+      return;
+    }
     fetchPeriods();
   }
 
@@ -943,21 +949,18 @@ export default function LuongPage() {
               </button>
             )}
 
-            {/* Calculate: HR_ADMIN or BOM. Chỉ hiện sau khi đã import lương SP */}
+            {/* Calculate: HR_ADMIN or BOM. Cho phép tính lương kể cả khi chưa import lương SP (mặc định = 0) */}
             {canManage && (row.status === "DRAFT" || row.status === "PROCESSING") && (
-              row.pieceRateImported ? (
-                <button
-                  onClick={() => handleCalculate(row.id)}
-                  disabled={isCalc}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
-                  style={{ background: "rgba(245,158,11,0.15)", color: "var(--ibs-warning)", opacity: isCalc ? 0.7 : 1 }}
-                >
-                  <RefreshCw size={11} className={isCalc ? "animate-spin" : ""} />
-                  {isCalc ? "Đang tính..." : row.status === "DRAFT" ? "Tính lương" : "Tính lại"}
-                </button>
-              ) : (
-                <span className="text-[10px] italic" style={{ color: "var(--ibs-text-dim)" }}>Import lương SP trước</span>
-              )
+              <button
+                onClick={() => handleCalculate(row.id)}
+                disabled={isCalc}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
+                style={{ background: "rgba(245,158,11,0.15)", color: "var(--ibs-warning)", opacity: isCalc ? 0.7 : 1 }}
+                title={row.pieceRateImported ? "Tính lương theo bảng công + lương SP đã import" : "Tính lương theo bảng công (chưa có lương SP — sẽ tính với SP = 0)"}
+              >
+                <RefreshCw size={11} className={isCalc ? "animate-spin" : ""} />
+                {isCalc ? "Đang tính..." : row.status === "DRAFT" ? "Tính lương" : "Tính lại"}
+              </button>
             )}
 
             {/* View detail: always */}

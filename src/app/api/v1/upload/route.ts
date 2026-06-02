@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getMinioClient, ensureBucket, getFileUrl, BUCKETS } from "@/lib/minio";
+import { getMinioClient, ensureBucket, getFileUrl, BUCKETS, getHrMinioClient, getHrFileUrl, HR_BUCKET, isHrBucket } from "@/lib/minio";
 
 const ALLOWED_BUCKETS = Object.values(BUCKETS);
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -32,16 +32,22 @@ export async function POST(request: NextRequest) {
     const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const objectName = folder ? `${folder}/${safeName}` : safeName;
 
-    // Ensure bucket exists
-    await ensureBucket(bucket);
-
-    // Upload to MinIO
-    const client = getMinioClient();
     const buffer = Buffer.from(await file.arrayBuffer());
-    await client.putObject(bucket, objectName, buffer, buffer.length, {
-      "Content-Type": file.type || "application/octet-stream",
-    });
+    const contentType = file.type || "application/octet-stream";
 
+    // Routing: HR_DOCUMENTS → MinIO RIÊNG (bucket "ibshi"); các bucket khác → MinIO local
+    if (isHrBucket(bucket)) {
+      const hrClient = getHrMinioClient();
+      // Bucket "ibshi" do anh tạo sẵn nên không cần makeBucket; gắn "hr-documents/" prefix để phân biệt với loại file khác trong tương lai.
+      const hrObjectName = `${BUCKETS.HR_DOCUMENTS}/${objectName}`;
+      await hrClient.putObject(HR_BUCKET, hrObjectName, buffer, buffer.length, { "Content-Type": contentType });
+      const url = getHrFileUrl(hrObjectName);
+      return NextResponse.json({ data: { url, bucket: HR_BUCKET, objectName: hrObjectName, fileName: file.name } });
+    }
+
+    await ensureBucket(bucket);
+    const client = getMinioClient();
+    await client.putObject(bucket, objectName, buffer, buffer.length, { "Content-Type": contentType });
     const url = getFileUrl(bucket, objectName);
     return NextResponse.json({ data: { url, bucket, objectName, fileName: file.name } });
   } catch (error: any) {

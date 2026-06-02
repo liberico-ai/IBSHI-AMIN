@@ -30,6 +30,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Dữ liệu không hợp lệ" } }, { status: 400 });
     }
 
+    // Defensive: từ chối record có workHours hoặc otHours bất thường (1 ngày max 24h)
+    // Bảo vệ DB khỏi lỗi parse Excel nhầm cột (vd mã NV / Excel-date-serial bị đẩy vào workHours).
+    const bad = records.filter((r) => {
+      const wh = Number(r.workHours);
+      const oh = Number(r.otHours);
+      return !Number.isFinite(wh) || !Number.isFinite(oh) || wh < 0 || oh < 0 || wh > 24 || oh > 24;
+    });
+    if (bad.length > 0) {
+      const sample = bad.slice(0, 3).map((r) => `${r.employeeCode} ngày ${r.date} (work=${r.workHours}, ot=${r.otHours})`).join("; ");
+      return NextResponse.json(
+        {
+          error: {
+            code: "INVALID_HOURS",
+            message: `Phát hiện ${bad.length}/${records.length} dòng có giờ làm bất thường (>24h hoặc âm). File Excel có thể bị nhầm cột. Mẫu: ${sample}`,
+          },
+        },
+        { status: 400 }
+      );
+    }
+
     // Resolve employee codes → IDs
     // Excel uses ERP numeric codes (e.g. "190342").
     // DB lookup order: User.erpCode (direct match) → User.employeeCode nv-prefixed match

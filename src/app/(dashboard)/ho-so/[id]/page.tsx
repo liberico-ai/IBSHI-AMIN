@@ -26,6 +26,7 @@ import {
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 import { DateInput } from "@/components/shared/date-input";
+import { viewUrl } from "@/lib/use-presigned-url";
 
 type Employee = {
   id: string;
@@ -326,6 +327,7 @@ function ViewContractDialog({
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const base = `/api/v1/employees/${employeeId}/contracts/${contractId}`;
+  const signedScan = scanUrl ? viewUrl(scanUrl) : null;
 
   useEffect(() => {
     fetch(`${base}/html`)
@@ -343,22 +345,40 @@ function ViewContractDialog({
         </div>
 
         <style>{`.contract-view h1{font-size:17px;font-weight:700;text-align:center;margin:0 0 10px} .contract-view .center,.contract-view .sign{text-align:center} .contract-view p{margin:4px 0}`}</style>
-        <div className="flex-1 overflow-y-auto rounded-lg border p-5" style={{ background: "#fff", color: "#111", borderColor: "var(--ibs-border)" }}>
-          {error ? (
-            <div className="text-[13px] text-red-500">{error}</div>
-          ) : html === null ? (
-            <div className="text-[13px] text-center py-8" style={{ color: "#888" }}>Đang tải nội dung hợp đồng…</div>
-          ) : (
-            <div className="contract-view text-[12.5px] leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />
-          )}
-        </div>
-
-        {scanUrl && (
-          <div className="mt-3 px-3 py-2 rounded-lg flex items-center justify-between gap-2" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)" }}>
-            <span className="text-[12px]" style={{ color: "var(--ibs-success)" }}>📎 HĐ này có bản scan đã ký đính kèm</span>
-            <a href={scanUrl} target="_blank" rel="noreferrer" className="text-[12px] font-semibold underline" style={{ color: "var(--ibs-success)" }}>Xem bản scan →</a>
+        <div className="flex-1 overflow-y-auto space-y-3">
+          <div className="rounded-lg border p-5" style={{ background: "#fff", color: "#111", borderColor: "var(--ibs-border)" }}>
+            {error ? (
+              <div className="text-[13px] text-red-500">{error}</div>
+            ) : html === null ? (
+              <div className="text-[13px] text-center py-8" style={{ color: "#888" }}>Đang tải nội dung hợp đồng…</div>
+            ) : (
+              <div className="contract-view text-[12.5px] leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />
+            )}
           </div>
-        )}
+
+          {scanUrl && (() => {
+            const ext = scanUrl.split("?")[0].split(".").pop()?.toLowerCase() || "";
+            const isImg = ["jpg", "jpeg", "png", "gif", "webp"].includes(ext);
+            const isPdf = ext === "pdf";
+            return (
+              <div className="rounded-lg border" style={{ borderColor: "var(--ibs-border)", background: "#fff" }}>
+                <div className="px-4 py-2 border-b text-[12px] font-semibold flex items-center justify-between" style={{ borderColor: "var(--ibs-border)", color: "#111" }}>
+                  <span>📎 Bản scan đã ký</span>
+                  <a href={signedScan || "#"} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)", opacity: signedScan ? 1 : 0.5, pointerEvents: signedScan ? "auto" : "none" }}>Mở tab mới ↗</a>
+                </div>
+                {isImg ? (
+                  <img src={signedScan!} alt="Bản scan" className="w-full h-auto block" style={{ maxHeight: "none" }} />
+                ) : isPdf ? (
+                  <iframe src={signedScan!} className="w-full" style={{ height: 600, border: 0 }} title="Bản scan PDF" />
+                ) : (
+                  <div className="p-4 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
+                    Định dạng <b>.{ext}</b> không hỗ trợ xem inline. Bấm "Mở tab mới ↗" để tải về.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
         <div className="flex gap-2 justify-end mt-4">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Đóng</button>
           <a href={`${base}/pdf`} className="px-4 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }}>Tải PDF</a>
@@ -1600,7 +1620,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                             </div>
                             <div className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-muted)" }}>{changes.join(" · ") || "—"}</div>
                             {a.rejectedReason && <div className="text-[11px] mt-0.5" style={{ color: "var(--ibs-danger)" }}>Lý do từ chối: {a.rejectedReason}</div>}
-                            {a.fileUrl && <a href={a.fileUrl} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 Xem bản scan đã ký</a>}
+                            {a.fileUrl && <a href={viewUrl(a.fileUrl)} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 Xem bản scan đã ký</a>}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded" style={{ color: badge.c, background: badge.bg }}>{badge.label}</span>

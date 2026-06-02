@@ -24,6 +24,88 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const type = searchParams.get("type") || "";
 
+  // ── cost-by-day: gom chi phí suất ăn (regs + supp đã duyệt) + thực phẩm theo từng ngày trong tháng ─
+  if (type === "cost-by-day") {
+    const month = parseInt(searchParams.get("month") || String(new Date().getMonth() + 1));
+    const year = parseInt(searchParams.get("year") || String(new Date().getFullYear()));
+    const startOfMonth = new Date(year, month - 1, 1);
+    const endOfMonth = new Date(year, month, 0, 23, 59, 59);
+
+    const [regs, supps, foods, visitorMeals] = await Promise.all([
+      prisma.mealRegistration.findMany({
+        where: { date: { gte: startOfMonth, lte: endOfMonth } },
+        select: { date: true, lunchCount: true, dinnerCount: true, guestCount: true, subcontractorCount: true, guestUnitPrice: true },
+      }),
+      prisma.mealSupplementaryRequest.findMany({
+        where: { status: "APPROVED", date: { gte: startOfMonth, lte: endOfMonth } },
+        select: { date: true, mealType: true, personType: true, quantity: true, guestUnitPrice: true },
+      }),
+      prisma.foodPurchase.findMany({
+        where: { date: { gte: startOfMonth, lte: endOfMonth } },
+        select: { date: true, quantity: true, unitPrice: true },
+      }),
+      prisma.visitorRequest.findMany({
+        where: { needsMeal: true, checkedInAt: { gte: startOfMonth, lte: endOfMonth } },
+        select: { checkedInAt: true, mealCount: true },
+      }),
+    ]);
+
+    type DayRow = {
+      date: string;
+      lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number;
+      totalMeals: number;
+      mealCost: number;
+      foodCost: number;
+    };
+    const byDay = new Map<string, DayRow>();
+    const keyOf = (d: Date) => new Date(d).toISOString().slice(0, 10);
+    const ensure = (k: string): DayRow => {
+      let row = byDay.get(k);
+      if (!row) { row = { date: k, lunchCount: 0, dinnerCount: 0, guestCount: 0, subcontractorCount: 0, totalMeals: 0, mealCost: 0, foodCost: 0 }; byDay.set(k, row); }
+      return row;
+    };
+
+    for (const r of regs) {
+      const row = ensure(keyOf(r.date));
+      row.lunchCount += r.lunchCount;
+      row.dinnerCount += r.dinnerCount;
+      row.guestCount += r.guestCount;
+      row.subcontractorCount += r.subcontractorCount;
+      row.mealCost += (r.lunchCount + r.dinnerCount) * MEAL_PRICE_EMPLOYEE
+                   + r.subcontractorCount * MEAL_PRICE_SUBCONTRACTOR
+                   + r.guestCount * (r.guestUnitPrice || MEAL_UNIT_PRICE);
+    }
+    for (const s of supps) {
+      const row = ensure(keyOf(s.date));
+      if (s.personType === "SUBCONTRACTOR") { row.subcontractorCount += s.quantity; row.mealCost += s.quantity * MEAL_PRICE_SUBCONTRACTOR; }
+      else if (s.personType === "GUEST") { row.guestCount += s.quantity; row.mealCost += s.quantity * (s.guestUnitPrice || MEAL_UNIT_PRICE); }
+      else { if (s.mealType === "DINNER") row.dinnerCount += s.quantity; else row.lunchCount += s.quantity; row.mealCost += s.quantity * MEAL_PRICE_EMPLOYEE; }
+    }
+    for (const v of visitorMeals) {
+      if (!v.checkedInAt) continue;
+      const row = ensure(keyOf(v.checkedInAt));
+      row.guestCount += v.mealCount;
+      row.mealCost += v.mealCount * MEAL_UNIT_PRICE;
+    }
+    for (const f of foods) {
+      const row = ensure(keyOf(f.date));
+      row.foodCost += f.quantity * f.unitPrice;
+    }
+
+    const data = Array.from(byDay.values())
+      .map((r) => ({ ...r, totalMeals: r.lunchCount + r.dinnerCount + r.guestCount + r.subcontractorCount, diff: r.mealCost - r.foodCost }))
+      .filter((r) => r.totalMeals > 0 || r.foodCost > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const totalMealCost = data.reduce((s, r) => s + r.mealCost, 0);
+    const totalFoodCost = data.reduce((s, r) => s + r.foodCost, 0);
+
+    return NextResponse.json({
+      data,
+      meta: { month, year, totalMealCost, totalFoodCost, totalDiff: totalMealCost - totalFoodCost },
+    });
+  }
+
   // ── cost-report: aggregate meal counts × unit price per department ─────────
   if (type === "cost-report") {
     const month = parseInt(searchParams.get("month") || String(new Date().getMonth() + 1));

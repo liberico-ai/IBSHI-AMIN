@@ -64,6 +64,9 @@ export default function NhaAnPage() {
   const [costMeta, setCostMeta] = useState<CostMeta | null>(null);
   const [costFoodTotal, setCostFoodTotal] = useState(0);
   const [costLoading, setCostLoading] = useState(false);
+  const [costView, setCostView] = useState<"by-dept" | "by-day">("by-dept");
+  type DayCostRow = { date: string; lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number; totalMeals: number; mealCost: number; foodCost: number; diff: number };
+  const [costByDay, setCostByDay] = useState<DayCostRow[]>([]);
   const [foodMonth, setFoodMonth] = useState(now.getMonth() + 1);
   const [foodYear, setFoodYear] = useState(now.getFullYear());
   const [foodRows, setFoodRows] = useState<FoodPurchase[]>([]);
@@ -124,10 +127,12 @@ export default function NhaAnPage() {
     Promise.all([
       fetch(`/api/v1/meals?type=cost-report&month=${m}&year=${y}`).then((r) => r.json()),
       fetch(`/api/v1/meals/food-purchases?month=${m}&year=${y}`).then((r) => r.json()),
+      fetch(`/api/v1/meals?type=cost-by-day&month=${m}&year=${y}`).then((r) => r.json()),
     ])
-      .then(([cost, food]) => {
+      .then(([cost, food, byDay]) => {
         setCostData(cost.data || []); setCostMeta(cost.meta || null);
         setCostFoodTotal(food.meta?.total || 0);
+        setCostByDay(byDay.data || []);
       })
       .finally(() => setCostLoading(false));
   }
@@ -145,12 +150,28 @@ export default function NhaAnPage() {
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepartments(res.data || []));
   }, []);
 
-  useEffect(() => { fetchRegs(); fetchFeedbacks(); }, [selectedDate]);
+  useEffect(() => { fetchRegs(); fetchFeedbacks(); fetchSupplementary(); }, [selectedDate]);
 
   const totalLunch  = registrations.reduce((s, r) => s + r.lunchCount, 0);
   const totalDinner = registrations.reduce((s, r) => s + r.dinnerCount, 0);
   const totalGuest  = registrations.reduce((s, r) => s + r.guestCount, 0);
   const totalSub    = registrations.reduce((s, r) => s + (r.subcontractorCount || 0), 0);
+
+  // ── Tổng hợp gộp (đăng ký thường + bổ sung đã duyệt) cho ngày đang chọn ──
+  const approvedSuppToday = suppReqs.filter((s) =>
+    s.status === "APPROVED" && new Date(s.date).toISOString().slice(0, 10) === selectedDate
+  );
+  const suppLunch = approvedSuppToday.filter((s) => s.personType === "EMPLOYEE" && s.mealType !== "DINNER").reduce((sum, s) => sum + s.quantity, 0);
+  const suppDinner = approvedSuppToday.filter((s) => s.personType === "EMPLOYEE" && s.mealType === "DINNER").reduce((sum, s) => sum + s.quantity, 0);
+  const suppGuest = approvedSuppToday.filter((s) => s.personType === "GUEST").reduce((sum, s) => sum + s.quantity, 0);
+  const suppSub = approvedSuppToday.filter((s) => s.personType === "SUBCONTRACTOR").reduce((sum, s) => sum + s.quantity, 0);
+
+  const combinedLunch = totalLunch + suppLunch;
+  const combinedDinner = totalDinner + suppDinner;
+  const combinedGuest = totalGuest + suppGuest;
+  const combinedSub = totalSub + suppSub;
+  const combinedTotal = combinedLunch + combinedDinner + combinedGuest + combinedSub;
+  const hasSupp = suppLunch > 0 || suppDinner > 0 || suppGuest > 0 || suppSub > 0;
 
   async function handleDelete(departmentId: string) {
     await fetch(`/api/v1/meals?departmentId=${departmentId}&date=${selectedDate}`, { method: "DELETE" });
@@ -305,9 +326,27 @@ export default function NhaAnPage() {
             </div>
           )
         )}
+
+        {/* Tổng hợp số suất ăn cuối cùng — gộp đăng ký thường + bổ sung đã duyệt */}
+        <CombinedMealSummary
+          date={selectedDate}
+          lunch={combinedLunch} dinner={combinedDinner} guest={combinedGuest} sub={combinedSub} total={combinedTotal}
+          baseLunch={totalLunch} baseDinner={totalDinner} baseGuest={totalGuest} baseSub={totalSub}
+          suppLunch={suppLunch} suppDinner={suppDinner} suppGuest={suppGuest} suppSub={suppSub}
+          hasSupp={hasSupp}
+        />
       </>}
 
       {tab === "supplementary" && <>
+        {/* Tổng hợp số suất ăn ngày đang chọn — gộp đăng ký thường + bổ sung đã duyệt */}
+        <CombinedMealSummary
+          date={selectedDate}
+          lunch={combinedLunch} dinner={combinedDinner} guest={combinedGuest} sub={combinedSub} total={combinedTotal}
+          baseLunch={totalLunch} baseDinner={totalDinner} baseGuest={totalGuest} baseSub={totalSub}
+          suppLunch={suppLunch} suppDinner={suppDinner} suppGuest={suppGuest} suppSub={suppSub}
+          hasSupp={hasSupp}
+        />
+
         <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
           <div className="px-5 py-3 border-b text-[14px] font-semibold flex items-center justify-between" style={{ borderColor: "var(--ibs-border)" }}>
             <span>Đăng ký suất ăn bổ sung</span>
@@ -484,8 +523,94 @@ export default function NhaAnPage() {
             );
           })()}
 
+          {/* Sub-tab switcher: theo phòng ban / theo ngày */}
+          <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+            {(["by-dept", "by-day"] as const).map((v) => (
+              <button key={v} onClick={() => setCostView(v)}
+                className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
+                style={{ background: costView === v ? "var(--ibs-accent)" : "transparent", color: costView === v ? "#fff" : "var(--ibs-text-dim)" }}>
+                {v === "by-dept" ? "Theo phòng ban" : "Theo ngày"}
+              </button>
+            ))}
+          </div>
+
           {costLoading ? (
             <div className="py-12 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
+          ) : costView === "by-day" ? (
+            costByDay.length === 0 ? (
+              <div className="py-12 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Không có dữ liệu cho tháng này</div>
+            ) : (
+              <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                <div className="px-5 py-3 border-b text-[14px] font-semibold" style={{ borderColor: "var(--ibs-border)" }}>
+                  Chi phí suất ăn theo ngày — Tháng {costMonth}/{costYear}
+                </div>
+                <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
+                      <th className="text-left px-5 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>NGÀY</th>
+                      <th className="text-right px-3 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>TRƯA</th>
+                      <th className="text-right px-3 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>TỐI OT</th>
+                      <th className="text-right px-3 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>KHÁCH</th>
+                      <th className="text-right px-3 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>THẦU PHỤ</th>
+                      <th className="text-right px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>SỐ SUẤT</th>
+                      <th className="text-right px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>CHI PHÍ SUẤT ĂN</th>
+                      <th className="text-right px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>CHI PHÍ THỰC PHẨM</th>
+                      <th className="text-right px-5 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>CHÊNH LỆCH</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {costByDay.map((r) => {
+                      const dt = new Date(r.date);
+                      const dow = dt.getDay() === 0 ? "CN" : `T${dt.getDay() + 1}`;
+                      return (
+                        <tr key={r.date} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
+                          <td className="px-5 py-2.5 font-medium">
+                            {r.date.split("-").reverse().join("/")} <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>({dow})</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-right" style={{ color: "var(--ibs-accent)" }}>{r.lunchCount}</td>
+                          <td className="px-3 py-2.5 text-right" style={{ color: "#8b5cf6" }}>{r.dinnerCount}</td>
+                          <td className="px-3 py-2.5 text-right" style={{ color: "var(--ibs-warning)" }}>{r.guestCount}</td>
+                          <td className="px-3 py-2.5 text-right" style={{ color: "#10b981" }}>{r.subcontractorCount}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold">{r.totalMeals.toLocaleString("vi-VN")}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold" style={{ color: "var(--ibs-accent)" }}>{r.mealCost.toLocaleString("vi-VN")}đ</td>
+                          <td className="px-4 py-2.5 text-right" style={{ color: "#f59e0b" }}>{r.foodCost.toLocaleString("vi-VN")}đ</td>
+                          <td className="px-5 py-2.5 text-right font-semibold" style={{ color: r.diff >= 0 ? "#10b981" : "var(--ibs-danger)" }}>
+                            {(r.diff >= 0 ? "+" : "") + r.diff.toLocaleString("vi-VN")}đ
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {(() => {
+                      const tLunch = costByDay.reduce((s, r) => s + r.lunchCount, 0);
+                      const tDinner = costByDay.reduce((s, r) => s + r.dinnerCount, 0);
+                      const tGuest = costByDay.reduce((s, r) => s + r.guestCount, 0);
+                      const tSub = costByDay.reduce((s, r) => s + r.subcontractorCount, 0);
+                      const tMeals = costByDay.reduce((s, r) => s + r.totalMeals, 0);
+                      const tMealCost = costByDay.reduce((s, r) => s + r.mealCost, 0);
+                      const tFoodCost = costByDay.reduce((s, r) => s + r.foodCost, 0);
+                      const tDiff = tMealCost - tFoodCost;
+                      return (
+                        <tr style={{ background: "rgba(0,180,216,0.06)" }}>
+                          <td className="px-5 py-3 font-bold">Tổng cộng ({costByDay.length} ngày)</td>
+                          <td className="px-3 py-3 text-right font-bold" style={{ color: "var(--ibs-accent)" }}>{tLunch.toLocaleString("vi-VN")}</td>
+                          <td className="px-3 py-3 text-right font-bold" style={{ color: "#8b5cf6" }}>{tDinner.toLocaleString("vi-VN")}</td>
+                          <td className="px-3 py-3 text-right font-bold" style={{ color: "var(--ibs-warning)" }}>{tGuest.toLocaleString("vi-VN")}</td>
+                          <td className="px-3 py-3 text-right font-bold" style={{ color: "#10b981" }}>{tSub.toLocaleString("vi-VN")}</td>
+                          <td className="px-4 py-3 text-right font-bold">{tMeals.toLocaleString("vi-VN")}</td>
+                          <td className="px-4 py-3 text-right font-bold" style={{ color: "var(--ibs-accent)" }}>{tMealCost.toLocaleString("vi-VN")}đ</td>
+                          <td className="px-4 py-3 text-right font-bold" style={{ color: "#f59e0b" }}>{tFoodCost.toLocaleString("vi-VN")}đ</td>
+                          <td className="px-5 py-3 text-right font-bold" style={{ color: tDiff >= 0 ? "#10b981" : "var(--ibs-danger)" }}>
+                            {(tDiff >= 0 ? "+" : "") + tDiff.toLocaleString("vi-VN")}đ
+                          </td>
+                        </tr>
+                      );
+                    })()}
+                  </tbody>
+                </table>
+                </div>
+              </div>
+            )
           ) : costData.length === 0 && costFoodTotal === 0 ? (
             <div className="py-12 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Không có dữ liệu</div>
           ) : costData.length === 0 ? (
@@ -545,17 +670,29 @@ export default function NhaAnPage() {
                         <td className="px-5 py-2.5 text-right font-semibold" style={{ color: "var(--ibs-warning)" }}>{costMeta.guestMealCost!.toLocaleString("vi-VN")}đ</td>
                       </tr>
                     )}
-                    {costMeta && (
-                      <tr style={{ background: "rgba(0,180,216,0.06)" }}>
-                        <td className="px-5 py-3 font-bold" colSpan={6}>Tổng cộng</td>
-                        <td className="px-5 py-3 text-right font-bold" style={{ color: "var(--ibs-accent)" }}>{costMeta.grandTotal.toLocaleString("vi-VN")}đ</td>
-                      </tr>
-                    )}
+                    {costMeta && (() => {
+                      const totalLunch = costData.reduce((s, r) => s + r.lunchCount, 0);
+                      const totalDinner = costData.reduce((s, r) => s + r.dinnerCount, 0);
+                      const totalGuest = costData.reduce((s, r) => s + r.guestCount, 0) + (costMeta.guestMeals ?? 0);
+                      const totalSub = costData.reduce((s, r) => s + (r.subcontractorCount || 0), 0);
+                      const totalMeals = costData.reduce((s, r) => s + r.totalMeals, 0) + (costMeta.guestMeals ?? 0);
+                      return (
+                        <tr style={{ background: "rgba(0,180,216,0.06)" }}>
+                          <td className="px-5 py-3 font-bold">Tổng cộng</td>
+                          <td className="px-3 py-3 text-right font-bold" style={{ color: "var(--ibs-accent)" }}>{totalLunch.toLocaleString("vi-VN")}</td>
+                          <td className="px-3 py-3 text-right font-bold" style={{ color: "#8b5cf6" }}>{totalDinner.toLocaleString("vi-VN")}</td>
+                          <td className="px-3 py-3 text-right font-bold" style={{ color: "var(--ibs-warning)" }}>{totalGuest.toLocaleString("vi-VN")}</td>
+                          <td className="px-3 py-3 text-right font-bold" style={{ color: "#10b981" }}>{totalSub.toLocaleString("vi-VN")}</td>
+                          <td className="px-4 py-3 text-right font-bold">{totalMeals.toLocaleString("vi-VN")}</td>
+                          <td className="px-5 py-3 text-right font-bold" style={{ color: "var(--ibs-accent)" }}>{costMeta.grandTotal.toLocaleString("vi-VN")}đ</td>
+                        </tr>
+                      );
+                    })()}
                   </tbody>
                 </table>
                 </div>
                 <div className="px-5 py-2.5 border-t text-[11px]" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>
-                  Đơn giá: CBNV <b>20.000đ</b> · Thầu phụ <b>28.000đ</b> · Khách: theo đơn giá nhập khi đăng ký
+                  Đơn giá: CBNV <b>20.000đ</b> · Thầu phụ <b>20.000đ</b> · Khách: theo đơn giá nhập khi đăng ký
                 </div>
               </div>
             </>
@@ -1005,6 +1142,49 @@ function FeedbackModal({ employeeId, selectedDate, onClose, onSuccess }: {
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+// ── Panel tổng hợp gộp đăng ký thường + bổ sung đã duyệt ─────────────────────
+function CombinedMealSummary(props: {
+  date: string;
+  lunch: number; dinner: number; guest: number; sub: number; total: number;
+  baseLunch: number; baseDinner: number; baseGuest: number; baseSub: number;
+  suppLunch: number; suppDinner: number; suppGuest: number; suppSub: number;
+  hasSupp: boolean;
+}) {
+  const { date, lunch, dinner, guest, sub, total, baseLunch, baseDinner, baseGuest, baseSub, suppLunch, suppDinner, suppGuest, suppSub, hasSupp } = props;
+  const cell = (label: string, value: number, color: string, baseVal: number, suppVal: number) => (
+    <div className="rounded-xl border p-4" style={{ background: "rgba(255,255,255,0.6)", borderColor: "var(--ibs-border)" }}>
+      <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>{label}</div>
+      <div className="text-[28px] font-bold" style={{ color }}>{value}</div>
+      <div className="text-[10px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
+        {hasSupp && suppVal > 0 ? <>= {baseVal} đăng ký + <span style={{ color: "var(--ibs-warning)", fontWeight: 600 }}>{suppVal} bổ sung</span></> : <>{baseVal} suất ăn</>}
+      </div>
+    </div>
+  );
+  return (
+    <div className="mt-6 rounded-xl border-2 p-4" style={{ background: "rgba(0,180,216,0.05)", borderColor: "var(--ibs-accent)" }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[14px] font-bold" style={{ color: "var(--ibs-accent)" }}>
+          📊 Tổng hợp số suất ăn cuối cùng — Ngày {date.split("-").reverse().join("/")}
+        </div>
+        <div className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>
+          Tổng: <span className="font-bold text-[16px]" style={{ color: "var(--ibs-accent)" }}>{total}</span> suất
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-3">
+        {cell("Bữa trưa", lunch, "var(--ibs-accent)", baseLunch, suppLunch)}
+        {cell("Bữa tối OT", dinner, "#8b5cf6", baseDinner, suppDinner)}
+        {cell("Suất khách", guest, "var(--ibs-warning)", baseGuest, suppGuest)}
+        {cell("Thầu phụ", sub, "#10b981", baseSub, suppSub)}
+      </div>
+      {!hasSupp && (
+        <div className="text-[11px] mt-3" style={{ color: "var(--ibs-text-dim)" }}>
+          Chưa có đăng ký bổ sung được duyệt cho ngày này. Số trên = đăng ký thường (trước 9h).
+        </div>
+      )}
     </div>
   );
 }
