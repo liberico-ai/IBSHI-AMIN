@@ -10,13 +10,34 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   const evalRec = await prisma.probationEvaluation.findUnique({
     where: { id: params.id },
-    include: { employee: { select: { fullName: true, dateOfBirth: true, idNumber: true, address: true, department: { select: { name: true } } } } },
+    include: {
+      employee: {
+        select: {
+          fullName: true, gender: true, dateOfBirth: true,
+          idNumber: true, idIssuedDate: true, idIssuedPlace: true,
+          address: true, department: { select: { name: true } },
+        },
+      },
+    },
   });
   if (!evalRec) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   const d: any = evalRec.contractDraft;
   if (!d) return NextResponse.json({ error: { code: "NO_DRAFT", message: "Chưa soạn thảo hợp đồng" } }, { status: 409 });
 
-  const html = d.contractHtml || buildContractHtml({ ...d, issuedDate: evalRec.contractIssuedAt, employee: { fullName: evalRec.employee.fullName, dateOfBirth: evalRec.employee.dateOfBirth, idNumber: evalRec.employee.idNumber, address: evalRec.employee.address, departmentName: evalRec.employee.department?.name } });
+  const html = d.contractHtml || buildContractHtml({
+    ...d,
+    issuedDate: evalRec.contractIssuedAt,
+    employee: {
+      fullName: evalRec.employee.fullName,
+      gender: evalRec.employee.gender,
+      dateOfBirth: evalRec.employee.dateOfBirth,
+      idNumber: evalRec.employee.idNumber,
+      idIssueDate: evalRec.employee.idIssuedDate,
+      idIssuePlace: evalRec.employee.idIssuedPlace,
+      address: evalRec.employee.address,
+      departmentName: evalRec.employee.department?.name,
+    },
+  });
   const docx = await renderContractDocxFromHtml(html);
   const safe = String(d.contractNumber).replace(/[\\/]/g, "_");
   return new NextResponse(new Uint8Array(docx), {

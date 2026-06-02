@@ -206,10 +206,16 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // ── list registrations by date ────────────────────────────────────────────
-  const date = searchParams.get("date") || "";
+  // ── list registrations by date / range ───────────────────────────────────
+  const from = searchParams.get("from") || "";
+  const to = searchParams.get("to") || "";
+  const date = searchParams.get("date") || ""; // backward-compat: date = single day
   const where: any = {};
-  if (date) {
+  if (from || to) {
+    const f = from ? new Date(new Date(from).setHours(0, 0, 0, 0)) : undefined;
+    const t = to ? new Date(new Date(to).setHours(23, 59, 59, 999)) : undefined;
+    where.date = { ...(f && { gte: f }), ...(t && { lte: t }) };
+  } else if (date) {
     const d = new Date(date);
     where.date = { gte: new Date(new Date(d).setHours(0, 0, 0, 0)), lte: new Date(new Date(d).setHours(23, 59, 59, 999)) };
   }

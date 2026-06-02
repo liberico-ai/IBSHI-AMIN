@@ -11,14 +11,31 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const c = await prisma.contract.findUnique({
     where: { id: contractId },
-    include: { employee: { select: { fullName: true, dateOfBirth: true, idNumber: true, address: true, department: { select: { name: true } } } } },
+    include: {
+      employee: {
+        select: {
+          fullName: true, gender: true, dateOfBirth: true,
+          idNumber: true, idIssuedDate: true, idIssuedPlace: true,
+          address: true, department: { select: { name: true } },
+        },
+      },
+    },
   });
   if (!c) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
   const html = c.documentHtml || buildContractHtml({
     contractNumber: c.contractNumber, contractType: c.contractType, startDate: c.startDate, endDate: c.endDate,
     baseSalary: c.insuranceSalary ?? c.baseSalary, allowance: c.allowance ?? 0, jobTitle: c.position, issuedDate: c.createdAt,
-    employee: { fullName: c.employee.fullName, dateOfBirth: c.employee.dateOfBirth, idNumber: c.employee.idNumber, address: c.employee.address, departmentName: c.employee.department?.name },
+    employee: {
+      fullName: c.employee.fullName,
+      gender: c.employee.gender,
+      dateOfBirth: c.employee.dateOfBirth,
+      idNumber: c.employee.idNumber,
+      idIssueDate: c.employee.idIssuedDate,
+      idIssuePlace: c.employee.idIssuedPlace,
+      address: c.employee.address,
+      departmentName: c.employee.department?.name,
+    },
   } as any);
   const pdf = await renderContractPdfFromHtml(html);
   const safe = safeFileName(c.contractNumber);

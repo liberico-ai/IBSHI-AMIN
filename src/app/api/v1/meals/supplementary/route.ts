@@ -29,11 +29,18 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status") || "";
+  const from = searchParams.get("from") || "";
+  const to = searchParams.get("to") || "";
 
   // TP HCNS / BOM xem tất cả; người khác chỉ xem phiếu mình tạo.
   const where: any = {};
   if (!canApprove(role)) where.requestedBy = userId;
   if (status) where.status = status;
+  if (from || to) {
+    const f = from ? new Date(new Date(from).setHours(0, 0, 0, 0)) : undefined;
+    const t = to ? new Date(new Date(to).setHours(23, 59, 59, 999)) : undefined;
+    where.date = { ...(f && { gte: f }), ...(t && { lte: t }) };
+  }
 
   const data = await prisma.mealSupplementaryRequest.findMany({
     where,

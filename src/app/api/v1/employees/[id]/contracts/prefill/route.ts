@@ -21,7 +21,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const emp = await prisma.employee.findUnique({
     where: { id: employeeId },
     select: {
-      code: true, fullName: true, dateOfBirth: true, idNumber: true, address: true,
+      code: true, fullName: true, gender: true, dateOfBirth: true,
+      idNumber: true, idIssuedDate: true, idIssuedPlace: true,
+      address: true,
       jobRole: true, jobPosition: true, skillLevel: true,
       department: { select: { name: true } },
       contracts: { orderBy: { startDate: "desc" } },
@@ -57,8 +59,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     issuedDate: new Date(),
     employee: {
       fullName: emp.fullName,
+      gender: emp.gender,
       dateOfBirth: emp.dateOfBirth,
       idNumber: emp.idNumber,
+      idIssueDate: emp.idIssuedDate,
+      idIssuePlace: emp.idIssuedPlace,
       address: emp.address,
       departmentName: emp.department?.name,
     },
