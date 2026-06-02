@@ -39,3 +39,15 @@ next-env.d.ts
 
 # local env files (secrets)
 .env*.local
+
+# claude cache
+.claude/
+
+# test files
+test-*.pdf
+
+# internal docs (không up git)
+docs/Bao-gia-subscription*
+docs/Ban-giao-he-thong-*
+docs/Các tính năng bàn giao.docx
+docs/~$*

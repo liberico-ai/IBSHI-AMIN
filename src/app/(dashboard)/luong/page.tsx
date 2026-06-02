@@ -943,21 +943,18 @@ export default function LuongPage() {
               </button>
             )}
 
-            {/* Calculate: HR_ADMIN or BOM. Chỉ hiện sau khi đã import lương SP */}
+            {/* Calculate: HR_ADMIN or BOM. Cho phép tính lương kể cả khi chưa import lương SP (mặc định = 0) */}
             {canManage && (row.status === "DRAFT" || row.status === "PROCESSING") && (
-              row.pieceRateImported ? (
-                <button
-                  onClick={() => handleCalculate(row.id)}
-                  disabled={isCalc}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
-                  style={{ background: "rgba(245,158,11,0.15)", color: "var(--ibs-warning)", opacity: isCalc ? 0.7 : 1 }}
-                >
-                  <RefreshCw size={11} className={isCalc ? "animate-spin" : ""} />
-                  {isCalc ? "Đang tính..." : row.status === "DRAFT" ? "Tính lương" : "Tính lại"}
-                </button>
-              ) : (
-                <span className="text-[10px] italic" style={{ color: "var(--ibs-text-dim)" }}>Import lương SP trước</span>
-              )
+              <button
+                onClick={() => handleCalculate(row.id)}
+                disabled={isCalc}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
+                style={{ background: "rgba(245,158,11,0.15)", color: "var(--ibs-warning)", opacity: isCalc ? 0.7 : 1 }}
+                title={row.pieceRateImported ? "Tính lương theo bảng công + lương SP đã import" : "Tính lương theo bảng công (chưa có lương SP — sẽ tính với SP = 0)"}
+              >
+                <RefreshCw size={11} className={isCalc ? "animate-spin" : ""} />
+                {isCalc ? "Đang tính..." : row.status === "DRAFT" ? "Tính lương" : "Tính lại"}
+              </button>
             )}
 
             {/* View detail: always */}

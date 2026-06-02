@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { renderOfferLetterPdf } from "@/lib/offer-letter-pdf";
 import { sendMail } from "@/lib/mail";
-import { getMinioClient, ensureBucket, getFileUrl } from "@/lib/minio";
+import { getHrMinioClient, getHrFileUrl, HR_BUCKET } from "@/lib/minio";
 import { BUCKETS } from "@/lib/minio-constants";
 
 // POST /api/v1/recruitment/offer-letters/[id]/approve
@@ -59,17 +59,16 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
     issuedDate: new Date(),
   });
 
-  // ── 2. Upload to MinIO ──
+  // ── 2. Upload to MinIO (HR riêng) ──
   const safeNum = offer.letterNumber.replace(/\//g, "_");
-  const objectName = `offer-letters/${safeNum}_${Date.now()}.pdf`;
+  const objectName = `${BUCKETS.HR_DOCUMENTS}/offer-letters/${safeNum}_${Date.now()}.pdf`;
   let pdfUrl: string;
   try {
-    await ensureBucket(BUCKETS.HR_DOCUMENTS);
-    const minio = getMinioClient();
-    await minio.putObject(BUCKETS.HR_DOCUMENTS, objectName, pdfBuf, pdfBuf.length, {
+    const minio = getHrMinioClient();
+    await minio.putObject(HR_BUCKET, objectName, pdfBuf, pdfBuf.length, {
       "Content-Type": "application/pdf",
     });
-    pdfUrl = getFileUrl(BUCKETS.HR_DOCUMENTS, objectName);
+    pdfUrl = getHrFileUrl(objectName);
   } catch (e: any) {
     console.error("[offer-letter approve] MinIO upload failed:", e);
     return NextResponse.json(
