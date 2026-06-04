@@ -134,7 +134,7 @@ export default function SalarySlipPage() {
             ["Ngân hàng", slip.employee.bankName || "—"],
             ["Số tài khoản", slip.employee.bankAccount || "—"],
             ["MST cá nhân", slip.employee.taxCode || "—"],
-            ["Số công / chuẩn", `${slip.workDays} / ${slip.standardDays} ngày`],
+            ["Số công / chuẩn", `${Number((slip.workDays || 0).toFixed(2))} / ${slip.standardDays} ngày`],
           ].map(([label, value]) => (
             <div key={label} className="flex gap-2">
               <span className="w-36 shrink-0" style={{ color: "var(--ibs-text-dim)" }}>{label}:</span>
