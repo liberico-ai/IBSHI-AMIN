@@ -61,18 +61,13 @@ export function paidHolidaysInMonth(year: number, month: number): string[] {
   return (VN_HOLIDAYS[year] || []).filter((d) => d.slice(0, 7) === `${year}-${mm}`);
 }
 
-/** Công chuẩn (CC) = số ngày làm thực = số ngày trong tháng − số Chủ Nhật − số ngày Lễ (rơi vào ngày thường). */
+/** Công chuẩn (CC) = số ngày trong tháng − số Chủ Nhật.
+ *  Lễ ngày thường KHÔNG trừ khỏi CC (theo chốt 2026-06-04 lần 2 — khớp HR). */
 export function standardWorkDays(year: number, month: number): number {
   const daysInMonth = new Date(year, month, 0).getDate();
   let sundays = 0;
-  let weekdayHolidays = 0;
   for (let d = 1; d <= daysInMonth; d++) {
-    const dt = new Date(year, month - 1, d);
-    if (dt.getDay() === 0) {
-      sundays++;
-      continue; // CN rồi → không đếm vào lễ ngày thường nữa
-    }
-    if (isHoliday(new Date(Date.UTC(year, month - 1, d)))) weekdayHolidays++;
+    if (new Date(year, month - 1, d).getDay() === 0) sundays++;
   }
-  return daysInMonth - sundays - weekdayHolidays;
+  return daysInMonth - sundays;
 }
