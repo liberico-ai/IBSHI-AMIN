@@ -85,9 +85,15 @@ export function calcTNCN(taxableMonthly: number): number {
 
 export function calculateSalary(input: SalaryInput): SalaryOutput {
   const CC = input.standardDays > 0 ? input.standardDays : SALARY_CONFIG.STANDARD_WORK_DAYS;
-  const dailyRateFull = input.totalIncome / CC;
+
+  // bonusAllowance (PC trách nhiệm + PC nhà xa) là SỐ PHẲNG — không chia theo công.
+  // → Đơn giá ngày làm + giờ OT phải trừ phần này ra khỏi totalIncome trước khi chia CC.
+  const bonusAllowanceForBase = input.bonusAllowance || 0;
+  const workIncomeBase = input.totalIncome - bonusAllowanceForBase;
+
+  const dailyRateFull = workIncomeBase / CC;
   const dailyRateInsurance = input.insuranceSalary / CC;
-  const hourlyRateFull = input.totalIncome / CC / 8;
+  const hourlyRateFull = workIncomeBase / CC / 8;
 
   // Danh sách OT xếp hệ số GIẢM DẦN (để bù lấy hệ số cao nhất trước)
   const otTypes = [

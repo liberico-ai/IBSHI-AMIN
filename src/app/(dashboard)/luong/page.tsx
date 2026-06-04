@@ -558,19 +558,19 @@ function PeriodDetailModal({
                         className="px-3 py-2 border-b text-center"
                         style={{ borderColor: "rgba(51,65,85,0.3)" }}
                       >
-                        {r.workDays}
+                        {Number((r.workDays || 0).toFixed(2)).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
                       </td>
                       <td
                         className="px-3 py-2 border-b text-center"
                         style={{ borderColor: "rgba(51,65,85,0.3)" }}
                       >
-                        {((r.otConvertedHours || 0) / 8).toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {Number(((r.otConvertedHours || 0) / 8).toFixed(2)).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
                       </td>
                       <td
                         className="px-3 py-2 border-b text-center font-medium"
                         style={{ borderColor: "rgba(51,65,85,0.3)", color: "var(--ibs-accent)" }}
                       >
-                        {(r.workDays + (r.otConvertedHours || 0) / 8).toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {Number((r.workDays + (r.otConvertedHours || 0) / 8).toFixed(2)).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
                       </td>
                       <td
                         className="px-3 py-2 border-b text-right whitespace-nowrap"
