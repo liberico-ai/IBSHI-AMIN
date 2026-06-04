@@ -1,7 +1,7 @@
 import prisma from "@/lib/prisma";
 import { calculateSalary, type SalaryInput } from "@/lib/salary-calc";
 import { SALARY_CONFIG, INSURANCE_RATES } from "@/lib/constants";
-import { standardWorkDays, isHoliday, isCompensatoryHoliday, holidaysInMonth } from "@/lib/holidays";
+import { standardWorkDays, isHoliday, isCompensatoryHoliday, paidHolidaysInMonth } from "@/lib/holidays";
 
 // ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
 
@@ -90,6 +90,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
   //   ABSENT_APPROVED(_HALF) (phép) → leaveDays (hưởng theo Lương BHXH/CC).
   const workDaysMap: Record<string, number> = {};        // công thường (ngày làm thực, ÷8)
   const alDaysFromAttendance: Record<string, number> = {};
+  const unpaidWeekdayMap: Record<string, number> = {};   // NK ngày thường (mục tiêu bù công)
   const otMap: Record<string, { weekday: number; sunday: number; holiday: number }> = {};
   const ensureOt = (id: string) => (otMap[id] ||= { weekday: 0, sunday: 0, holiday: 0 });
 
@@ -102,10 +103,13 @@ export async function calculatePayrollForPeriod(periodId: string) {
       alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + (a.paidLeaveDays || 0);
     }
     if (isHoliday(d)) {
-      // Nghỉ bù (lễ rơi CN) → OT ×2 như Chủ nhật; lễ thật → OT ×3.
+      // Phân loại OT: CN hoặc nghỉ bù → ×2; lễ ngày thường → ×3.
       if (wh + oh > 0) {
-        if (isCompensatoryHoliday(d)) ensureOt(a.employeeId).sunday += wh + oh;
-        else ensureOt(a.employeeId).holiday += wh + oh;
+        if (d.getUTCDay() === 0 || isCompensatoryHoliday(d)) {
+          ensureOt(a.employeeId).sunday += wh + oh;
+        } else {
+          ensureOt(a.employeeId).holiday += wh + oh;
+        }
       }
     } else if (d.getUTCDay() === 0) {
       if (wh + oh > 0) ensureOt(a.employeeId).sunday += wh + oh;        // mọi giờ CN = OT CN
@@ -116,6 +120,9 @@ export async function calculatePayrollForPeriod(periodId: string) {
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 1;
       } else if (a.status === "HALF_DAY") {
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 0.5;
+      } else if (a.status === "ABSENT_UNAPPROVED") {
+        // NK ngày thường — mục tiêu bù công
+        unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
       }
       // Nghỉ phép có lương: đã cộng từ paidLeaveDays ở trên (không suy từ status nữa).
       if (oh > 0) ensureOt(a.employeeId).weekday += oh;                 // OT ngày thường
@@ -139,21 +146,13 @@ export async function calculatePayrollForPeriod(periodId: string) {
     leavePaidMap[empId] = (leavePaidMap[empId] || 0) + days;
   }
 
-  // Nghỉ lễ: ngày lễ (lịch VN) mà NV KHÔNG đi làm → cũng hưởng lương theo Lương BHXH/CC
-  const holidayYmds = holidaysInMonth(period.year, period.month);
-  const workedKey = (empId: string, d: Date) =>
-    `${empId}|${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-  const workedSet = new Set<string>();
-  for (const a of attendanceData) {
-    if (["PRESENT", "LATE", "BUSINESS_TRIP", "HALF_DAY"].includes(a.status)) {
-      workedSet.add(workedKey(a.employeeId, new Date(a.date)));
-    }
-  }
+  // Nghỉ lễ: lễ chính thức (VN_HOLIDAYS, kể cả rơi CN) → TẤT CẢ NV được +1 công nghỉ có lương
+  // (đi làm vào lễ vẫn được công này, cộng thêm OT theo hệ số).
+  // Nghỉ bù (COMP) KHÔNG tính → không cộng vào leaveDays.
+  const paidHolidayCount = paidHolidaysInMonth(period.year, period.month).length;
   const holidayRestMap: Record<string, number> = {};
   for (const empId of employeeIdsWithAttendance) {
-    let rest = 0;
-    for (const hy of holidayYmds) if (!workedSet.has(`${empId}|${hy}`)) rest++;
-    if (rest > 0) holidayRestMap[empId] = rest;
+    if (paidHolidayCount > 0) holidayRestMap[empId] = paidHolidayCount;
   }
 
   // Công chuẩn (CC) = số ngày trong tháng − số Chủ Nhật
@@ -196,6 +195,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       standardDays: CC,
       workDaysActual,
       leaveDays,
+      unpaidWeekdayDays: unpaidWeekdayMap[emp.id] || 0,
       ot: {
         weekday: ot.weekday,
         weekdayNight: 0,   // ca đêm chờ máy chấm công

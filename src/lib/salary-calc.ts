@@ -27,9 +27,10 @@ export interface OTHours {
 export interface SalaryInput {
   totalIncome: number;       // Tổng thu nhập đủ tháng = Lương BHXH + Phụ cấp
   insuranceSalary: number;   // Lương đóng BHXH (= lương chính)
-  standardDays: number;      // CC = ngày trong tháng − số CN
+  standardDays: number;      // CC = ngày trong tháng − số CN − số Lễ ngày thường
   workDaysActual: number;    // số ngày đi làm thực (present + nửa ngày)
   leaveDays: number;         // phép + lễ (hưởng theo Lương BHXH/CC)
+  unpaidWeekdayDays?: number;// số ngày NK rơi ngày thường (T2-T7 không lễ) — mục tiêu bù công
   ot: OTHours;
   dependentsCount: number;
   bonusAllowance?: number;   // Bổ sung lương (trách nhiệm + nhà xa) — số phẳng, cộng vào Gross/Net
@@ -103,13 +104,27 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
 
   const effectiveDays = input.workDaysActual + input.leaveDays;
 
-  // OT trả ĐỦ HỆ SỐ cho mọi giờ (KHÔNG bù-công) — khớp bảng lương kế toán (chốt 2026-05-27).
-  const otFillHours = 0;
+  // BÙ CÔNG (chốt 2026-06-04 — khớp bảng kế toán mới):
+  //   Mục tiêu = số ngày NK rơi ngày thường (unpaidWeekdayDays).
+  //   Lấy giờ OT từ hệ số CAO NHẤT trước → kéo xuống 1× → bù NK.
+  //   Phần OT dôi còn lại mới được nhân hệ số.
+  const fillTarget = Math.max(0, input.unpaidWeekdayDays || 0) * 8; // ngày × 8h
+  let remainingFill = Math.min(fillTarget, otHoursTotal);
+  const otFillHours = remainingFill;
+
   let otPayMultiplied = 0;
+  let otPaidHours = 0;
+  // Duyệt theo thứ tự hệ số GIẢM DẦN: lễ đêm → lễ → CN đêm → đêm thường → CN → thường.
+  // Mỗi loại: lấy đến hết remainingFill (tính 1×), phần còn lại tính hệ số.
   for (const o of otTypes) {
-    otPayMultiplied += o.hours * hourlyRateFull * o.rate;
+    if (o.hours <= 0) continue;
+    const fillFromThis = Math.min(o.hours, remainingFill);
+    const paidFromThis = o.hours - fillFromThis;
+    otPayMultiplied += fillFromThis * hourlyRateFull * 1
+                     + paidFromThis * hourlyRateFull * o.rate;
+    otPaidHours += paidFromThis;
+    remainingFill -= fillFromThis;
   }
-  const otPaidHours = otHoursTotal;
 
   // Các khoản nhập tay theo kỳ + bổ sung — số phẳng, cộng vào thu nhập (chịu thuế)
   const bonusAllowance = input.bonusAllowance || 0;   // trách nhiệm + nhà xa
