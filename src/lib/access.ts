@@ -7,6 +7,7 @@ export const PAYROLL_CONTRACT_VIEWERS = new Set<string>([
   "190327", // Phạm Thị Mai Liên
   "190867", // Phạm Thảo Nguyên
   "toannd", // Nguyễn Đức Toàn (IBS-1137)
+  "nv190906", // Lê Thị Hải Yến (P. HCNS)
 ]);
 
 /** Có được xem M7 - Lương + tab Hợp đồng không? */
