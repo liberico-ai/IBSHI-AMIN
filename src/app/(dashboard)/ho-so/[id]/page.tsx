@@ -1534,7 +1534,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                 <table className="w-full border-collapse">
                   <thead>
                     <tr>
-                      {["Số HĐ", "Loại HĐ", "Vị trí", "Ngày bắt đầu", "Ngày kết thúc", "Lương đóng BHXH", "Phụ cấp", "Tổng thu nhập", "Trạng thái"].map(
+                      {["Số HĐ", "Loại HĐ", "Vị trí", "Ngày bắt đầu", "Ngày kết thúc", "Mức lương chính", "Phụ cấp", "Tổng thu nhập", "Trạng thái"].map(
                         (h) => (
                           <th
                             key={h}
@@ -1557,17 +1557,29 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                         <td className="px-4 py-3 text-[13px]">
                           {c.endDate ? formatDate(new Date(c.endDate)) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}
                         </td>
-                        <td className="px-4 py-3 text-[13px] font-medium" style={{ color: c.insuranceSalary ? "var(--ibs-accent)" : "var(--ibs-text-dim)" }}>
-                          {c.contractType === "PROBATION"
-                            ? <span className="text-[11px] italic" style={{ color: "var(--ibs-text-dim)" }}>(Không đóng BHXH khi thử việc)</span>
-                            : (c.insuranceSalary ? formatVND(c.insuranceSalary) : "—")}
+                        <td className="px-4 py-3 text-[13px] font-medium">
+                          {c.contractType === "PROBATION" ? (
+                            (c.baseSalary ?? 0) > 0 ? (
+                              <div>
+                                <div style={{ color: "var(--ibs-accent)" }}>{formatVND(c.baseSalary!)}</div>
+                                <div className="text-[10px] italic mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>(Không đóng BHXH khi thử việc)</div>
+                              </div>
+                            ) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>
+                          ) : (
+                            c.insuranceSalary
+                              ? <span style={{ color: "var(--ibs-accent)" }}>{formatVND(c.insuranceSalary)}</span>
+                              : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-[13px] font-medium" style={{ color: c.allowance ? "var(--ibs-warning)" : "var(--ibs-text-dim)" }}>
                           {c.allowance ? formatVND(c.allowance) : "—"}
                         </td>
                         <td className="px-4 py-3 text-[13px] font-semibold" style={{ color: "var(--ibs-success)" }}>
                           {(() => {
-                            const tn = c.contractType === "PROBATION" ? c.baseSalary : (c.insuranceSalary ?? 0) + (c.allowance ?? 0);
+                            // HĐ thử việc: dùng baseSalary (vì insuranceSalary = 0); HĐ chính thức: dùng insuranceSalary.
+                            // Cả 2 trường hợp đều CỘNG allowance vào.
+                            const base = c.contractType === "PROBATION" ? (c.baseSalary ?? 0) : (c.insuranceSalary ?? 0);
+                            const tn = base + (c.allowance ?? 0);
                             return tn > 0 ? formatVND(tn) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>;
                           })()}
                         </td>

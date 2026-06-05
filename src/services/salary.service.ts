@@ -114,14 +114,18 @@ export async function calculatePayrollForPeriod(periodId: string) {
     } else if (d.getUTCDay() === 0) {
       if (wh + oh > 0) ensureOt(a.employeeId).sunday += wh + oh;        // mọi giờ CN = OT CN
     } else {
-      // Ngày thường — đếm theo số NGÀY có mặt (chốt 2026-05-27): mỗi ngày đi làm = 1 công tròn,
-      // nửa ngày = 0,5; KHÔNG chia giờ thực ÷ 8 (giờ lẻ đi muộn/về sớm không trừ vào công).
-      if (["PRESENT", "LATE", "BUSINESS_TRIP"].includes(a.status)) {
+      // Ngày thường — đếm công theo workHours/8 (chốt 2026-06-05):
+      //   PRESENT, LATE → workHours / 8 (đi muộn/về sớm BỊ trừ theo giờ thực)
+      //   BUSINESS_TRIP → 1 cố định (đi công tác tính tròn 1 công)
+      //   HALF_DAY      → 0.5 cố định
+      //   ABSENT_UNAPPROVED → mục tiêu bù công (NK ngày thường)
+      if (a.status === "PRESENT" || a.status === "LATE") {
+        workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + wh / 8;
+      } else if (a.status === "BUSINESS_TRIP") {
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 1;
       } else if (a.status === "HALF_DAY") {
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 0.5;
       } else if (a.status === "ABSENT_UNAPPROVED") {
-        // NK ngày thường — mục tiêu bù công
         unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
       }
       // Nghỉ phép có lương: đã cộng từ paidLeaveDays ở trên (không suy từ status nữa).

@@ -83,6 +83,9 @@ export function calcTNCN(taxableMonthly: number): number {
   return Math.round(tax);
 }
 
+// Round 2 chữ số thập phân (rule chốt 2026-06-05).
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
 export function calculateSalary(input: SalaryInput): SalaryOutput {
   const CC = input.standardDays > 0 ? input.standardDays : SALARY_CONFIG.STANDARD_WORK_DAYS;
 
@@ -91,24 +94,37 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const bonusAllowanceForBase = input.bonusAllowance || 0;
   const workIncomeBase = input.totalIncome - bonusAllowanceForBase;
 
-  const dailyRateFull = workIncomeBase / CC;
-  const dailyRateInsurance = input.insuranceSalary / CC;
-  const hourlyRateFull = workIncomeBase / CC / 8;
+  // Đơn giá round 2 chữ số TRƯỚC khi nhân (Cách B — khớp HR Excel).
+  const dailyRateFull = r2(workIncomeBase / CC);
+  const dailyRateInsurance = r2(input.insuranceSalary / CC);
+  const hourlyRateFull = r2(workIncomeBase / CC / 8);
+
+  // Round input số công + giờ OT về 2 chữ số (tránh float precision lung tung).
+  const workDaysActual = r2(input.workDaysActual);
+  const leaveDays = r2(input.leaveDays);
+  const otInput = {
+    weekday: r2(input.ot.weekday),
+    weekdayNight: r2(input.ot.weekdayNight),
+    sunday: r2(input.ot.sunday),
+    sundayNight: r2(input.ot.sundayNight),
+    holiday: r2(input.ot.holiday),
+    holidayNight: r2(input.ot.holidayNight),
+  };
 
   // Danh sách OT xếp hệ số GIẢM DẦN (để bù lấy hệ số cao nhất trước)
   const otTypes = [
-    { rate: SALARY_CONFIG.OT_RATE_HOLIDAY_NIGHT, hours: input.ot.holidayNight },
-    { rate: SALARY_CONFIG.OT_RATE_HOLIDAY, hours: input.ot.holiday },
-    { rate: SALARY_CONFIG.OT_RATE_SUNDAY_NIGHT, hours: input.ot.sundayNight },
-    { rate: SALARY_CONFIG.OT_RATE_WEEKDAY_NIGHT, hours: input.ot.weekdayNight },
-    { rate: SALARY_CONFIG.OT_RATE_SUNDAY, hours: input.ot.sunday },
-    { rate: SALARY_CONFIG.OT_RATE_WEEKDAY, hours: input.ot.weekday },
+    { rate: SALARY_CONFIG.OT_RATE_HOLIDAY_NIGHT, hours: otInput.holidayNight },
+    { rate: SALARY_CONFIG.OT_RATE_HOLIDAY, hours: otInput.holiday },
+    { rate: SALARY_CONFIG.OT_RATE_SUNDAY_NIGHT, hours: otInput.sundayNight },
+    { rate: SALARY_CONFIG.OT_RATE_WEEKDAY_NIGHT, hours: otInput.weekdayNight },
+    { rate: SALARY_CONFIG.OT_RATE_SUNDAY, hours: otInput.sunday },
+    { rate: SALARY_CONFIG.OT_RATE_WEEKDAY, hours: otInput.weekday },
   ];
-  const otHoursTotal = otTypes.reduce((s, o) => s + o.hours, 0);
+  const otHoursTotal = r2(otTypes.reduce((s, o) => s + o.hours, 0));
   // Quy đổi thuần (báo cáo): mọi giờ OT × hệ số, không liên quan logic bù công
-  const otConvertedHours = otTypes.reduce((s, o) => s + o.hours * o.rate, 0);
+  const otConvertedHours = r2(otTypes.reduce((s, o) => s + o.hours * o.rate, 0));
 
-  const effectiveDays = input.workDaysActual + input.leaveDays;
+  const effectiveDays = workDaysActual + leaveDays;
 
   // BÙ CÔNG (chốt 2026-06-04 — khớp bảng kế toán mới):
   //   Mục tiêu = số ngày NK rơi ngày thường (unpaidWeekdayDays).
@@ -137,9 +153,9 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const pieceRate = input.pieceRate || 0;             // lương sản phẩm/khoán
   const adjustment = input.adjustment || 0;           // điều chỉnh tay (có thể âm)
 
-  // Các khoản tiền (làm tròn từng khoản về đồng)
-  const salaryWorkActual = Math.round(input.workDaysActual * dailyRateFull);
-  const leavePay = Math.round(input.leaveDays * dailyRateInsurance);
+  // Các khoản tiền (làm tròn từng khoản về đồng) — dùng workDaysActual, leaveDays ĐÃ ROUND
+  const salaryWorkActual = Math.round(workDaysActual * dailyRateFull);
+  const leavePay = Math.round(leaveDays * dailyRateInsurance);
   const fillPay = 0; // không còn bù-công
   const salaryOT = Math.round(otPayMultiplied);
   const grossSalary = salaryWorkActual + leavePay + salaryOT + bonusAllowance + pieceRate + adjustment;
@@ -166,8 +182,8 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
 
   return {
     standardDays: CC,
-    workDaysActual: input.workDaysActual,
-    leaveDays: input.leaveDays,
+    workDaysActual,    // đã round 2 chữ số
+    leaveDays,         // đã round 2 chữ số
     effectiveDays,
     otHoursTotal,
     otConvertedHours,
