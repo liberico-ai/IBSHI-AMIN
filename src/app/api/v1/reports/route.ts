@@ -257,10 +257,11 @@ export async function GET(request: NextRequest) {
     const from = new Date(year, month - 1, 1);
     const to   = new Date(year, month, 0, 23, 59, 59);
 
-    const [payrollPeriod, vehicleBookings, mealRegs] = await Promise.all([
+    const [payrollPeriod, vehicleBookings, mealRegs, subMealAgg] = await Promise.all([
       prisma.payrollPeriod.findFirst({ where: { month, year }, include: { records: { select: { grossSalary: true, netSalary: true, bhxh: true, bhyt: true, bhtn: true, tncn: true, employee: { select: { code: true, fullName: true, department: { select: { name: true } } } } } } } }),
       prisma.vehicleBooking.groupBy({ by: ["status"], where: { startDate: { gte: from, lte: to } }, _count: true }),
-      prisma.mealRegistration.aggregate({ where: { date: { gte: from, lte: to } }, _sum: { lunchCount: true, dinnerCount: true, guestCount: true } }),
+      prisma.mealRegistration.aggregate({ where: { date: { gte: from, lte: to }, department: { isActive: true } }, _sum: { lunchCount: true, dinnerCount: true, guestCount: true } }),
+      prisma.subcontractorMeal.aggregate({ where: { date: { gte: from, lte: to } }, _sum: { lunchCount: true, dinnerCount: true } }),
     ]);
 
     const payrollRecords = payrollPeriod?.records || [];
@@ -281,8 +282,8 @@ export async function GET(request: NextRequest) {
     const vehicleMap: Record<string, number> = {};
     for (const v of vehicleBookings) vehicleMap[v.status] = v._count;
 
-    const lunchTotal  = mealRegs._sum.lunchCount  ?? 0;
-    const dinnerTotal = mealRegs._sum.dinnerCount ?? 0;
+    const lunchTotal  = (mealRegs._sum.lunchCount  ?? 0) + (subMealAgg._sum.lunchCount  ?? 0);
+    const dinnerTotal = (mealRegs._sum.dinnerCount ?? 0) + (subMealAgg._sum.dinnerCount ?? 0);
     const guestTotal  = mealRegs._sum.guestCount  ?? 0;
 
     return NextResponse.json({

@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canApproveRoomVehicle } from "@/lib/access";
 
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  const role = (session.user as any).role;
-  if (role !== "HR_ADMIN" && role !== "BOM")
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ NV phụ trách phòng họp (HR_ADMIN/BOM) duyệt" } }, { status: 403 });
+  const employeeCode = (session.user as any).employeeCode;
+  if (!canApproveRoomVehicle(employeeCode))
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền duyệt phiếu đặt phòng họp" } }, { status: 403 });
 
   const { id } = await params;
   const b = await prisma.roomBooking.findUnique({ where: { id } });

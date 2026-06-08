@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR } from "@/lib/constants";
+import { computeFifo } from "@/lib/food-inventory";
 
 const RegisterSchema = z.object({
   departmentId: z.string().uuid(),
@@ -31,24 +32,28 @@ export async function GET(request: NextRequest) {
     const startOfMonth = new Date(year, month - 1, 1);
     const endOfMonth = new Date(year, month, 0, 23, 59, 59);
 
-    const [regs, supps, foods, visitorMeals] = await Promise.all([
+    const [regs, supps, allPurchases, visitorMeals, subMeals, allIssues] = await Promise.all([
       prisma.mealRegistration.findMany({
-        where: { date: { gte: startOfMonth, lte: endOfMonth } },
+        where: { date: { gte: startOfMonth, lte: endOfMonth }, department: { isActive: true } },
         select: { date: true, lunchCount: true, dinnerCount: true, guestCount: true, subcontractorCount: true, guestUnitPrice: true },
       }),
       prisma.mealSupplementaryRequest.findMany({
         where: { status: "APPROVED", date: { gte: startOfMonth, lte: endOfMonth } },
         select: { date: true, mealType: true, personType: true, quantity: true, guestUnitPrice: true },
       }),
-      prisma.foodPurchase.findMany({
-        where: { date: { gte: startOfMonth, lte: endOfMonth } },
-        select: { date: true, quantity: true, unitPrice: true },
-      }),
+      prisma.foodPurchase.findMany(),  // FIFO cần toàn bộ lịch sử nhập
       prisma.visitorRequest.findMany({
         where: { needsMeal: true, checkedInAt: { gte: startOfMonth, lte: endOfMonth } },
         select: { checkedInAt: true, mealCount: true },
       }),
+      prisma.subcontractorMeal.findMany({
+        where: { date: { gte: startOfMonth, lte: endOfMonth } },
+        select: { date: true, lunchCount: true, dinnerCount: true },
+      }),
+      prisma.foodIssue.findMany(),     // FIFO cần toàn bộ lịch sử xuất
     ]);
+    // Chi phí thực phẩm theo ngày = giá vốn THỰC XUẤT (FIFO), không phải tiền mua.
+    const { issueCost } = computeFifo(allPurchases as any, allIssues as any);
 
     type DayRow = {
       date: string;
@@ -77,9 +82,15 @@ export async function GET(request: NextRequest) {
     }
     for (const s of supps) {
       const row = ensure(keyOf(s.date));
-      if (s.personType === "SUBCONTRACTOR") { row.subcontractorCount += s.quantity; row.mealCost += s.quantity * MEAL_PRICE_SUBCONTRACTOR; }
-      else if (s.personType === "GUEST") { row.guestCount += s.quantity; row.mealCost += s.quantity * (s.guestUnitPrice || MEAL_UNIT_PRICE); }
+      // Thầu phụ (bổ sung) tính như suất trưa/tối OT — đơn giá thầu phụ (= giá CBNV).
+      if (s.personType === "GUEST") { row.guestCount += s.quantity; row.mealCost += s.quantity * (s.guestUnitPrice || MEAL_UNIT_PRICE); }
       else { if (s.mealType === "DINNER") row.dinnerCount += s.quantity; else row.lunchCount += s.quantity; row.mealCost += s.quantity * MEAL_PRICE_EMPLOYEE; }
+    }
+    for (const m of subMeals) {
+      const row = ensure(keyOf(m.date));
+      row.lunchCount += m.lunchCount;
+      row.dinnerCount += m.dinnerCount;
+      row.mealCost += (m.lunchCount + m.dinnerCount) * MEAL_PRICE_SUBCONTRACTOR;
     }
     for (const v of visitorMeals) {
       if (!v.checkedInAt) continue;
@@ -87,9 +98,10 @@ export async function GET(request: NextRequest) {
       row.guestCount += v.mealCount;
       row.mealCost += v.mealCount * MEAL_UNIT_PRICE;
     }
-    for (const f of foods) {
-      const row = ensure(keyOf(f.date));
-      row.foodCost += f.quantity * f.unitPrice;
+    for (const i of allIssues) {
+      if (i.date < startOfMonth || i.date > endOfMonth) continue;
+      const row = ensure(keyOf(i.date));
+      row.foodCost += issueCost.get(i.id) ?? 0;
     }
 
     const data = Array.from(byDay.values())
@@ -114,12 +126,15 @@ export async function GET(request: NextRequest) {
     const endOfMonth   = new Date(year, month, 0, 23, 59, 59);
 
     const regs = await prisma.mealRegistration.findMany({
-      where: { date: { gte: startOfMonth, lte: endOfMonth } },
+      where: { date: { gte: startOfMonth, lte: endOfMonth }, department: { isActive: true } },
       include: { department: { select: { id: true, name: true } } },
     });
 
+    // Khóa riêng cho dòng "Thầu phụ" (gom mọi nhà thầu — đăng ký thường + bổ sung).
+    const SUB_KEY = "__SUB__";
+
     // Aggregate per department — đơn giá theo đối tượng:
-    //   CBNV (trưa + tối OT) = 20k, Thầu phụ = 28k, Khách = đơn giá nhập tay (guestUnitPrice).
+    //   CBNV (trưa + tối OT) = 20k, Thầu phụ = 20k, Khách = đơn giá nhập tay (guestUnitPrice).
     const deptMap: Record<string, { name: string; lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number; cost: number }> = {};
     for (const r of regs) {
       if (!deptMap[r.departmentId]) {
@@ -141,20 +156,33 @@ export async function GET(request: NextRequest) {
       include: { department: { select: { id: true, name: true } } },
     });
     for (const s of suppApproved) {
-      if (!deptMap[s.departmentId]) {
-        deptMap[s.departmentId] = { name: s.department.name, lunchCount: 0, dinnerCount: 0, guestCount: 0, subcontractorCount: 0, cost: 0 };
+      // Thầu phụ (bổ sung) → gom vào dòng "Thầu phụ" và tính như suất trưa/tối OT.
+      const key = s.personType === "SUBCONTRACTOR" ? SUB_KEY : s.departmentId;
+      if (!deptMap[key]) {
+        deptMap[key] = { name: s.personType === "SUBCONTRACTOR" ? "Thầu phụ" : s.department.name, lunchCount: 0, dinnerCount: 0, guestCount: 0, subcontractorCount: 0, cost: 0 };
       }
-      const d = deptMap[s.departmentId];
-      if (s.personType === "SUBCONTRACTOR") {
-        d.subcontractorCount += s.quantity;
-        d.cost += s.quantity * MEAL_PRICE_SUBCONTRACTOR;
-      } else if (s.personType === "GUEST") {
+      const d = deptMap[key];
+      if (s.personType === "GUEST") {
         d.guestCount += s.quantity;
         d.cost += s.quantity * (s.guestUnitPrice || MEAL_UNIT_PRICE);
       } else {
         if (s.mealType === "DINNER") d.dinnerCount += s.quantity; else d.lunchCount += s.quantity;
-        d.cost += s.quantity * MEAL_PRICE_EMPLOYEE;
+        d.cost += s.quantity * (s.personType === "SUBCONTRACTOR" ? MEAL_PRICE_SUBCONTRACTOR : MEAL_PRICE_EMPLOYEE);
       }
+    }
+
+    // Suất ăn thầu phụ ĐĂNG KÝ THƯỜNG (bảng SubcontractorMeal) → cũng gom vào dòng "Thầu phụ".
+    const subMealAgg = await prisma.subcontractorMeal.aggregate({
+      where: { date: { gte: startOfMonth, lte: endOfMonth } },
+      _sum: { lunchCount: true, dinnerCount: true },
+    });
+    const subLunch = subMealAgg._sum.lunchCount ?? 0;
+    const subDinner = subMealAgg._sum.dinnerCount ?? 0;
+    if (subLunch + subDinner > 0) {
+      if (!deptMap[SUB_KEY]) deptMap[SUB_KEY] = { name: "Thầu phụ", lunchCount: 0, dinnerCount: 0, guestCount: 0, subcontractorCount: 0, cost: 0 };
+      deptMap[SUB_KEY].lunchCount += subLunch;
+      deptMap[SUB_KEY].dinnerCount += subDinner;
+      deptMap[SUB_KEY].cost += (subLunch + subDinner) * MEAL_PRICE_SUBCONTRACTOR;
     }
 
     const data = Object.entries(deptMap)
@@ -220,6 +248,10 @@ export async function GET(request: NextRequest) {
     where.date = { gte: new Date(new Date(d).setHours(0, 0, 0, 0)), lte: new Date(new Date(d).setHours(23, 59, 59, 999)) };
   }
 
+  // Chỉ lấy đăng ký của phòng ban THẬT (loại phòng ban ẩn "Thầu phụ" — suất thầu phụ
+  // nay lưu ở bảng SubcontractorMeal riêng và hiển thị thành dòng tổng hợp riêng).
+  where.department = { isActive: true };
+
   const data = await prisma.mealRegistration.findMany({
     where,
     include: { department: { select: { id: true, name: true } } },
@@ -257,10 +289,23 @@ export async function POST(request: NextRequest) {
 
   const registeredBy = userId;
 
+  // Mỗi lần đăng ký là MỘT đối tượng (trưa / tối OT / khách / thầu phụ) → CỘNG DỒN
+  // vào phiếu của phòng ban trong ngày, KHÔNG ghi đè. Nếu ghi đè thì đăng ký khách
+  // (guest) sẽ xoá mất suất CBNV (lunch) đã đăng ký trước đó.
+  // Các trường phụ (đơn giá khách, tên thầu phụ, ghi chú) chỉ cập nhật khi liên quan
+  // đến lần đăng ký này, để không xoá thông tin đã có của đối tượng khác.
   const reg = await prisma.mealRegistration.upsert({
     where: { departmentId_date: { departmentId, date: new Date(date) } },
     create: { departmentId, date: new Date(date), lunchCount, dinnerCount, guestCount, subcontractorCount, subcontractorName: subcontractorName || null, guestUnitPrice, specialNote, registeredBy },
-    update: { lunchCount, dinnerCount, guestCount, subcontractorCount, subcontractorName: subcontractorName || null, guestUnitPrice, specialNote },
+    update: {
+      lunchCount: { increment: lunchCount },
+      dinnerCount: { increment: dinnerCount },
+      guestCount: { increment: guestCount },
+      subcontractorCount: { increment: subcontractorCount },
+      ...(guestCount > 0 && guestUnitPrice ? { guestUnitPrice } : {}),
+      ...(subcontractorCount > 0 && subcontractorName ? { subcontractorName } : {}),
+      ...(specialNote ? { specialNote } : {}),
+    },
     include: { department: { select: { id: true, name: true } } },
   });
 

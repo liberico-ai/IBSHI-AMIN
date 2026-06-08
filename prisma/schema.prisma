@@ -874,6 +874,7 @@ model PayrollManualInput {
   year       Int
   pieceRate  Int      @default(0) // Lương sản phẩm / khoán theo sản lượng
   adjustment Int      @default(0) // Điều chỉnh/bổ sung tay (có thể âm)
+  mealBonus  Int      @default(0) // Tiền ăn thêm giờ (HR Excel cột AZ) — cộng vào Gross
   note       String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -1039,6 +1040,7 @@ model VehicleBooking {
   actualKm       Int?          // Số km thực tế sau chuyến đi
   returnTime     String?       // Giờ về thực tế "17:30"
   notes          String?
+  seriesId       String?       // Nếu là phần của series lặp lại — chung seriesId
   createdAt      DateTime      @default(now())
 
   vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
@@ -1047,6 +1049,7 @@ model VehicleBooking {
   @@index([vehicleId])
   @@index([requestedBy])
   @@index([status])
+  @@index([seriesId])
 }
 
 model MealRegistration {
@@ -1099,7 +1102,57 @@ model MealSupplementaryRequest {
   @@index([departmentId])
 }
 
-// Chi phí mua thực phẩm theo ngày (sổ chợ nhà bếp): mỗi dòng = 1 mặt hàng mua trong ngày.
+// Danh mục nhà thầu phụ đăng ký làm việc tại nhà máy (HCNS quản lý).
+// Dùng để chuẩn hoá tên thầu phụ khi đăng ký suất ăn (thay vì nhập tay tự do).
+model Subcontractor {
+  id          String   @id @default(uuid())
+  name        String   @unique   // Tên gọi nhà thầu (vd: "Nhà thầu Tùng")
+  companyName String             // Tên công ty đầy đủ
+  phone       String?
+  note        String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  meals       SubcontractorMeal[]
+
+  @@index([active])
+}
+
+// Đăng ký suất ăn của nhà thầu phụ — lưu THEO TỪNG nhà thầu / ngày để diễn giải
+// chi tiết "nhà thầu nào bao nhiêu suất". Đơn giá = giá thầu phụ (20k = giá CBNV).
+model SubcontractorMeal {
+  id              String        @id @default(uuid())
+  subcontractorId String
+  date            DateTime
+  lunchCount      Int           @default(0)
+  dinnerCount     Int           @default(0)
+  specialNote     String?
+  registeredBy    String
+  createdAt       DateTime      @default(now())
+
+  subcontractor   Subcontractor @relation(fields: [subcontractorId], references: [id], onDelete: Cascade)
+
+  @@unique([subcontractorId, date])
+  @@index([date])
+}
+
+// Con số suất ăn THỰC TẾ bếp phục vụ trong ngày (HCNS nhập sau khi chốt) —
+// để đối soát Kế hoạch (đăng ký) vs Thực tế. Tách 4 loại: trưa / tối OT / khách / thầu phụ.
+model MealActual {
+  id           String   @id @default(uuid())
+  date         DateTime @unique
+  lunchActual  Int      @default(0)
+  dinnerActual Int      @default(0)
+  guestActual  Int      @default(0)
+  subActual    Int      @default(0)
+  note         String?
+  recordedBy   String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Chi phí mua thực phẩm theo ngày (sổ chợ nhà bếp): mỗi dòng = 1 lô NHẬP kho trong ngày.
 model FoodPurchase {
   id        String   @id @default(uuid())
   date      DateTime
@@ -1107,6 +1160,20 @@ model FoodPurchase {
   unit      String   @default("Kg")
   quantity  Float    @default(0)
   unitPrice Int      @default(0)
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
+
+// Thực XUẤT thực phẩm: lượng thực phẩm bếp thực sự nấu trong ngày → trừ tồn kho theo FIFO.
+// Giá vốn từng lần xuất tính FIFO (lô nhập cũ xuất trước) khi đọc, không lưu sẵn.
+model FoodIssue {
+  id        String   @id @default(uuid())
+  date      DateTime
+  name      String
+  unit      String   @default("Kg")
+  quantity  Float    @default(0)
   createdBy String
   createdAt DateTime @default(now())
 
@@ -1775,6 +1842,7 @@ model RoomBooking {
   approvedById    String?
   approvedAt      DateTime?
   rejectReason    String?
+  seriesId        String?           // Nếu là phần của series lặp lại — chung seriesId
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -1783,6 +1851,7 @@ model RoomBooking {
   @@index([roomId, startTime])
   @@index([requesterId])
   @@index([status])
+  @@index([seriesId])
 }
 
 enum RsvpStatus {

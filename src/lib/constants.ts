@@ -59,6 +59,12 @@ export const MEAL_PRICE_EMPLOYEE = 20000;      // Cán bộ nhân viên
 export const MEAL_PRICE_SUBCONTRACTOR = 20000; // Thầu phụ
 // Khách: nhập tay đơn giá khi đăng ký (guestUnitPrice trên từng phiếu)
 
+// Chốt giờ đăng ký suất ăn (giờ VN). Thường: trước 9h. Bổ sung: trước 10h30 —
+// sau mốc này (và các ngày đã qua) chỉ P. HCNS (HR_ADMIN/BOM) được thêm/sửa.
+export const MEAL_CUTOFF_HOUR = 9;
+export const MEAL_SUPP_CUTOFF_HOUR = 10;
+export const MEAL_SUPP_CUTOFF_MINUTE = 30;
+
 export const SALARY_CONFIG = {
   STANDARD_WORK_DAYS: 26,
   BHXH_MIN_DAYS: 14,                // ≥14 công (đi làm + phép + lễ) mới đóng/trừ BHXH

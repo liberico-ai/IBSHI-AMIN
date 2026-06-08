@@ -14,3 +14,16 @@ export const PAYROLL_CONTRACT_VIEWERS = new Set<string>([
 export function canViewPayroll(employeeCode?: string | null): boolean {
   return !!employeeCode && PAYROLL_CONTRACT_VIEWERS.has(employeeCode);
 }
+
+// Danh sách NV được phép DUYỆT phiếu đặt phòng họp + đặt xe.
+// KHÔNG phân quyền theo role — chỉ định đích danh 3 NV.
+export const ROOM_VEHICLE_APPROVERS = new Set<string>([
+  "190021", // Nguyễn Thị Hương Thúy
+  "190067", // Nguyễn Thanh Tùng
+  "190865", // Hoàng Văn Toại
+]);
+
+/** Có được duyệt phiếu đặt phòng họp + đặt xe không? */
+export function canApproveRoomVehicle(employeeCode?: string | null): boolean {
+  return !!employeeCode && ROOM_VEHICLE_APPROVERS.has(employeeCode);
+}

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { canDo } from "@/lib/permissions";
 import { z } from "zod";
+import { canApproveRoomVehicle } from "@/lib/access";
 
 const UpdateSchema = z.object({
-  action: z.enum(["APPROVE", "REJECT", "COMPLETE"]).optional(),
+  action: z.enum(["APPROVE", "REJECT", "COMPLETE", "CANCEL"]).optional(),
   rejectedReason: z.string().optional(),
   actualKm: z.number().int().min(0).optional(),
   returnTime: z.string().optional(),
@@ -19,10 +19,9 @@ export async function PUT(
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  const userRole = (session.user as any).role;
-  if (!canDo(userRole, "vehicleBookings", "approve2")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-  }
+  const employeeCode = (session.user as any).employeeCode;
+  const userId = (session.user as any).id;
+  const isApprover = canApproveRoomVehicle(employeeCode);
 
   const { id } = await params;
   const booking = await prisma.vehicleBooking.findUnique({
@@ -39,10 +38,18 @@ export async function PUT(
 
   const { action, rejectedReason, actualKm, returnTime } = parsed.data;
 
+  // CANCEL — owner cũng được. APPROVE/REJECT/COMPLETE chỉ approver.
+  const isOwner = booking.requester?.user?.id === userId;
+  const isCancel = action === "CANCEL" || parsed.data.status === "CANCELLED";
+  if (!isApprover && !(isCancel && isOwner)) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền thao tác phiếu này" } }, { status: 403 });
+  }
+
   let newStatus = parsed.data.status;
   if (action === "APPROVE") newStatus = "APPROVED";
   if (action === "REJECT") newStatus = "REJECTED";
   if (action === "COMPLETE") newStatus = "COMPLETED";
+  if (action === "CANCEL") newStatus = "CANCELLED";
 
   const updateData: any = {};
   if (newStatus) updateData.status = newStatus;

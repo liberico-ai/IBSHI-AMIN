@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
+import { computeFifo } from "@/lib/food-inventory";
 
 // Sổ chi phí mua thực phẩm theo ngày. HCNS (HR_ADMIN/BOM) quản lý.
 const CreateSchema = z.object({
@@ -34,7 +35,22 @@ export async function GET(request: NextRequest) {
     orderBy: [{ date: "asc" }, { createdAt: "asc" }],
   });
   const total = data.reduce((s, r) => s + Math.round(r.quantity * r.unitPrice), 0);
-  return NextResponse.json({ data, meta: { month, year, total, canManage: canManage((session.user as any).role) } });
+
+  // Tồn kho hiện tại (FIFO, toàn bộ lịch sử) + giá vốn THỰC XUẤT trong tháng.
+  const [allPurchases, allIssues] = await Promise.all([
+    prisma.foodPurchase.findMany(),
+    prisma.foodIssue.findMany(),
+  ]);
+  const { issueCost, inventory } = computeFifo(allPurchases as any, allIssues as any);
+  const issueCostTotal = allIssues
+    .filter((i) => i.date >= start && i.date <= end)
+    .reduce((s, i) => s + (issueCost.get(i.id) ?? 0), 0);
+  const inventoryValue = inventory.reduce((s, r) => s + r.value, 0);
+
+  return NextResponse.json({
+    data,
+    meta: { month, year, total, issueCostTotal, inventory, inventoryValue, canManage: canManage((session.user as any).role) },
+  });
 }
 
 export async function POST(request: NextRequest) {

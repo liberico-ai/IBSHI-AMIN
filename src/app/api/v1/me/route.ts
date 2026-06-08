@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { canViewPayroll } from "@/lib/access";
+import prisma from "@/lib/prisma";
 
 export async function GET() {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
+  const userId = (session.user as any).id;
   const employeeCode = (session.user as any).employeeCode;
+  const emp = await prisma.employee.findFirst({ where: { userId }, select: { id: true } });
   return NextResponse.json({
-    id: (session.user as any).id,
+    id: userId,
+    employeeId: emp?.id ?? null,
     name: session.user.name,
     email: session.user.email,
     role: (session.user as any).role,

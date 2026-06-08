@@ -780,6 +780,155 @@ function ImportPieceRateModal({
   );
 }
 
+// ── Import Bảng lương HR Modal (2-step: preview → confirm) ────────────────
+function ImportBangLuongModal({
+  period,
+  onClose,
+  onSuccess,
+}: {
+  period: PayrollPeriod;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [preview, setPreview] = useState<any | null>(null);
+  const [confirmed, setConfirmed] = useState<any | null>(null);
+
+  async function doRequest(mode: "preview" | "confirm") {
+    if (!file) { setError("Chọn file Excel trước"); return; }
+    setLoading(true); setError("");
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/v1/payroll/${period.id}/upload-bang-luong?mode=${mode}`, { method: "POST", body: fd });
+    setLoading(false);
+    const data = await res.json();
+    if (!res.ok) { setError(apiError(res.status, data.error)); return; }
+    if (mode === "preview") setPreview(data.data);
+    else setConfirmed(data.data);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="rounded-2xl w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[16px] font-bold">Import Bảng lương HR — T{period.month}/{period.year}</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+
+        {!preview && !confirmed && (
+          <div className="flex flex-col gap-3">
+            <p className="text-[12.5px]" style={{ color: "var(--ibs-text-dim)" }}>
+              Upload file Excel "Bảng lương" của HCNS (cần có 2 sheet: <b>Chi tiết lương</b> + <b>Thêm giờ</b>).
+              Hệ thống sẽ đọc + đối chiếu Mã NV với DB và hiển thị preview trước khi ghi.
+            </p>
+            <ul className="text-[11.5px] pl-4 list-disc space-y-1" style={{ color: "var(--ibs-text-dim)" }}>
+              <li>Sheet <b>Chi tiết lương</b>: AT (Lương khoán), AZ (Tiền ăn TG), BE (BS/Điều chỉnh kỳ này)</li>
+              <li>Sheet <b>Thêm giờ</b>: giờ OT mỗi ngày (CN + Lễ sẽ tạo OTRequest; T2-T7 đã có trong chấm công)</li>
+            </ul>
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Chọn file Excel *</label>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="block w-full text-[12px] file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-[12px] file:font-semibold"
+              />
+            </div>
+            {error && <div className="text-[12px] text-red-500">{error}</div>}
+            <div className="flex gap-2 justify-end">
+              <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+              <button onClick={() => doRequest("preview")} disabled={loading} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: loading ? 0.7 : 1 }}>
+                {loading ? "Đang xử lý..." : "Xem preview"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {preview && !confirmed && (
+          <div className="flex flex-col gap-3">
+            <div className="text-[13px] font-semibold">Preview — sẽ KHÔNG ghi cho đến khi anh bấm Xác nhận:</div>
+            <div className="grid grid-cols-2 gap-2 text-[12.5px]">
+              <div>Tổng NV trong file: <b>{preview.summary.totalNVs}</b></div>
+              <div>NV khớp với DB: <b style={{ color: "var(--ibs-accent)" }}>{preview.summary.matchedNVs}</b></div>
+              <div>NV không tìm thấy: <b style={{ color: preview.summary.notFoundNVs > 0 ? "var(--ibs-warning)" : "inherit" }}>{preview.summary.notFoundNVs}</b></div>
+              <div>OTRequest sẽ tạo (CN+Lễ): <b>{preview.summary.totalOTRequestsWillCreate}</b></div>
+              <div>Σ Lương khoán: <b>{formatVND(preview.summary.totalPieceRate)}</b></div>
+              <div>Σ Tiền ăn TG: <b>{formatVND(preview.summary.totalMealBonus)}</b></div>
+              <div>Σ BS/Điều chỉnh: <b>{formatVND(preview.summary.totalAdjustment)}</b></div>
+              <div>Σ Giờ OT trong Excel: <b>{preview.summary.totalOtHoursInExcel}h</b></div>
+            </div>
+
+            {preview.notFound.length > 0 && (
+              <div className="rounded-lg p-2 text-[11.5px]" style={{ background: "rgba(245,158,11,0.08)", color: "var(--ibs-warning)" }}>
+                ⚠️ {preview.notFound.length} NV trong Excel không có trong DB (bỏ qua):<br />
+                {preview.notFound.slice(0, 8).map((n: any) => `${n.code} ${n.name}`).join(", ")}{preview.notFound.length > 8 ? "..." : ""}
+              </div>
+            )}
+
+            <div className="text-[12px] mt-2 font-semibold">Mẫu 50 NV đầu khớp DB:</div>
+            <div className="overflow-y-auto max-h-[280px] border rounded" style={{ borderColor: "var(--ibs-border)" }}>
+              <table className="w-full text-[11px]">
+                <thead style={{ background: "var(--ibs-bg)" }}>
+                  <tr>
+                    <th className="px-2 py-1 text-left">Mã</th>
+                    <th className="px-2 py-1 text-left">Họ tên</th>
+                    <th className="px-2 py-1 text-right">L.khoán</th>
+                    <th className="px-2 py-1 text-right">Tiền ăn TG</th>
+                    <th className="px-2 py-1 text-right">BS đ/c</th>
+                    <th className="px-2 py-1 text-center">OT-CN/Lễ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.matched.map((m: any) => (
+                    <tr key={m.code} className="border-t" style={{ borderColor: "var(--ibs-border)" }}>
+                      <td className="px-2 py-1 font-mono">{m.code}</td>
+                      <td className="px-2 py-1">{m.fullName}</td>
+                      <td className="px-2 py-1 text-right">{m.pieceRate ? formatVND(m.pieceRate) : "—"}</td>
+                      <td className="px-2 py-1 text-right">{m.mealBonus ? formatVND(m.mealBonus) : "—"}</td>
+                      <td className="px-2 py-1 text-right">{m.adjustment ? formatVND(m.adjustment) : "—"}</td>
+                      <td className="px-2 py-1 text-center">{m.otRequestCount}×{m.otRequestHours}h</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="text-[11.5px] italic" style={{ color: "var(--ibs-text-dim)" }}>
+              ⚠️ Bấm "Xác nhận import" sẽ XOÁ tất cả PayrollManualInput + OTRequest đã import của kỳ này, rồi ghi mới (idempotent).
+              Sau khi import xong, hãy bấm "Tính lương" lại để có số chính xác.
+            </div>
+            {error && <div className="text-[12px] text-red-500">{error}</div>}
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setPreview(null); setFile(null); }} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Quay lại chọn file</button>
+              <button onClick={() => doRequest("confirm")} disabled={loading} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "#22c55e", opacity: loading ? 0.7 : 1 }}>
+                {loading ? "Đang ghi..." : `Xác nhận import (${preview.matchedTotalCount} NV)`}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {confirmed && (
+          <div className="flex flex-col gap-3">
+            <div className="text-[14px] font-semibold" style={{ color: "var(--ibs-success)" }}>✅ Import thành công!</div>
+            <div className="grid grid-cols-2 gap-2 text-[12.5px]">
+              <div>PayrollManualInput đã tạo: <b>{confirmed.imported.manualInputs}</b></div>
+              <div>OTRequest đã tạo: <b>{confirmed.imported.otRequests}</b></div>
+            </div>
+            <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
+              Bấm <b>Xong</b> để đóng. Sau đó nhớ bấm "Tính lương" để recompute kỳ này.
+            </div>
+            <div className="flex justify-end">
+              <button onClick={onSuccess} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>Xong</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function LuongPage() {
   const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
@@ -792,6 +941,7 @@ export default function LuongPage() {
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [importPeriod, setImportPeriod] = useState<PayrollPeriod | null>(null);
+  const [importBangLuongPeriod, setImportBangLuongPeriod] = useState<PayrollPeriod | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => setAllowed(!!res.canViewPayroll)).catch(() => setAllowed(false));
@@ -946,6 +1096,18 @@ export default function LuongPage() {
                 title="Import file Lương sản phẩm theo sản lượng tháng"
               >
                 <Download size={11} className="rotate-180" /> {row.pieceRateImported ? "Import lại lương SP" : "Import lương SP"}
+              </button>
+            )}
+
+            {/* Import Bảng lương HR (Excel "Bảng lương" của HCNS): đồng bộ lương khoán + OT + phụ cấp */}
+            {canManage && (row.status === "DRAFT" || row.status === "PROCESSING") && (
+              <button
+                onClick={() => setImportBangLuongPeriod(row)}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
+                style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}
+                title="Import file Bảng lương HR (sheet Chi tiết lương + Thêm giờ)"
+              >
+                <Download size={11} className="rotate-180" /> Import Bảng lương HR
               </button>
             )}
 
@@ -1153,6 +1315,18 @@ export default function LuongPage() {
           onClose={() => setImportPeriod(null)}
           onSuccess={() => {
             setImportPeriod(null);
+            fetchPeriods();
+          }}
+        />
+      )}
+
+      {/* Import Bảng lương HR modal */}
+      {importBangLuongPeriod && (
+        <ImportBangLuongModal
+          period={importBangLuongPeriod}
+          onClose={() => setImportBangLuongPeriod(null)}
+          onSuccess={() => {
+            setImportBangLuongPeriod(null);
             fetchPeriods();
           }}
         />

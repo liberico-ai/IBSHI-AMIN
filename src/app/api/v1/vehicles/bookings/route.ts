@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
+import { randomUUID } from "crypto";
+import { generateDates, applyTimeToDate } from "@/lib/recurrence";
 
 const VehiclePurposeEnum = z.enum(["DELIVERY", "CLIENT_PICKUP", "BUSINESS_TRIP", "PROCUREMENT", "OTHER"]);
 
@@ -14,6 +16,11 @@ const CreateSchema = z.object({
   purpose: VehiclePurposeEnum,
   passengers: z.number().int().min(1).default(1),
   notes: z.string().optional().nullable(),
+  recurrence: z.object({
+    // 1=T2..6=T7 (KHÔNG cho phép CN=0)
+    daysOfWeek: z.array(z.number().int().min(1).max(6)).min(1),
+    until: z.string().optional(),
+  }).optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -66,6 +73,61 @@ export async function POST(request: NextRequest) {
 
   const startDate = new Date(parsed.data.startDate);
   const endDate = new Date(parsed.data.endDate);
+
+  // ── Lịch lặp lại (series) — KHÔNG check conflict, push lên duyệt ───────────
+  const rec = parsed.data.recurrence;
+  if (rec) {
+    // Không có "đến ngày" → dùng cap 365 ngày từ ngày bắt đầu.
+    const until = rec.until
+      ? new Date(rec.until + "T23:59:59")
+      : new Date(startDate.getTime() + 365 * 86400_000);
+    if (until <= startDate) {
+      return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Ngày kết thúc lặp phải sau ngày bắt đầu" } }, { status: 400 });
+    }
+    const dates = generateDates(startDate, until, rec.daysOfWeek);
+    if (dates.length === 0) {
+      return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Không có ngày nào phù hợp với kiểu lặp" } }, { status: 400 });
+    }
+    if (dates.length > 365) {
+      return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Tối đa 365 phiếu / series" } }, { status: 400 });
+    }
+    const seriesId = randomUUID();
+    const adminsRec = await prisma.user.findMany({ where: { role: { in: ["HR_ADMIN"] }, isActive: true }, select: { id: true } });
+    try {
+      // Dùng createMany — nhanh hơn 365 lần create + tránh transaction timeout.
+      const result = await prisma.vehicleBooking.createMany({
+        data: dates.map((d) => ({
+          vehicleId: parsed.data.vehicleId,
+          origin: parsed.data.origin || null,
+          destination: parsed.data.destination,
+          purpose: parsed.data.purpose,
+          passengers: parsed.data.passengers,
+          notes: parsed.data.notes || null,
+          startDate: applyTimeToDate(d, startDate),
+          endDate: applyTimeToDate(d, endDate),
+          requestedBy: emp.id,
+          status: "PENDING" as const,
+          seriesId,
+        })),
+      });
+      if (adminsRec.length > 0) {
+        await prisma.notification.createMany({
+          data: adminsRec.map((u) => ({
+            userId: u.id,
+            title: "Yêu cầu đặt xe (lịch cố định)",
+            message: `${emp.fullName} đặt xe đến ${parsed.data.destination} — ${result.count} phiếu (lịch cố định)`,
+            type: "APPROVAL_REQUIRED",
+            referenceType: "vehicle_booking_series",
+            referenceId: seriesId,
+          })),
+        });
+      }
+      return NextResponse.json({ data: { seriesId, count: result.count } }, { status: 201 });
+    } catch (e: any) {
+      console.error("[vehicles bookings series create] error:", e);
+      return NextResponse.json({ error: { code: "CREATE_FAILED", message: e?.message || "Tạo series thất bại" } }, { status: 500 });
+    }
+  }
 
   // Check vehicle availability
   const conflict = await prisma.vehicleBooking.findFirst({
