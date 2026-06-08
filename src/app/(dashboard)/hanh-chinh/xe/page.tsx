@@ -8,6 +8,7 @@ import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench } from "lucid
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
+import { canApproveRoomVehicle } from "@/lib/access";
 import { alertDialog } from "@/lib/confirm-dialog";
 
 // Vietnamese number formatting helpers
@@ -44,9 +45,9 @@ type VehicleBooking = {
   id: string; vehicleId: string; startDate: string; endDate: string;
   startDatetime?: string; endDatetime?: string;
   origin?: string | null; destination: string; purpose: string; passengers: number; status: string;
-  approvedAt?: string; actualKm?: number; returnTime?: string; notes?: string;
+  approvedAt?: string; actualKm?: number; returnTime?: string; notes?: string; seriesId?: string | null;
   vehicle: { licensePlate: string; model: string };
-  requester: { code: string; fullName: string; department: { name: string } };
+  requester: { id?: string; code: string; fullName: string; department: { name: string } };
 };
 
 const VEHICLE_STATUS: Record<string, { label: string; color: string }> = {
@@ -83,6 +84,8 @@ export default function XePage() {
   const [fuelVehicleId, setFuelVehicleId] = useState("");
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState("");
+  const [employeeCode, setEmployeeCode] = useState("");
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
   const [showNewBooking, setShowNewBooking] = useState(false);
   const [showNewVehicle, setShowNewVehicle] = useState(false);
   const [showNewFuel, setShowNewFuel] = useState(false);
@@ -134,7 +137,7 @@ export default function XePage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.role || ""));
+    fetch("/api/v1/me").then((r) => r.json()).then((res) => { setUserRole(res.role || ""); setEmployeeCode(res.employeeCode || ""); setMyEmployeeId(res.employeeId || null); });
     // Always fetch vehicles for fuel tab dropdown
     fetch("/api/v1/vehicles").then((r) => r.json()).then((res) => setVehicles(res.data || []));
   }, []);
@@ -153,6 +156,8 @@ export default function XePage() {
   }, [maintenanceVehicleId]);
 
   const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "MANAGER";
+  // Duyệt phiếu đặt xe: chỉ 3 NV được chỉ định (theo employeeCode), không theo role.
+  const canApproveBooking = canApproveRoomVehicle(employeeCode);
 
   async function handleBookingAction(id: string, action: "APPROVE" | "REJECT") {
     await fetch(`/api/v1/vehicles/bookings/${id}`, {
@@ -161,36 +166,173 @@ export default function XePage() {
     });
     fetchBookings();
   }
+  async function approveSeries(seriesId: string) {
+    const res = await fetch(`/api/v1/vehicles/bookings/series/${seriesId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "APPROVE" }),
+    });
+    const j = await res.json().catch(() => null);
+    if (!res.ok) { alert("Duyệt series thất bại: " + apiError(res.status, j?.error)); return; }
+    const { approved, skipped, conflicts } = j.data || {};
+    let msg = `Đã duyệt ${approved} phiếu.`;
+    if (skipped > 0) {
+      msg += `\n${skipped} phiếu conflict, giữ chờ duyệt:`;
+      for (const c of (conflicts || []).slice(0, 5)) msg += `\n• ${c.date.split("-").reverse().join("/")} — trùng "${c.conflictDestination}"`;
+    }
+    alert(msg);
+    fetchBookings();
+  }
+  async function cancelSeries(seriesId: string) {
+    if (!confirm("Huỷ toàn bộ series? Mọi phiếu PENDING/APPROVED trong series sẽ huỷ.")) return;
+    await fetch(`/api/v1/vehicles/bookings/series/${seriesId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "CANCEL" }),
+    });
+    fetchBookings();
+  }
+  async function cancelOneBooking(id: string, hasSeries: boolean) {
+    const msg = hasSeries
+      ? "Huỷ phiếu này? (Các phiếu khác trong series giữ nguyên)"
+      : "Huỷ phiếu đặt xe này?";
+    if (!confirm(msg)) return;
+    await fetch(`/api/v1/vehicles/bookings/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "CANCEL" }),
+    });
+    fetchBookings();
+  }
 
   const pendingCount = bookings.filter((b) => b.status === "PENDING").length;
   const approvedCount = bookings.filter((b) => b.status === "APPROVED").length;
+
+  // Gom series → 1 dòng tóm tắt. Mỗi seriesId chỉ giữ phiếu đầu tiên.
+  // Tính daysOfWeek cho từng series từ các phiếu cùng seriesId.
+  const seriesDays = (() => {
+    const m: Record<string, Set<number>> = {};
+    for (const b of bookings) {
+      if (b.seriesId) {
+        if (!m[b.seriesId]) m[b.seriesId] = new Set();
+        m[b.seriesId].add(new Date(b.startDate).getDay());
+      }
+    }
+    return m;
+  })();
+  const seriesStartEnd = (() => {
+    const m: Record<string, { first: Date; last: Date; count: number }> = {};
+    for (const b of bookings) {
+      if (!b.seriesId) continue;
+      const dt = new Date(b.startDate);
+      const cur = m[b.seriesId];
+      if (!cur) m[b.seriesId] = { first: dt, last: dt, count: 1 };
+      else {
+        if (dt < cur.first) cur.first = dt;
+        if (dt > cur.last) cur.last = dt;
+        cur.count++;
+      }
+    }
+    return m;
+  })();
+  const displayBookings = (() => {
+    const seen = new Set<string>();
+    const result: VehicleBooking[] = [];
+    for (const b of bookings) {
+      if (b.seriesId) {
+        if (seen.has(b.seriesId)) continue;
+        seen.add(b.seriesId);
+      }
+      result.push(b);
+    }
+    return result;
+  })();
+
+  // Format thứ trong tuần: [1,3,5] → "T2, T4, T6"
+  const DOW_LABELS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+  function formatDaysOfWeek(days: number[]): string {
+    return days.sort().map((d) => DOW_LABELS[d]).join(", ");
+  }
+  function pad2(n: number): string { return String(n).padStart(2, "0"); }
+  function formatTimeHM(d: Date): string { return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
   const availableVehicles = vehicles.filter((v) => v.status === "AVAILABLE").length;
 
   const bookingColumns: Column<VehicleBooking>[] = [
-    { key: "requester", header: "Người đặt", render: (b) => <div><div className="font-semibold">{b.requester.fullName}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{b.requester.department.name}</div></div> },
+    { key: "requester", header: "Người đặt", render: (b) => (
+      <div>
+        <div className="font-semibold">{b.requester.fullName}</div>
+        <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{b.requester.department.name}</div>
+      </div>
+    ) },
+    { key: "type", header: "Loại", render: (b) => (
+      b.seriesId
+        ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: "rgba(0,180,216,0.15)", color: "var(--ibs-accent)", border: "1px solid var(--ibs-accent)" }}>📅 Cố định</span>
+        : <span className="text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: "rgba(0,0,0,0.04)", color: "var(--ibs-text-dim)" }}>Lẻ</span>
+    ) },
     { key: "vehicle", header: "Xe", render: (b) => <div><div className="font-mono font-semibold">{b.vehicle.licensePlate}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{b.vehicle.model}</div></div> },
-    { key: "startDate", header: "Từ", render: (b) => <span className="text-[12px]">{formatDateTime(b.startDate)}</span> },
-    { key: "endDate", header: "Đến", render: (b) => <span className="text-[12px]">{formatDateTime(b.endDate)}</span> },
+    { key: "time", header: "Thời gian", render: (b) => {
+      if (b.seriesId) {
+        const days = Array.from(seriesDays[b.seriesId] || []);
+        const range = seriesStartEnd[b.seriesId];
+        const st = new Date(b.startDate);
+        const et = new Date(b.endDate);
+        const dur = `${formatTimeHM(st)} → ${formatTimeHM(et)}`;
+        return (
+          <div className="text-[12px]">
+            <div className="font-semibold">{dur}</div>
+            <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
+              {formatDaysOfWeek(days)} hàng tuần
+            </div>
+            {range && <div className="text-[10px]" style={{ color: "var(--ibs-text-dim)" }}>
+              {range.first.toLocaleDateString("vi-VN")} → {range.last.toLocaleDateString("vi-VN")} · {range.count} phiếu
+            </div>}
+          </div>
+        );
+      }
+      return (
+        <div className="text-[12px]">
+          <div>{formatDateTime(b.startDate)}</div>
+          <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>→ {formatDateTime(b.endDate)}</div>
+        </div>
+      );
+    } },
     { key: "destination", header: "Hành trình", render: (b) => <div><div>{b.origin ? `${b.origin} → ` : ""}{b.destination}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{VEHICLE_PURPOSE_LABELS[b.purpose] ?? b.purpose}</div></div> },
     { key: "passengers", header: "Hành khách", render: (b) => <span className="text-[12px]">{b.passengers} người</span> },
     { key: "status", header: "Trạng thái", render: (b) => {
       const s = BOOKING_STATUS[b.status] || { label: b.status, color: "#6b7280" };
       return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg" style={{ background: `${s.color}20`, color: s.color }}>{s.label}</span>;
     }},
-    { key: "actions", header: "", render: (b) => canManage ? (
+    { key: "actions", header: "", render: (b) => {
+      const isOwner = !!myEmployeeId && b.requester?.id === myEmployeeId;
+      const canCancel = (isOwner || canApproveBooking) && (b.status === "PENDING" || b.status === "APPROVED");
+      return (
       <div className="flex gap-1 flex-wrap">
-        {b.status === "PENDING" && (<>
+        {/* Duyệt cả series — chỉ 3 approver, phiếu PENDING có seriesId */}
+        {canApproveBooking && b.status === "PENDING" && b.seriesId && (
+          <button onClick={() => approveSeries(b.seriesId!)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(0,180,216,0.15)", color: "var(--ibs-accent)" }} title="Duyệt cả series">
+            <Check size={11} /> Duyệt series
+          </button>
+        )}
+        {/* Duyệt/Từ chối phiếu lẻ */}
+        {canApproveBooking && b.status === "PENDING" && !b.seriesId && (<>
           <button onClick={() => handleBookingAction(b.id, "APPROVE")} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}><Check size={11} /> Duyệt</button>
           <button onClick={() => handleBookingAction(b.id, "REJECT")} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}><XCircle size={11} /></button>
         </>)}
-        {b.status === "APPROVED" && (
-          <button onClick={() => setCompletingBooking(b)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(0,180,216,0.15)", color: "var(--ibs-accent)" }}>✓ Hoàn thành</button>
+        {/* Huỷ phiếu lẻ */}
+        {canCancel && !b.seriesId && (
+          <button onClick={() => cancelOneBooking(b.id, false)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
+            <X size={11} /> Huỷ
+          </button>
+        )}
+        {/* Huỷ cả series */}
+        {canCancel && b.seriesId && (
+          <button onClick={() => cancelSeries(b.seriesId!)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }} title="Huỷ cả series (mọi phiếu trong lịch cố định)">
+            <X size={11} /> Huỷ series
+          </button>
         )}
         {b.status === "COMPLETED" && b.actualKm != null && (
           <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{b.actualKm} km</span>
         )}
       </div>
-    ) : null },
+      );
+    } },
   ];
 
   return (
@@ -241,18 +383,20 @@ export default function XePage() {
                 <Plus size={14} /> Đặt xe
               </button>
             </div>
-            <DataTable columns={bookingColumns} data={bookings} loading={loading} emptyText="Chưa có lịch đặt xe" />
+            <DataTable columns={bookingColumns} data={displayBookings} loading={loading} emptyText="Chưa có lịch đặt xe" />
           </div>
         </div>
       )}
 
       {tab === "calendar" && (
         <MonthCalendar
-          events={bookings.filter((b) => b.status === "APPROVED" || b.status === "COMPLETED").map((b) => ({
-            date: b.startDate,
-            label: `${b.vehicle.licensePlate} — ${b.requester.fullName} → ${b.destination}`,
-            color: BOOKING_STATUS[b.status]?.color,
-          }))}
+          events={bookings
+            .filter((b) => b.status === "APPROVED" || b.status === "COMPLETED" || b.status === "PENDING")
+            .map((b) => ({
+              date: b.startDate,
+              label: `${b.seriesId ? "📅 " : ""}${b.vehicle.licensePlate} — ${b.requester.fullName} → ${b.destination}${b.status === "PENDING" ? " (chờ duyệt)" : ""}`,
+              color: BOOKING_STATUS[b.status]?.color,
+            }))}
           onDayClick={(dateStr, evs) => void alertDialog({ title: dateStr, message: (<div className="space-y-1">{evs.map((e, i) => (<div key={i}>{e.label}</div>))}</div>) })}
         />
       )}
@@ -631,7 +775,21 @@ function CompleteBookingModal({ booking, onClose, onSuccess }: {
   onSuccess: () => void;
 }) {
   const [actualKm, setActualKm] = useState("");
-  const [returnTime, setReturnTime] = useState(new Date().toTimeString().slice(0, 5));
+  // Snap về mốc 30 phút gần nhất (giống form đặt xe).
+  const _snap = (() => {
+    const n = new Date();
+    const pad2 = (x: number) => String(x).padStart(2, "0");
+    const m = Math.ceil(n.getMinutes() / 30) * 30;
+    const h = (n.getHours() + Math.floor(m / 60)) % 24;
+    return `${pad2(h)}:${pad2(m % 60)}`;
+  })();
+  const [returnTime, setReturnTime] = useState(_snap);
+  // 48 slot 30 phút (00:00 → 23:30)
+  const _COMPLETE_TIME_SLOTS = (() => {
+    const slots: string[] = [];
+    for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30) slots.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+    return slots;
+  })();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -683,12 +841,14 @@ function CompleteBookingModal({ booking, onClose, onSuccess }: {
             <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>
               Giờ về thực tế
             </label>
-            <TimeInput
+            <select
               value={returnTime}
               onChange={(e) => setReturnTime(e.target.value)}
               className="w-full rounded-lg px-3 py-2 text-[13px] border"
               style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
-            />
+            >
+              {_COMPLETE_TIME_SLOTS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
           {error && <div className="text-[12px] text-red-500">{error}</div>}
           <div className="flex gap-2 justify-end mt-1">
@@ -709,27 +869,67 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const nowTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  const plusHour = `${pad((now.getHours() + 1) % 24)}:${pad(now.getMinutes())}`;
+  // Snap về mốc 30 phút gần nhất.
+  const snapMinutes = (mins: number) => Math.ceil(mins / 30) * 30;
+  const startMins = now.getHours() * 60 + snapMinutes(now.getMinutes());
+  const endMins = startMins + 30;
+  const nowTime = `${pad(Math.floor(startMins / 60) % 24)}:${pad(startMins % 60)}`;
+  const plusHour = `${pad(Math.floor(endMins / 60) % 24)}:${pad(endMins % 60)}`;
+
+  // Sinh list slot 30 phút từ 00:00 → 23:30 (48 slot)
+  const TIME_SLOTS = (() => {
+    const slots: string[] = [];
+    for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30) slots.push(`${pad(h)}:${pad(m)}`);
+    return slots;
+  })();
 
   const [form, setForm] = useState({
     vehicleId: "", origin: "Trụ sở Công ty", destination: "", purpose: "", passengers: "1",
     startDatePart: todayStr, startTimePart: nowTime,
     endDatePart: todayStr, endTimePart: plusHour,
   });
+  const [recurrenceOn, setRecurrenceOn] = useState(false);
+  const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
+  const [recurrenceUntil, setRecurrenceUntil] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  function toggleRecurrence(on: boolean) {
+    setRecurrenceOn(on);
+    if (on && recurrenceDays.length === 0) {
+      const dow = new Date(form.startDatePart).getDay();
+      setRecurrenceDays([dow === 0 ? 1 : dow]);
+    }
+  }
+  function toggleDay(d: number) {
+    setRecurrenceDays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort());
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setSaving(true);
     const startDate = `${form.startDatePart}T${form.startTimePart}`;
     const endDate = `${form.endDatePart}T${form.endTimePart}`;
+    // Sanitize: chỉ giữ thứ 1..6 (KHÔNG cho CN=0)
+    const cleanDays = recurrenceDays.filter((d) => d >= 1 && d <= 6);
+    if (recurrenceOn) {
+      if (cleanDays.length === 0) { setError("Chọn ít nhất 1 thứ trong tuần (T2–T7)"); setSaving(false); return; }
+    }
     const res = await fetch("/api/v1/vehicles/bookings", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vehicleId: form.vehicleId, origin: form.origin, destination: form.destination, purpose: form.purpose, passengers: parseInt(form.passengers), startDate, endDate }),
+      body: JSON.stringify({
+        vehicleId: form.vehicleId, origin: form.origin, destination: form.destination,
+        purpose: form.purpose, passengers: parseInt(form.passengers), startDate, endDate,
+        ...(recurrenceOn ? { recurrence: { daysOfWeek: cleanDays, ...(recurrenceUntil ? { until: recurrenceUntil } : {}) } } : {}),
+      }),
     });
     setSaving(false);
-    if (res.ok) { onSuccess(); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
+    if (res.ok) {
+      const d = await res.json();
+      if (recurrenceOn && d.data?.count) {
+        alert(`Đã tạo ${d.data.count} phiếu (chờ duyệt). Approver có thể duyệt cả series 1 lần.`);
+      }
+      onSuccess();
+    } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
   }
 
   const inputCls = "w-full rounded-lg px-3 py-2 text-[13px] border";
@@ -758,8 +958,10 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>Giờ đi *</label>
-              <TimeInput required value={form.startTimePart} onChange={(e) => setForm({ ...form, startTimePart: e.target.value })}
-                className={inputCls} style={inputStyle} />
+              <select required value={form.startTimePart} onChange={(e) => setForm({ ...form, startTimePart: e.target.value })}
+                className={inputCls} style={inputStyle}>
+                {TIME_SLOTS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -770,8 +972,10 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>Giờ về *</label>
-              <TimeInput required value={form.endTimePart} onChange={(e) => setForm({ ...form, endTimePart: e.target.value })}
-                className={inputCls} style={inputStyle} />
+              <select required value={form.endTimePart} onChange={(e) => setForm({ ...form, endTimePart: e.target.value })}
+                className={inputCls} style={inputStyle}>
+                {TIME_SLOTS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -802,6 +1006,64 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
           </div>
+          {/* Lặp lại — đặt lịch cố định */}
+          <div className="rounded-lg p-3 border" style={{ background: "rgba(0,180,216,0.04)", borderColor: "var(--ibs-border)" }}>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={recurrenceOn} onChange={(e) => toggleRecurrence(e.target.checked)} />
+              <span className="text-[12px] font-semibold" style={{ color: "var(--ibs-accent)" }}>📅 Lặp lại lịch này</span>
+            </label>
+            {recurrenceOn && (
+              <>
+                <div className="mt-2">
+                  <div className="text-[11px] mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>Vào các thứ:</div>
+                  <div className="flex gap-1 flex-wrap">
+                    {[
+                      { label: "T2", value: 1 },
+                      { label: "T3", value: 2 },
+                      { label: "T4", value: 3 },
+                      { label: "T5", value: 4 },
+                      { label: "T6", value: 5 },
+                      { label: "T7", value: 6 },
+                    ].map(({ label, value }) => {
+                      const checked = recurrenceDays.includes(value);
+                      return (
+                        <button key={value} type="button" onClick={() => toggleDay(value)}
+                          className="px-2.5 py-1 rounded text-[12px] font-semibold border"
+                          style={{
+                            background: checked ? "var(--ibs-accent)" : "var(--ibs-bg)",
+                            color: checked ? "#fff" : "var(--ibs-text)",
+                            borderColor: checked ? "var(--ibs-accent)" : "var(--ibs-border)",
+                          }}>
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1 flex gap-1.5 text-[10px]" style={{ color: "var(--ibs-text-dim)" }}>
+                    <button type="button" onClick={() => setRecurrenceDays([1, 2, 3, 4, 5, 6])} className="underline">T2–T7</button>
+                    <button type="button" onClick={() => setRecurrenceDays([1, 2, 3, 4, 5])} className="underline">T2–T6</button>
+                    <button type="button" onClick={() => {
+                      const dow = new Date(form.startDatePart).getDay();
+                      setRecurrenceDays([dow === 0 ? 1 : dow]);
+                    }} className="underline">Chỉ cùng thứ</button>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>
+                    Lặp đến ngày <span style={{ color: "var(--ibs-text-dim)" }}>(để trống = lặp tối đa 365 ngày)</span>
+                  </label>
+                  <DateInput value={recurrenceUntil} onChange={(e) => setRecurrenceUntil(e.target.value)}
+                    min={form.startDatePart}
+                    className="w-full rounded-lg px-2 py-1.5 text-[12px] border"
+                    style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+                </div>
+                <div className="mt-2 text-[10px] italic" style={{ color: "var(--ibs-warning)" }}>
+                  ⚠️ Phiếu cần được duyệt trước khi sử dụng. Approver có thể duyệt cả series 1 lần.
+                </div>
+              </>
+            )}
+          </div>
+
           {error && <div className="text-[12px] text-red-500">{error}</div>}
           <div className="flex gap-2 justify-end mt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>

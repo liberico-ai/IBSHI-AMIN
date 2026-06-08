@@ -1,6 +1,23 @@
 import prisma from "@/lib/prisma";
 import { MEAL_UNIT_PRICE } from "@/lib/constants";
 
+// Sentinel dùng ở dropdown "Phòng ban" của form đăng ký suất ăn: chọn "Thầu phụ"
+// thay vì một phòng ban thật. Backend ánh xạ sang phòng ban ẩn "Thầu phụ".
+export const SUBCONTRACTOR_DEPT_SENTINEL = "SUBCONTRACTOR";
+export const SUBCONTRACTOR_DEPT_CODE = "THAUPHU";
+
+// Lấy id phòng ban ẩn "Thầu phụ" — nơi gom các suất ăn của nhà thầu phụ.
+// isActive=false → KHÔNG xuất hiện ở các dropdown phòng ban khác (chỉ dùng nội bộ M10 nhà ăn).
+export async function getSubcontractorDepartmentId(): Promise<string> {
+  const dept = await prisma.department.upsert({
+    where: { code: SUBCONTRACTOR_DEPT_CODE },
+    create: { code: SUBCONTRACTOR_DEPT_CODE, name: "Thầu phụ", headcount: 0, isActive: false, sortOrder: 999 },
+    update: {},
+    select: { id: true },
+  });
+  return dept.id;
+}
+
 export async function registerMeals(data: {
   departmentId: string;
   date: string;

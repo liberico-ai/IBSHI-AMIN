@@ -59,16 +59,24 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // Đầu vào nhập tay theo kỳ: lương sản phẩm + điều chỉnh
   const manualInputs = await prisma.payrollManualInput.findMany({
     where: { month: period.month, year: period.year },
-    select: { employeeId: true, pieceRate: true, adjustment: true },
+    select: { employeeId: true, pieceRate: true, adjustment: true, mealBonus: true },
   });
-  const manualMap: Record<string, { pieceRate: number; adjustment: number }> = {};
-  for (const m of manualInputs) manualMap[m.employeeId] = { pieceRate: m.pieceRate, adjustment: m.adjustment };
+  const manualMap: Record<string, { pieceRate: number; adjustment: number; mealBonus: number }> = {};
+  for (const m of manualInputs) manualMap[m.employeeId] = { pieceRate: m.pieceRate, adjustment: m.adjustment, mealBonus: m.mealBonus };
 
   // M3: OT đã được duyệt
   const otData = await prisma.oTRequest.findMany({
     where: { date: { gte: startDate, lte: endDate }, status: "APPROVED" },
-    select: { employeeId: true, hours: true, otRate: true },
+    select: { employeeId: true, date: true, hours: true, otRate: true },
   });
+  // Build set "employeeId|YYYY-MM-DD" để service biết NV nào có OTRequest cho ngày nào.
+  // Dùng để xác định: wh ngày CN/Lễ chỉ cộng vào công thường NẾU NV có OTRequest tương ứng
+  // (NV không có OTRequest = NV không được nhập vào sheet "Thêm giờ" của HR → wh ngày CN/Lễ bị bỏ qua).
+  const otReqDays = new Set<string>();
+  for (const o of otData) {
+    const ymd = o.date.toISOString().slice(0, 10);
+    otReqDays.add(`${o.employeeId}|${ymd}`);
+  }
 
   // M3: Nghỉ phép đã duyệt — phân loại có lương vs không lương
   const leaveData = await prisma.leaveRequest.findMany({
@@ -103,16 +111,18 @@ export async function calculatePayrollForPeriod(periodId: string) {
       alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + (a.paidLeaveDays || 0);
     }
     if (isHoliday(d)) {
-      // Phân loại OT: CN hoặc nghỉ bù → ×2; lễ ngày thường → ×3.
+      // Lễ — wh+oh → OT × hệ số (chốt 2026-06-08).
+      //   - Comp Holiday → ×2 (HR coi như CN)
+      //   - Lễ thường/Lễ rơi CN → ×3
       if (wh + oh > 0) {
-        if (d.getUTCDay() === 0 || isCompensatoryHoliday(d)) {
+        if (isCompensatoryHoliday(d)) {
           ensureOt(a.employeeId).sunday += wh + oh;
         } else {
           ensureOt(a.employeeId).holiday += wh + oh;
         }
       }
     } else if (d.getUTCDay() === 0) {
-      if (wh + oh > 0) ensureOt(a.employeeId).sunday += wh + oh;        // mọi giờ CN = OT CN
+      if (wh + oh > 0) ensureOt(a.employeeId).sunday += wh + oh;
     } else {
       // Ngày thường — đếm công theo workHours/8 (chốt 2026-06-05):
       //   PRESENT, LATE → workHours / 8 (đi muộn/về sớm BỊ trừ theo giờ thực)
@@ -120,7 +130,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
       //   HALF_DAY      → 0.5 cố định
       //   ABSENT_UNAPPROVED → mục tiêu bù công (NK ngày thường)
       if (a.status === "PRESENT" || a.status === "LATE") {
-        workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + wh / 8;
+        // Làm tròn 2 chữ số TRƯỚC khi cộng (chốt 2026-06-08 từ HR):
+        //   23 ngày × 7.5h → mỗi ngày 0.94 → cộng = 21.62 công
+        //   (KHÁC với cộng giờ trước rồi chia: 23×7.5/8 = 21.5625 → 21.56)
+        workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + Math.round((wh / 8) * 100) / 100;
       } else if (a.status === "BUSINESS_TRIP") {
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 1;
       } else if (a.status === "HALF_DAY") {
@@ -189,9 +202,19 @@ export async function calculatePayrollForPeriod(periodId: string) {
       missingContractEmployees.push({ code: emp.code, fullName: emp.fullName });
     }
 
-    const workDaysActual = workDaysMap[emp.id] || 0;
+    const workDaysActualRaw = workDaysMap[emp.id] || 0;
     const leaveDays = (leavePaidMap[emp.id] || 0) + (holidayRestMap[emp.id] || 0);
     const ot = otMap[emp.id] || { weekday: 0, sunday: 0, holiday: 0 };
+
+    // BÙ CÔNG theo HR (chốt 2026-06-08, refined):
+    //   - NV có KL (ABSENT_UNAPPROVED T2-T7) → bù bằng OT (Lễ → CN → thường)
+    //   - bù cộng vào workDays (NV nhận 1× dailyRate cho ngày bù)
+    //   - OT × hệ số vẫn pay đầy đủ (HR "double count")
+    //   - Logic này khớp output Excel HR (vd Phương Anh 22.92 ngày)
+    const klHours = (unpaidWeekdayMap[emp.id] || 0) * 8;
+    const otTotal = (ot.weekday || 0) + (ot.sunday || 0) + (ot.holiday || 0);
+    const buHours = Math.min(klHours, otTotal);
+    const workDaysActual = workDaysActualRaw + buHours / 8;
 
     const input: SalaryInput = {
       totalIncome,
@@ -199,7 +222,9 @@ export async function calculatePayrollForPeriod(periodId: string) {
       standardDays: CC,
       workDaysActual,
       leaveDays,
-      unpaidWeekdayDays: unpaidWeekdayMap[emp.id] || 0,
+      // unpaidWeekdayDays = 0 vì bù đã được tính vào workDaysActual trên
+      // → calc KHÔNG trừ OT pay nữa, OT × hệ số được pay đầy đủ (theo HR Excel)
+      unpaidWeekdayDays: 0,
       ot: {
         weekday: ot.weekday,
         weekdayNight: 0,   // ca đêm chờ máy chấm công
@@ -211,7 +236,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
       dependentsCount: emp.dependents || 0,
       bonusAllowance: ((emp as any).responsibilityAllowance || 0) + ((emp as any).farAllowance || 0),
       pieceRate: manualMap[emp.id]?.pieceRate || 0,
-      adjustment: manualMap[emp.id]?.adjustment || 0,
+      // adjustment + mealBonus cùng cộng vào Gross (cả 2 đều là số phẳng nhập tay)
+      adjustment: (manualMap[emp.id]?.adjustment || 0) + (manualMap[emp.id]?.mealBonus || 0),
     };
 
     const out = calculateSalary(input);

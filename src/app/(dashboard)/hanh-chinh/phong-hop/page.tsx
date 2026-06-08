@@ -3,15 +3,23 @@
 import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { apiError } from "@/lib/utils";
-import { X, Calendar, ClipboardList, ChevronDown, ChevronRight } from "lucide-react";
+import { X, Calendar, ClipboardList, ChevronDown, ChevronRight, Check, XCircle } from "lucide-react";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
+import { canApproveRoomVehicle } from "@/lib/access";
 
 type Room = { id: string; code: string; name: string; capacity: number; equipment: string[] };
 type Booking = {
   id: string; roomId: string; title: string; description?: string; priorityNote?: string;
-  startTime: string; endTime: string; status: string;
+  startTime: string; endTime: string; status: string; rejectReason?: string; seriesId?: string | null;
   room: { id: string; name: string; code: string; capacity: number };
   requester: { id: string; code: string; fullName: string };
+};
+
+const BOOKING_STATUS: Record<string, { label: string; color: string; bg: string }> = {
+  PENDING_APPROVAL: { label: "Chờ duyệt", color: "var(--ibs-warning)", bg: "rgba(234,179,8,0.12)" },
+  APPROVED:         { label: "Đã duyệt", color: "#10b981", bg: "rgba(16,185,129,0.12)" },
+  REJECTED:         { label: "Từ chối", color: "var(--ibs-danger)", bg: "rgba(239,68,68,0.12)" },
+  CANCELLED:        { label: "Đã huỷ", color: "#6b7280", bg: "rgba(107,114,128,0.12)" },
 };
 
 const SLOT_START_HOUR = 7;
@@ -30,13 +38,13 @@ function timeToSlot(date: Date): number {
 
 export default function PhongHopPage() {
   const [tab, setTab] = useState<"book" | "list">("book");
-  const [me, setMe] = useState<{ id: string; employeeId: string | null } | null>(null);
+  const [me, setMe] = useState<{ id: string; employeeId: string | null; employeeCode: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then(async (res) => {
       if (!res?.id) return;
       const list = await fetch(`/api/v1/room-bookings`).then((r) => r.json());
-      setMe({ id: res.id, employeeId: list.myEmployeeId });
+      setMe({ id: res.id, employeeId: list.myEmployeeId, employeeCode: res.employeeCode || "" });
     });
   }, []);
 
@@ -77,8 +85,42 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priorityNote, setPriorityNote] = useState("");
+  const [recurrenceOn, setRecurrenceOn] = useState(false);
+  const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]); // 0=CN..6=T7
+  const [recurrenceUntil, setRecurrenceUntil] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Preview list ngày của series — cap 60 ngày hiển thị
+  const recurrencePreview = useMemo(() => {
+    if (!recurrenceOn || recurrenceDays.length === 0) return null;
+    const start = new Date(date);
+    // Nếu không nhập "đến ngày" → dùng cap 365 ngày
+    const until = recurrenceUntil
+      ? new Date(recurrenceUntil + "T23:59:59")
+      : new Date(start.getTime() + 365 * 86400_000);
+    if (until <= start) return null;
+    const allowed = new Set(recurrenceDays);
+    const dates: Date[] = [];
+    let d = new Date(start);
+    while (d.getTime() <= until.getTime() && dates.length < 60) {
+      if (allowed.has(d.getDay())) dates.push(new Date(d));
+      d = new Date(d.getTime() + 86400_000);
+    }
+    return dates;
+  }, [recurrenceOn, recurrenceDays, recurrenceUntil, date]);
+
+  // Khi bật/tắt: mặc định check thứ của ngày bắt đầu (nếu là CN → fallback T2)
+  function toggleRecurrence(on: boolean) {
+    setRecurrenceOn(on);
+    if (on && recurrenceDays.length === 0) {
+      const dow = new Date(date).getDay();
+      setRecurrenceDays([dow === 0 ? 1 : dow]);
+    }
+  }
+  function toggleDay(d: number) {
+    setRecurrenceDays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort());
+  }
 
   useEffect(() => {
     fetch("/api/v1/meeting-rooms").then((r) => r.json()).then((res) => {
@@ -122,6 +164,11 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
     if (!roomId) { setError("Chưa chọn phòng"); return; }
     if (slotStart === null || slotEnd === null) { setError("Chưa chọn khung giờ"); return; }
     if (!title.trim()) { setError("Chưa nhập tiêu đề"); return; }
+    // Sanitize: chỉ giữ thứ trong khoảng 1..6 (KHÔNG cho CN=0)
+    const cleanDays = recurrenceDays.filter((d) => d >= 1 && d <= 6);
+    if (recurrenceOn) {
+      if (cleanDays.length === 0) { setError("Chọn ít nhất 1 thứ trong tuần (T2–T7)"); return; }
+    }
     setSubmitting(true);
     const dayDate = new Date(date);
     const start = new Date(dayDate); start.setHours(SLOT_START_HOUR + Math.floor(slotStart / 2), (slotStart % 2) * 30, 0, 0);
@@ -132,11 +179,16 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
         body: JSON.stringify({
           roomId, startTime: start.toISOString(), endTime: end.toISOString(),
           title: title.trim(), description: description.trim() || null, priorityNote: priorityNote.trim() || null,
+          ...(recurrenceOn ? { recurrence: { daysOfWeek: cleanDays, ...(recurrenceUntil ? { until: recurrenceUntil } : {}) } } : {}),
         }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(apiError(res.status, d.error));
+      if (recurrenceOn && d.data?.count) {
+        await alertDialog(`Đã tạo ${d.data.count} phiếu (chờ duyệt). Phiếu cần được duyệt cả series trước khi sử dụng.`);
+      }
       setTitle(""); setDescription(""); setPriorityNote("");
+      setRecurrenceOn(false); setRecurrenceDays([]); setRecurrenceUntil("");
       setSlotStart(null); setSlotEnd(null);
       onCreated();
     } catch (e: any) { setError(String(e.message || e)); } finally { setSubmitting(false); }
@@ -212,6 +264,72 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
             style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
         </div>
 
+        {/* Lặp lại — đặt lịch cố định */}
+        <div className="rounded-lg p-3 border" style={{ background: "rgba(0,180,216,0.04)", borderColor: "var(--ibs-border)" }}>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={recurrenceOn} onChange={(e) => toggleRecurrence(e.target.checked)} />
+            <span className="text-[12px] font-semibold" style={{ color: "var(--ibs-accent)" }}>📅 Lặp lại lịch này</span>
+          </label>
+          {recurrenceOn && (
+            <>
+              <div className="mt-2">
+                <div className="text-[11px] mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>Vào các thứ:</div>
+                <div className="flex gap-1 flex-wrap">
+                  {[
+                    { label: "T2", value: 1 },
+                    { label: "T3", value: 2 },
+                    { label: "T4", value: 3 },
+                    { label: "T5", value: 4 },
+                    { label: "T6", value: 5 },
+                    { label: "T7", value: 6 },
+                  ].map(({ label, value }) => {
+                    const checked = recurrenceDays.includes(value);
+                    return (
+                      <button key={value} type="button" onClick={() => toggleDay(value)}
+                        className="px-2.5 py-1 rounded text-[12px] font-semibold border transition-colors"
+                        style={{
+                          background: checked ? "var(--ibs-accent)" : "var(--ibs-bg)",
+                          color: checked ? "#fff" : "var(--ibs-text)",
+                          borderColor: checked ? "var(--ibs-accent)" : "var(--ibs-border)",
+                        }}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-1 flex gap-1.5 text-[10px]" style={{ color: "var(--ibs-text-dim)" }}>
+                  <button type="button" onClick={() => setRecurrenceDays([1, 2, 3, 4, 5, 6])} className="underline">T2–T7</button>
+                  <button type="button" onClick={() => setRecurrenceDays([1, 2, 3, 4, 5])} className="underline">T2–T6</button>
+                  <button type="button" onClick={() => {
+                    const dow = new Date(date).getDay();
+                    setRecurrenceDays([dow === 0 ? 1 : dow]);
+                  }} className="underline">Chỉ cùng thứ</button>
+                </div>
+              </div>
+              <div className="mt-3">
+                <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>
+                  Lặp đến ngày <span style={{ color: "var(--ibs-text-dim)" }}>(để trống = lặp tối đa 365 ngày)</span>
+                </label>
+                <input type="date" value={recurrenceUntil} onChange={(e) => setRecurrenceUntil(e.target.value)}
+                  min={date}
+                  className="w-full px-2 py-1.5 rounded border text-[12px]"
+                  style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
+              </div>
+              {recurrencePreview && recurrencePreview.length > 0 && (
+                <div className="mt-2 text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
+                  Sẽ tạo <b style={{ color: "var(--ibs-accent)" }}>{recurrencePreview.length}</b> phiếu
+                  {recurrencePreview.length <= 5
+                    ? <>: {recurrencePreview.map((d) => d.toLocaleDateString("vi-VN")).join(", ")}</>
+                    : <> · từ <b>{recurrencePreview[0].toLocaleDateString("vi-VN")}</b> đến <b>{recurrencePreview[recurrencePreview.length - 1].toLocaleDateString("vi-VN")}</b></>}
+                </div>
+              )}
+              <div className="mt-2 text-[10px] italic" style={{ color: "var(--ibs-warning)" }}>
+                ⚠️ Phiếu cần được duyệt trước khi sử dụng. Approver có thể duyệt cả series 1 lần.
+              </div>
+            </>
+          )}
+        </div>
+
         {error && <div className="p-2 rounded text-[13px]" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
 
         <button onClick={submit} disabled={submitting} className="w-full px-4 py-2.5 rounded-lg text-[13px] font-semibold"
@@ -223,10 +341,14 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-function ListTab({ me }: { me: { id: string; employeeId: string | null } | null }) {
+function ListTab({ me }: { me: { id: string; employeeId: string | null; employeeCode: string } | null }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<"all" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "CANCELLED">("all");
+  const [rejectTarget, setRejectTarget] = useState<Booking | null>(null);
+
+  const canApprove = canApproveRoomVehicle(me?.employeeCode);
 
   function load() {
     setLoading(true);
@@ -235,9 +357,75 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null } | null 
   }
   useEffect(() => { load(); }, []);
 
-  async function cancel(id: string) {
-    if (!(await confirmDialog("Huỷ phiếu này?"))) return;
+  const filtered = useMemo(() => filter === "all" ? bookings : bookings.filter((b) => b.status === filter), [bookings, filter]);
+  const pendingCount = useMemo(() => bookings.filter((b) => b.status === "PENDING_APPROVAL").length, [bookings]);
+
+  // Gom series → 1 phiếu đại diện. Tính daysOfWeek + count cho từng series.
+  const seriesInfo = useMemo(() => {
+    const m: Record<string, { days: Set<number>; first: Date; last: Date; count: number }> = {};
+    for (const b of bookings) {
+      if (!b.seriesId) continue;
+      const dt = new Date(b.startTime);
+      if (!m[b.seriesId]) m[b.seriesId] = { days: new Set([dt.getDay()]), first: dt, last: dt, count: 1 };
+      else {
+        m[b.seriesId].days.add(dt.getDay());
+        if (dt < m[b.seriesId].first) m[b.seriesId].first = dt;
+        if (dt > m[b.seriesId].last) m[b.seriesId].last = dt;
+        m[b.seriesId].count++;
+      }
+    }
+    return m;
+  }, [bookings]);
+  const displayBookings = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Booking[] = [];
+    for (const b of filtered) {
+      if (b.seriesId) {
+        if (seen.has(b.seriesId)) continue;
+        seen.add(b.seriesId);
+      }
+      result.push(b);
+    }
+    return result;
+  }, [filtered]);
+  const DOW_LABELS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+
+  async function cancelOne(id: string) {
+    if (!(await confirmDialog("Huỷ phiếu này? (Các phiếu khác trong series vẫn giữ nguyên)"))) return;
     await fetch(`/api/v1/room-bookings/${id}/cancel`, { method: "POST" });
+    load();
+  }
+  async function cancelEntireSeries(seriesId: string) {
+    if (!(await confirmDialog({ message: "Huỷ TẤT CẢ phiếu trong series này?\n\nMọi phiếu Chờ duyệt / Đã duyệt sẽ chuyển sang Đã huỷ.", tone: "danger", confirmText: "Huỷ cả series" }))) return;
+    await fetch(`/api/v1/room-bookings/series/${seriesId}/cancel`, { method: "POST" });
+    load();
+  }
+  async function approve(id: string) {
+    if (!(await confirmDialog("Duyệt phiếu đặt phòng này?"))) return;
+    const res = await fetch(`/api/v1/room-bookings/${id}/approve`, { method: "POST" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      await alertDialog(apiError(res.status, j?.error) || "Duyệt thất bại");
+      return;
+    }
+    load();
+  }
+  async function approveSeries(seriesId: string) {
+    if (!(await confirmDialog("Duyệt cả series? Mỗi phiếu sẽ check conflict riêng — phiếu conflict được giữ chờ duyệt."))) return;
+    const res = await fetch(`/api/v1/room-bookings/series/${seriesId}/approve`, { method: "POST" });
+    const j = await res.json().catch(() => null);
+    if (!res.ok) { await alertDialog(apiError(res.status, j?.error) || "Duyệt series thất bại"); return; }
+    const { approved, skipped, conflicts } = j.data || {};
+    let msg = `✓ Đã duyệt ${approved} phiếu.`;
+    if (skipped > 0) {
+      msg += `\n\n⚠️ ${skipped} phiếu bị conflict, giữ trạng thái Chờ duyệt:`;
+      for (const c of (conflicts || []).slice(0, 5)) {
+        msg += `\n• Ngày ${c.date.split("-").reverse().join("/")} — trùng với "${c.conflictTitle}"`;
+      }
+      if ((conflicts || []).length > 5) msg += `\n... và ${conflicts.length - 5} phiếu khác`;
+    }
+    await alertDialog(msg);
     load();
   }
   function toggle(id: string) {
@@ -247,46 +435,163 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null } | null 
   }
 
   return (
+    <>
     <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-      <div className="px-4 py-2 text-[12px] border-b" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>
-        {bookings.length} phiếu đặt phòng (mới nhất trước)
+      <div className="px-4 py-3 border-b flex items-center gap-2 flex-wrap" style={{ borderColor: "var(--ibs-border)" }}>
+        <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{filtered.length} phiếu</span>
+        <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+          {([
+            { k: "all", label: "Tất cả", count: bookings.length },
+            { k: "PENDING_APPROVAL", label: "Chờ duyệt", count: pendingCount, highlight: pendingCount > 0 && canApprove },
+            { k: "APPROVED", label: "Đã duyệt", count: bookings.filter((b) => b.status === "APPROVED").length },
+            { k: "REJECTED", label: "Từ chối", count: bookings.filter((b) => b.status === "REJECTED").length },
+            { k: "CANCELLED", label: "Đã huỷ", count: bookings.filter((b) => b.status === "CANCELLED").length },
+          ] as const).map((f: any) => {
+            const active = filter === f.k;
+            return (
+              <button key={f.k} onClick={() => setFilter(f.k)}
+                className="text-[11px] px-2.5 py-1 rounded-full font-semibold border"
+                style={{
+                  background: active ? "var(--ibs-accent)" : (f.highlight ? "rgba(234,179,8,0.12)" : "transparent"),
+                  color: active ? "#fff" : (f.highlight ? "var(--ibs-warning)" : "var(--ibs-text-dim)"),
+                  borderColor: active ? "var(--ibs-accent)" : "var(--ibs-border)",
+                }}>
+                {f.label} ({f.count})
+              </button>
+            );
+          })}
+        </div>
       </div>
       {loading ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
-        : bookings.length === 0 ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Chưa có phiếu nào</div>
-        : bookings.map((b) => {
+        : displayBookings.length === 0 ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Không có phiếu nào</div>
+        : displayBookings.map((b) => {
           const isOwner = me?.employeeId && me.employeeId === b.requester.id;
           const start = new Date(b.startTime), end = new Date(b.endTime);
+          const st = BOOKING_STATUS[b.status] || { label: b.status, color: "#6b7280", bg: "rgba(0,0,0,0.05)" };
+          const isPending = b.status === "PENDING_APPROVAL";
+          const info = b.seriesId ? seriesInfo[b.seriesId] : null;
+          // Format thời gian: series → "07:00–08:00 · T2, T4 hàng tuần"; lẻ → "06/06/2026 07:00–08:00"
+          const timeStr = info
+            ? `${pad2(start.getHours())}:${pad2(start.getMinutes())}–${pad2(end.getHours())}:${pad2(end.getMinutes())} · ${Array.from(info.days).sort().map((d) => DOW_LABELS[d]).join(", ")} hàng tuần`
+            : `${start.toLocaleDateString("vi-VN")} ${pad2(start.getHours())}:${pad2(start.getMinutes())}–${pad2(end.getHours())}:${pad2(end.getMinutes())}`;
           return (
             <div key={b.id} className="border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }}>
               <div className="px-4 py-3 flex items-center justify-between gap-4">
                 <button onClick={() => toggle(b.id)} className="flex items-center gap-2 flex-1 text-left min-w-0">
                   {expanded.has(b.id) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   <div className="min-w-0">
-                    <div className="font-semibold truncate">{b.title}</div>
+                    <div className="font-semibold truncate flex items-center gap-2">
+                      {b.title}
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ background: st.bg, color: st.color }}>{st.label}</span>
+                      {b.seriesId
+                        ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "rgba(0,180,216,0.15)", color: "var(--ibs-accent)", border: "1px solid var(--ibs-accent)" }}>📅 Cố định ({info?.count || 0})</span>
+                        : <span className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: "rgba(0,0,0,0.04)", color: "var(--ibs-text-dim)" }}>Lẻ</span>}
+                    </div>
                     <div className="text-[11px] truncate" style={{ color: "var(--ibs-text-dim)" }}>
                       🏛 <b>{b.room.name}</b>
-                      {" · "}📅 {start.toLocaleDateString("vi-VN")} {start.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}–{end.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
+                      {" · "}🗓 {timeStr}
                       {" · "}👤 {b.requester.fullName}
                     </div>
                   </div>
                 </button>
 
-                {isOwner && (
-                  <button onClick={() => cancel(b.id)} className="px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 shrink-0" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
-                    <X size={12} /> Huỷ
-                  </button>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {canApprove && isPending && b.seriesId && (
+                    <button onClick={() => approveSeries(b.seriesId!)} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "var(--ibs-accent)" }} title="Duyệt cả series">
+                      <Check size={12} /> Duyệt series
+                    </button>
+                  )}
+                  {canApprove && isPending && !b.seriesId && (
+                    <>
+                      <button onClick={() => approve(b.id)} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "#10b981" }}>
+                        <Check size={12} /> Duyệt
+                      </button>
+                      <button onClick={() => setRejectTarget(b)} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
+                        <XCircle size={12} /> Từ chối
+                      </button>
+                    </>
+                  )}
+                  {isOwner && (b.status === "PENDING_APPROVAL" || b.status === "APPROVED") && (
+                    b.seriesId ? (
+                      <button onClick={() => cancelEntireSeries(b.seriesId!)} className="px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }} title="Huỷ cả series (mọi phiếu trong lịch cố định)">
+                        <X size={12} /> Huỷ series
+                      </button>
+                    ) : (
+                      <button onClick={() => cancelOne(b.id)} className="px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
+                        <X size={12} /> Huỷ
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
 
-              {expanded.has(b.id) && (b.description || b.priorityNote) && (
+              {expanded.has(b.id) && (b.description || b.priorityNote || b.rejectReason || b.seriesId) && (
                 <div className="px-4 pb-3 pl-10 text-[12px]" style={{ background: "rgba(0,0,0,0.03)", color: "var(--ibs-text-muted)" }}>
                   {b.description && <div className="mb-1">📝 {b.description}</div>}
                   {b.priorityNote && <div style={{ color: "var(--ibs-warning)" }}>⚡ Ưu tiên: {b.priorityNote}</div>}
+                  {b.seriesId && <div className="mt-1" style={{ color: "var(--ibs-accent)" }}>📅 Phiếu thuộc lịch cố định (series #{b.seriesId.slice(0, 8)})</div>}
+                  {b.rejectReason && <div className="mt-1" style={{ color: "var(--ibs-danger)" }}>❌ Lý do từ chối: {b.rejectReason}</div>}
                 </div>
               )}
             </div>
           );
         })}
+    </div>
+
+    {rejectTarget && (
+      <RejectModal booking={rejectTarget} onClose={() => setRejectTarget(null)} onDone={() => { setRejectTarget(null); load(); }} />
+    )}
+    </>
+  );
+}
+
+function RejectModal({ booking, onClose, onDone }: { booking: Booking; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!reason.trim()) { setError("Vui lòng nhập lý do từ chối"); return; }
+    setSaving(true);
+    const res = await fetch(`/api/v1/room-bookings/${booking.id}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason.trim() }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      setError(apiError(res.status, j?.error) || "Từ chối thất bại");
+      return;
+    }
+    onDone();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }}>
+      <div className="w-full max-w-md rounded-2xl p-5" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[15px] font-bold">Từ chối phiếu đặt phòng</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-3" style={{ color: "var(--ibs-text-dim)" }}>
+          Phiếu: <b style={{ color: "var(--ibs-text)" }}>{booking.title}</b>
+        </div>
+        <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+          Lý do từ chối <span style={{ color: "var(--ibs-danger)" }}>*</span>
+        </label>
+        <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
+          placeholder="VD: Phòng đã được dùng cho cuộc họp ưu tiên cao hơn"
+          className="w-full rounded-lg px-3 py-2 text-[13px] border resize-none mb-2"
+          style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+        {error && <div className="text-[12px] p-2 rounded mb-2" style={{ background: "rgba(239,68,68,0.12)", color: "var(--ibs-danger)" }}>{error}</div>}
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={onClose} disabled={saving} className="px-3 py-2 rounded-lg text-[12px] font-semibold border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Huỷ</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg text-[12px] font-semibold text-white" style={{ background: "var(--ibs-danger)", opacity: saving ? 0.7 : 1 }}>
+            {saving ? "Đang gửi..." : "Xác nhận từ chối"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
