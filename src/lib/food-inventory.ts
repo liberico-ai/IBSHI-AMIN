@@ -26,7 +26,7 @@ export function computeFifo(purchases: PurchaseRow[], issues: IssueRow[]) {
   const issueCost = new Map<string, number>();   // issueId → giá vốn FIFO
   const shortage = new Map<string, number>();     // issueId → lượng thiếu (vượt tồn)
 
-  for (const g of groups.values()) {
+  for (const g of Array.from(groups.values())) {
     g.batches.sort((a, b) => a.date.getTime() - b.date.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
     g.issues.sort((a, b) => a.date.getTime() - b.date.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
     let bi = 0;

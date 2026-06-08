@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     cur.qty += it.quantity;
     needByKey.set(k, cur);
   }
-  for (const n of needByKey.values()) {
+  for (const n of Array.from(needByKey.values())) {
     const avail = availableQty(allPurchases as any, allIssues as any, n.name, n.unit);
     if (n.qty > avail + 1e-6) {
       return NextResponse.json({ error: { code: "OVER_STOCK", message: `"${n.name}" chỉ còn tồn ${avail} ${n.unit}, không thể xuất ${n.qty} ${n.unit}.` } }, { status: 409 });
