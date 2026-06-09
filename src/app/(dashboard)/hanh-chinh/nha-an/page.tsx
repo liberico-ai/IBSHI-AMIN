@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { formatDate, apiError } from "@/lib/utils";
-import { Plus, RefreshCw, X, Star } from "lucide-react";
+import { Plus, RefreshCw, X, Star, Download } from "lucide-react";
 import Link from "next/link";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { DateInput } from "@/components/shared/date-input";
@@ -47,6 +47,59 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 // Sentinel cho mục "Thầu phụ" trong dropdown Phòng ban (khớp backend meal.service).
 const SUBCONTRACTOR_DEPT = "SUBCONTRACTOR";
+
+// Xuất Excel: gọi API export (trả {title, columns, rows}) rồi dựng workbook tải về.
+async function exportMealData(type: string, from: string, to: string, subId?: string) {
+  const url = `/api/v1/meals/export?type=${type}&from=${from}&to=${to}${subId ? `&subcontractorId=${subId}` : ""}`;
+  const res = await fetch(url);
+  const json = await res.json();
+  if (!res.ok) throw new Error(apiError(res.status, json?.error));
+  const { title, columns, rows } = json.data as { title: string; columns: { header: string; key: string; width?: number }[]; rows: Record<string, unknown>[] };
+
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "IBS ONE Platform";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Dữ liệu");
+
+  ws.mergeCells(1, 1, 1, columns.length);
+  const titleCell = ws.getCell(1, 1);
+  titleCell.value = title;
+  titleCell.font = { bold: true, size: 14 };
+  ws.addRow([]);
+  const headerRow = ws.addRow(columns.map((c) => c.header));
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } }; });
+  for (const r of rows) ws.addRow(columns.map((c) => (r[c.key] ?? "") as any));
+
+  // Dòng TỔNG CỘNG — cộng các cột số có ý nghĩa (không cộng đơn giá/đơn vị).
+  const SUM_KEYS: Record<string, string[]> = {
+    registrations: ["lunch", "dinner", "guest", "total"],
+    supplementary: ["quantity"],
+    "food-purchases": ["quantity", "total"],
+    "food-issues": ["quantity", "cost"],
+    cost: ["lunch", "dinner", "guest", "sub", "totalMeals", "mealCost", "foodCost", "diff"],
+    subcontractor: ["lunch", "dinner", "total", "cost"],
+  };
+  const sumKeys = SUM_KEYS[type] || [];
+  if (sumKeys.length && rows.length) {
+    const totals: Record<string, number> = {};
+    for (const k of sumKeys) totals[k] = rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+    const totalRow = ws.addRow(columns.map((c, i) => (i === 0 ? "TỔNG CỘNG" : (c.key in totals ? totals[c.key] : "")) as any));
+    totalRow.font = { bold: true };
+    totalRow.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2E8F0" } }; });
+  }
+
+  columns.forEach((c, i) => { ws.getColumn(i + 1).width = c.width || 16; });
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${type}_${from}_${to}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 export default function NhaAnPage() {
   const [tab, setTab] = useState<"registrations" | "supplementary" | "feedback" | "cost" | "food" | "subcontractors">("registrations");
@@ -106,6 +159,7 @@ export default function NhaAnPage() {
   const [subCanManage, setSubCanManage] = useState(false);
   const [showSubForm, setShowSubForm] = useState(false);
   const [editingSub, setEditingSub] = useState<Subcontractor | null>(null);
+  const [showExport, setShowExport] = useState(false);
 
   function fetchFood(month?: number, year?: number) {
     const m = month ?? foodMonth; const y = year ?? foodYear;
@@ -297,6 +351,9 @@ export default function NhaAnPage() {
           Hôm nay
         </button>
         <button onClick={() => { fetchRegs(); fetchFeedbacks(); fetchSupplementary(); }} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
+        <button onClick={() => setShowExport(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-1.5 rounded-lg font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)", background: "var(--ibs-bg-card)" }}>
+          <Download size={14} /> Export Excel
+        </button>
         {tab === "registrations" && (
           <div className="flex items-center gap-2 ml-auto">
             <button onClick={() => setShowSupplementary(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}>
@@ -326,7 +383,9 @@ export default function NhaAnPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
-        {(["registrations", "supplementary", "feedback", "food", "cost", "subcontractors"] as const).map((t) => (
+        {(["registrations", "supplementary", "feedback", "food", "cost", "subcontractors"] as const)
+          .filter((t) => isHRAdmin || !["food", "cost", "subcontractors"].includes(t))
+          .map((t) => (
           <button key={t} onClick={() => { setTab(t); if (t === "supplementary") fetchSupplementary(); if (t === "cost") fetchCostReport(); if (t === "food") fetchFood(); if (t === "subcontractors") fetchSubcontractors(); }}
             className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
             style={{ background: tab === t ? "var(--ibs-accent)" : "transparent", color: tab === t ? "#fff" : "var(--ibs-text-dim)" }}>
@@ -757,7 +816,7 @@ export default function NhaAnPage() {
                       <th className="text-right px-3 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>KHÁCH</th>
                       <th className="text-right px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>SỐ SUẤT</th>
                       <th className="text-right px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>CHI PHÍ SUẤT ĂN</th>
-                      <th className="text-right px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>CHI PHÍ THỰC PHẨM</th>
+                      <th className="text-right px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>TP THỰC XUẤT</th>
                       <th className="text-right px-5 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>CHÊNH LỆCH</th>
                     </tr>
                   </thead>
@@ -1185,6 +1244,9 @@ export default function NhaAnPage() {
           onClose={() => setEditActualDate(null)}
           onSuccess={() => { setEditActualDate(null); fetchCostReport(); }} />
       )}
+      {showExport && (
+        <ExportModal subcontractors={subcontractors} defaultFrom={dateFrom} defaultTo={dateTo} canExportHcns={isHRAdmin} onClose={() => setShowExport(false)} />
+      )}
 
       {showRegister && (
         <RegisterMealModal departments={departments} subcontractors={subcontractors} selectedDate={selectedDate} canManageMeals={isHRAdmin}
@@ -1284,6 +1346,91 @@ function SubcontractorModal({ subcontractor, onClose, onSuccess }: {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function ExportModal({ subcontractors, defaultFrom, defaultTo, canExportHcns, onClose }: {
+  subcontractors: Subcontractor[]; defaultFrom: string; defaultTo: string; canExportHcns: boolean; onClose: () => void;
+}) {
+  // Các loại liên quan chi phí/thực phẩm/thầu phụ chỉ HCNS được export (khớp quyền tab).
+  const TYPES = [
+    { value: "registrations", label: "Đăng ký suất ăn", hcns: false },
+    { value: "supplementary", label: "Đăng ký bổ sung", hcns: false },
+    { value: "food-purchases", label: "Lịch sử mua thực phẩm", hcns: true },
+    { value: "food-issues", label: "Lịch sử xuất thực kho", hcns: true },
+    { value: "cost", label: "Chi phí ăn", hcns: true },
+    { value: "subcontractor", label: "Thầu phụ (số suất + chi phí)", hcns: true },
+  ].filter((t) => canExportHcns || !t.hcns);
+  const [type, setType] = useState("registrations");
+  const [from, setFrom] = useState(defaultFrom);
+  const [to, setTo] = useState(defaultTo);
+  const [subId, setSubId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const isSub = type === "subcontractor";
+
+  async function doExport() {
+    setError("");
+    if (from > to) { setError("Từ ngày phải ≤ Đến ngày"); return; }
+    setBusy(true);
+    try {
+      await exportMealData(type, from, to, isSub && subId ? subId : undefined);
+      onClose();
+    } catch (e: any) {
+      setError(e?.message || "Có lỗi khi export");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ic = "w-full rounded-lg px-3 py-2 text-[13px] border";
+  const is = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const lc = "text-[12px] font-medium mb-1 block";
+  const ls = { color: "var(--ibs-text-dim)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="rounded-2xl w-full max-w-md mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-5">
+          <div className="text-[16px] font-bold">Export Excel</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className={lc} style={ls}>Nội dung export *</label>
+            <select value={type} onChange={(e) => setType(e.target.value)} className={ic} style={is}>
+              {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+          {isSub && (
+            <div>
+              <label className={lc} style={ls}>Nhà thầu</label>
+              <select value={subId} onChange={(e) => setSubId(e.target.value)} className={ic} style={is}>
+                <option value="">Tất cả nhà thầu</option>
+                {subcontractors.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.companyName}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lc} style={ls}>Từ ngày *</label>
+              <DateInput value={from} onChange={(e) => setFrom(e.target.value)} max={to} className={ic} style={is} />
+            </div>
+            <div>
+              <label className={lc} style={ls}>Đến ngày *</label>
+              <DateInput value={to} onChange={(e) => setTo(e.target.value)} min={from} className={ic} style={is} />
+            </div>
+          </div>
+          {error && <div className="text-[12px] text-red-500">{error}</div>}
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+            <button type="button" onClick={doExport} disabled={busy} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: busy ? 0.5 : 1 }}>
+              <Download size={14} /> {busy ? "Đang xuất..." : "Tải Excel"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

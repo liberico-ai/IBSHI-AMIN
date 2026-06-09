@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
+import { isAfterMealCutoff } from "@/services/meal.service";
 
 // Đăng ký suất ăn thầu phụ — lưu theo TỪNG nhà thầu / ngày (để diễn giải chi tiết).
 const RegisterSchema = z.object({
@@ -47,6 +48,11 @@ export async function POST(request: NextRequest) {
   const parsed = RegisterSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
   const { subcontractorId, date, mealType, count, specialNote } = parsed.data;
+
+  // Chốt 9h: sau 9h (hoặc ngày đã qua) KHÓA đăng ký thường với TẤT CẢ → dùng Đăng ký bổ sung.
+  if (isAfterMealCutoff(date)) {
+    return NextResponse.json({ error: { code: "MEAL_CUTOFF", message: "Đã quá giờ đăng ký suất ăn (chốt 9h sáng). Sau 9h vui lòng dùng Đăng ký bổ sung." } }, { status: 403 });
+  }
 
   const lunch = mealType === "LUNCH" ? count : 0;
   const dinner = mealType === "DINNER" ? count : 0;

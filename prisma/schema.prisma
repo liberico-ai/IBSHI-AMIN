@@ -1039,6 +1039,8 @@ model VehicleBooking {
   rejectedReason String?
   actualKm       Int?          // Số km thực tế sau chuyến đi
   returnTime     String?       // Giờ về thực tế "17:30"
+  driverName     String?       // Lái xe được người duyệt CHỈ ĐỊNH khi duyệt phiếu
+  priority       String        @default("NORMAL") // NONE | NORMAL | PRIORITY (Không / Bình thường / Ưu tiên)
   notes          String?
   seriesId       String?       // Nếu là phần của series lặp lại — chung seriesId
   createdAt      DateTime      @default(now())
@@ -1958,14 +1960,22 @@ model IncomingDocument {
   id          String    @id @default(uuid())
   docNumber   String?
   docDate     DateTime?
-  fromEntity  String?
+  recipientType String  @default("CONG_TY") // CONG_TY | CA_NHAN — gửi cho công ty hay đích danh cá nhân/phòng ban
+  fromEntity  String?   // Đơn vị chuyển (khi gửi cho Công ty)
   subject     String?
   scanFileUrl String
   ocrJson     Json?
-  routedTo    String?
+  routedTo    String?   // Tên hiển thị nơi nhận (NV/phòng ban) — khi recipientType = CA_NHAN
+  routedEmployeeId   String? // Nơi nhận = 1 nhân viên cụ thể
+  routedDepartmentId String? // Nơi nhận = 1 phòng ban
   status      String    @default("RECEIVED")
   receivedAt  DateTime  @default(now())
   processedAt DateTime?
+
+  // Xác nhận đã nhận (chỉ với CA_NHAN) — phục vụ theo dõi lịch sử / thất lạc.
+  confirmedAt    DateTime?
+  confirmedById  String?
+  confirmedByName String?
 
   @@index([status])
   @@index([routedTo])
@@ -1991,6 +2001,10 @@ model OutgoingDocument {
   subject    String
   body       String
   toEntity   String?
+  senderType String  @default("CONG_TY") // CONG_TY | CA_NHAN — người/đơn vị gửi
+  senderName String?                      // Tên người gửi / đơn vị gửi (hiển thị)
+  transportMethod String?       // Hình thức vận chuyển (Bưu điện / Chuyển phát nhanh / Trực tiếp...)
+  transportUnit   String?       // Đơn vị vận chuyển (VNPost, Viettel Post, GHN...)
   signedBy   String?
   status     String            @default("DRAFT")
   pdfUrl     String?

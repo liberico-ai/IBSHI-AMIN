@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { generateDates, applyTimeToDate } from "@/lib/recurrence";
+import { autoCancelExpiredBookings } from "@/lib/booking-autocancel";
 
 const CreateSchema = z.object({
   roomId: z.string().uuid(),
@@ -31,6 +32,8 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const roomId = searchParams.get("roomId");
   const date = searchParams.get("date");
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
 
   // Khi pick slot (có roomId+date): chỉ xem APPROVED + PENDING_APPROVAL để chặn slot bận.
   // Khi list tổng (không params): xem tất cả status để approver có thể duyệt + user thấy phiếu mình.
@@ -40,6 +43,17 @@ export async function GET(request: NextRequest) {
     const day = new Date(date);
     const dayEnd = new Date(day); dayEnd.setDate(dayEnd.getDate() + 1);
     where = { roomId, status: { in: ["APPROVED", "PENDING_APPROVAL"] }, startTime: { gte: day, lt: dayEnd } };
+  } else {
+    // List tổng → tự động hủy phiếu chưa duyệt đã qua ngày (trạng thái luôn đúng khi xem).
+    await autoCancelExpiredBookings();
+    // Lọc lịch sử theo phòng + khoảng ngày.
+    if (roomId) where.roomId = roomId;
+    if (from || to) {
+      where.startTime = {
+        ...(from && { gte: new Date(new Date(from).setHours(0, 0, 0, 0)) }),
+        ...(to && { lte: new Date(new Date(to).setHours(23, 59, 59, 999)) }),
+      };
+    }
   }
 
   const data = await prisma.roomBooking.findMany({
@@ -66,6 +80,12 @@ export async function POST(request: NextRequest) {
   const startTime = new Date(body.startTime);
   const endTime = new Date(body.endTime);
   if (endTime <= startTime) return NextResponse.json({ error: { code: "INVALID_TIME", message: "Giờ kết thúc phải sau giờ bắt đầu" } }, { status: 400 });
+
+  // Phải đặt trước tối thiểu 30 phút, không đặt giờ trong quá khứ.
+  const minStart = new Date(Date.now() + 30 * 60_000);
+  if (startTime.getTime() < minStart.getTime()) {
+    return NextResponse.json({ error: { code: "TOO_SOON", message: "Phải đặt trước ít nhất 30 phút (không đặt giờ trong quá khứ)." } }, { status: 400 });
+  }
 
   // ── Lịch lặp lại (series) ──────────────────────────────────────────────────
   // KHÔNG check conflict — push lên duyệt, approver xử lý từng phiếu khi duyệt series.

@@ -63,7 +63,7 @@ const NAV_SECTIONS: NavSection[] = [
     subItems: [
       { icon: "DoorOpen", label: "Đặt phòng họp", href: "/hanh-chinh/phong-hop", badge: null },
       { icon: "Car", label: "Quản lý xe", href: "/hanh-chinh/xe", badge: null },
-      { icon: "Wrench", label: "Yêu cầu sửa chữa", href: "/hanh-chinh/sua-chua", badge: null },
+      { icon: "Wrench", label: "Yêu cầu cấp phát, sửa chữa thiết bị VP", href: "/hanh-chinh/sua-chua", badge: null },
       { icon: "Package", label: "Văn phòng phẩm", href: "/hanh-chinh/vpp", badge: null },
       { icon: "UtensilsCrossed", label: "Nhà ăn", href: "/hanh-chinh/nha-an", badge: null },
       { icon: "Sparkles", label: "Vệ sinh", href: "/hanh-chinh/ve-sinh", badge: null },

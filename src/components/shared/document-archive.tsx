@@ -5,6 +5,7 @@ import { Plus, X, RefreshCw, Upload, ExternalLink, Trash2, FileText, Search } fr
 import { DataTable, Column } from "@/components/shared/data-table";
 import { DateInput } from "@/components/shared/date-input";
 import { formatDate, apiError } from "@/lib/utils";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { BUCKETS } from "@/lib/minio-constants";
 import { viewUrl } from "@/lib/use-presigned-url";
 
@@ -13,8 +14,16 @@ type Doc = {
   docDate?: string | null;
   docNumber?: string | null;
   subject?: string | null;
-  fromEntity?: string | null;  // incoming
+  fromEntity?: string | null;  // incoming (Công ty)
+  recipientType?: string | null; // incoming: CONG_TY | CA_NHAN
+  routedTo?: string | null;      // incoming (Cá nhân) — nơi nhận đích danh
+  confirmedAt?: string | null;   // incoming (Cá nhân) — đã xác nhận nhận lúc nào
+  confirmedByName?: string | null;
   toEntity?: string | null;    // outgoing
+  senderType?: string | null;      // outgoing: CONG_TY | CA_NHAN
+  senderName?: string | null;      // outgoing — người/đơn vị gửi
+  transportMethod?: string | null; // outgoing
+  transportUnit?: string | null;   // outgoing
   scanFileUrl?: string;
   scanUrl?: string;
   receivedAt?: string;
@@ -27,6 +36,9 @@ interface Props {
   description: string;
   numberRequired?: boolean; // outgoing yêu cầu mã bắt buộc + unique
 }
+
+// Hình thức vận chuyển công văn đi.
+const TRANSPORT_METHODS = ["Bưu điện", "Chuyển phát nhanh", "Giao trực tiếp", "Email / Điện tử", "Khác"];
 
 export function DocumentArchive({ kind, title, description, numberRequired }: Props) {
   const apiBase = `/api/v1/documents/${kind}`;
@@ -60,19 +72,35 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, from, to]);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "MANAGER";
+  // Công văn ĐẾN: chỉ Phòng HCNS (HR_ADMIN/BOM) được thêm. Công văn đi: thêm cả MANAGER.
+  const canManage = kind === "incoming"
+    ? (userRole === "HR_ADMIN" || userRole === "BOM")
+    : (userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "MANAGER");
   const canDelete = userRole === "HR_ADMIN" || userRole === "BOM";
 
   async function handleDelete(id: string) {
-    if (!confirm("Xác nhận xoá công văn này?")) return;
+    if (!(await confirmDialog({ message: "Xác nhận xoá công văn này?", tone: "danger", confirmText: "Xoá" }))) return;
     const res = await fetch(`${apiBase}/${id}`, { method: "DELETE" });
     if (!res.ok) {
       const json = await res.json().catch(() => null);
-      alert(apiError(res.status, json?.error) || "Xoá thất bại");
+      await alertDialog(apiError(res.status, json?.error) || "Xoá thất bại");
       return;
     }
     fetchDocs();
   }
+
+  async function confirmReceived(id: string) {
+    if (!(await confirmDialog({ message: "Xác nhận bạn (cá nhân/phòng ban) đã NHẬN ĐƯỢC công văn này?", confirmText: "Xác nhận" }))) return;
+    const res = await fetch(`${apiBase}/${id}/confirm`, { method: "POST" });
+    if (!res.ok) {
+      const json = await res.json().catch(() => null);
+      await alertDialog(apiError(res.status, json?.error) || "Xác nhận thất bại");
+      return;
+    }
+    fetchDocs();
+  }
+
+  const fmtDateTime = (d: string) => new Date(d).toLocaleString("vi-VN");
 
   const columns: Column<Doc>[] = [
     {
@@ -94,31 +122,78 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
     },
     {
       key: "entity",
-      header: "Đơn vị chuyển",
-      width: "200px",
+      header: kind === "incoming" ? "Đơn vị chuyển / Nơi nhận" : "Người gửi / Nơi nhận",
+      width: "220px",
       render: (d) => {
-        const v = kind === "incoming" ? d.fromEntity : d.toEntity;
-        return v ? <span className="text-[12px]">{v}</span> : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>;
+        if (kind === "incoming") {
+          const caNhan = d.recipientType === "CA_NHAN";
+          const v = caNhan ? d.routedTo : d.fromEntity;
+          if (!v) return <span style={{ color: "var(--ibs-text-dim)" }}>—</span>;
+          return (
+            <span className="text-[12px] inline-flex items-center gap-1.5">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={caNhan ? { background: "rgba(16,185,129,0.15)", color: "var(--ibs-success)" } : { background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>{caNhan ? "Cá nhân" : "Công ty"}</span>
+              {v}
+            </span>
+          );
+        }
+        return (
+          <div className="space-y-0.5">
+            {d.senderName && (
+              <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold mr-1" style={d.senderType === "CA_NHAN" ? { background: "rgba(16,185,129,0.15)", color: "var(--ibs-success)" } : { background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>{d.senderType === "CA_NHAN" ? "Cá nhân" : "Công ty"}</span>
+                Gửi: {d.senderName}
+              </div>
+            )}
+            {d.toEntity ? <div className="text-[12px]">Nhận: {d.toEntity}</div> : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}
+            {(d.transportMethod || d.transportUnit) && (
+              <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>🚚 {[d.transportMethod, d.transportUnit].filter(Boolean).join(" · ")}</div>
+            )}
+          </div>
+        );
       },
     },
     {
       key: "scan",
-      header: "File scan",
-      width: "120px",
+      header: kind === "incoming" ? "File scan / Xác nhận" : "File scan",
+      width: kind === "incoming" ? "210px" : "120px",
       render: (d) => {
         const url = d.scanFileUrl || d.scanUrl;
-        if (!url) return <span style={{ color: "var(--ibs-text-dim)" }}>—</span>;
+        const caNhan = kind === "incoming" && d.recipientType === "CA_NHAN";
         return (
-          <a
-            href={viewUrl(url)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-md font-semibold"
-            style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}
-          >
-            <FileText size={11} /> Xem
-            <ExternalLink size={10} />
-          </a>
+          <div className="flex items-center gap-2 flex-wrap">
+            {url ? (
+              <a
+                href={viewUrl(url)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-md font-semibold"
+                style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}
+              >
+                <FileText size={11} /> Xem
+                <ExternalLink size={10} />
+              </a>
+            ) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}
+            {caNhan && (
+              d.confirmedAt ? (
+                <span
+                  className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-md font-semibold"
+                  style={{ background: "rgba(16,185,129,0.15)", color: "var(--ibs-success)" }}
+                  title={`Đã xác nhận: ${d.confirmedByName || ""} · ${fmtDateTime(d.confirmedAt)}`}
+                >
+                  ✓ Đã nhận
+                </span>
+              ) : (
+                <button
+                  onClick={() => confirmReceived(d.id)}
+                  className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-md font-semibold"
+                  style={{ background: "rgba(234,179,8,0.15)", color: "var(--ibs-warning)" }}
+                  title="Xác nhận đã nhận được công văn này"
+                >
+                  Xác nhận
+                </button>
+              )
+            )}
+          </div>
         );
       },
     },
@@ -257,11 +332,27 @@ function AddModal({
   const [docNumber, setDocNumber] = useState("");
   const [subject, setSubject] = useState("");
   const [entity, setEntity] = useState("");
+  const [recipientType, setRecipientType] = useState<"CONG_TY" | "CA_NHAN">("CONG_TY");
+  const [routedTo, setRoutedTo] = useState("");
+  const [transportMethod, setTransportMethod] = useState("");
+  const [transportUnit, setTransportUnit] = useState("");
+  // Công văn ĐI: người gửi / đơn vị gửi (Công ty hay Cá nhân/phòng ban).
+  const [senderType, setSenderType] = useState<"CONG_TY" | "CA_NHAN">("CONG_TY");
+  const [senderText, setSenderText] = useState(""); // khi Công ty
+  const [senderSel, setSenderSel] = useState("");   // khi Cá nhân: emp:<id> / dept:<id>
+  const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
+  const [emps, setEmps] = useState<{ id: string; code: string; fullName: string; department?: { name?: string } | null }[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Tải danh sách phòng ban + nhân viên cho dropdown Cá nhân (Nơi nhận ở "đến" / Người gửi ở "đi").
+  useEffect(() => {
+    fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepts(res.data || [])).catch(() => {});
+    fetch("/api/v1/employees?limit=500").then((r) => r.json()).then((res) => setEmps(res.data || [])).catch(() => {});
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -276,6 +367,14 @@ function AddModal({
     }
     if (numberRequired && !docNumber.trim()) {
       setError("Vui lòng nhập mã công văn");
+      return;
+    }
+    if (kind === "incoming" && recipientType === "CA_NHAN" && !routedTo.trim()) {
+      setError("Vui lòng chọn nơi nhận (cá nhân / phòng ban)");
+      return;
+    }
+    if (kind === "outgoing" && senderType === "CA_NHAN" && !senderSel) {
+      setError("Vui lòng chọn người gửi (cá nhân / phòng ban)");
       return;
     }
 
@@ -295,17 +394,44 @@ function AddModal({
     const scanFileUrl = upJson.data?.url;
 
     setSaving(true);
-    const entityField = kind === "incoming" ? "fromEntity" : "toEntity";
+    const payload: any = {
+      docDate,
+      docNumber: docNumber.trim() || null,
+      subject: subject.trim(),
+      scanFileUrl,
+    };
+    if (kind === "incoming") {
+      payload.recipientType = recipientType;
+      if (recipientType === "CA_NHAN") {
+        if (routedTo.startsWith("dept:")) {
+          const did = routedTo.slice(5);
+          payload.routedDepartmentId = did;
+          payload.routedTo = depts.find((d) => d.id === did)?.name || "";
+        } else if (routedTo.startsWith("emp:")) {
+          const eid = routedTo.slice(4);
+          const e = emps.find((x) => x.id === eid);
+          payload.routedEmployeeId = eid;
+          payload.routedTo = e ? `${e.fullName} (${e.code})` : "";
+        }
+      } else {
+        payload.fromEntity = entity.trim() || null;
+      }
+    } else {
+      payload.toEntity = entity.trim() || null;
+      payload.transportMethod = transportMethod || null;
+      payload.transportUnit = transportUnit.trim() || null;
+      payload.senderType = senderType;
+      if (senderType === "CA_NHAN") {
+        if (senderSel.startsWith("dept:")) payload.senderName = depts.find((d) => d.id === senderSel.slice(5))?.name || "";
+        else if (senderSel.startsWith("emp:")) { const e = emps.find((x) => x.id === senderSel.slice(4)); payload.senderName = e ? `${e.fullName} (${e.code})` : ""; }
+      } else {
+        payload.senderName = senderText.trim() || null;
+      }
+    }
     const res = await fetch(`/api/v1/documents/${kind}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        docDate,
-        docNumber: docNumber.trim() || null,
-        subject: subject.trim(),
-        [entityField]: entity.trim() || null,
-        scanFileUrl,
-      }),
+      body: JSON.stringify(payload),
     });
     const json = await res.json();
     setSaving(false);
@@ -384,19 +510,144 @@ function AddModal({
             />
           </div>
 
-          <div>
-            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
-              Đơn vị chuyển
-            </label>
-            <input
-              type="text"
-              value={entity}
-              onChange={(e) => setEntity(e.target.value)}
-              placeholder={kind === "incoming" ? "Đơn vị gửi đến (VD: Sở LĐ-TBXH Hải Phòng)" : "Đơn vị nhận (VD: BHXH TP. Hải Phòng)"}
-              className="w-full px-3 py-2 rounded-lg text-[13px]"
-              style={inputStyle}
-            />
-          </div>
+          {kind === "outgoing" && (
+            <>
+              <div>
+                <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+                  Người gửi / Đơn vị gửi <span style={{ color: "var(--ibs-danger)" }}>*</span>
+                </label>
+                <select
+                  value={senderType}
+                  onChange={(e) => setSenderType(e.target.value as "CONG_TY" | "CA_NHAN")}
+                  className="w-full px-3 py-2 rounded-lg text-[13px]"
+                  style={inputStyle}
+                >
+                  <option value="CONG_TY">Công ty (gửi từ công ty)</option>
+                  <option value="CA_NHAN">Cá nhân (đích danh người / phòng ban)</option>
+                </select>
+              </div>
+              {senderType === "CA_NHAN" ? (
+                <div>
+                  <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+                    Người gửi <span style={{ color: "var(--ibs-danger)" }}>*</span>
+                  </label>
+                  <select
+                    value={senderSel}
+                    onChange={(e) => setSenderSel(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-[13px]"
+                    style={inputStyle}
+                  >
+                    <option value="">Chọn cá nhân / phòng ban...</option>
+                    <optgroup label="Phòng ban">
+                      {depts.map((d) => <option key={d.id} value={`dept:${d.id}`}>{d.name}</option>)}
+                    </optgroup>
+                    <optgroup label="Nhân viên">
+                      {emps.map((e) => <option key={e.id} value={`emp:${e.id}`}>{e.fullName} — {e.code}{e.department?.name ? ` · ${e.department.name}` : ""}</option>)}
+                    </optgroup>
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+                    Đơn vị gửi
+                  </label>
+                  <input
+                    type="text"
+                    value={senderText}
+                    onChange={(e) => setSenderText(e.target.value)}
+                    placeholder="VD: Công ty IBS Heavy Industry / P. HCNS"
+                    className="w-full px-3 py-2 rounded-lg text-[13px]"
+                    style={inputStyle}
+                  />
+                </div>
+              )}
+            </>
+          )}
+
+          {kind === "incoming" && (
+            <div>
+              <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+                Gửi cho <span style={{ color: "var(--ibs-danger)" }}>*</span>
+              </label>
+              <select
+                value={recipientType}
+                onChange={(e) => setRecipientType(e.target.value as "CONG_TY" | "CA_NHAN")}
+                className="w-full px-3 py-2 rounded-lg text-[13px]"
+                style={inputStyle}
+              >
+                <option value="CONG_TY">Công ty (gửi chung cho công ty)</option>
+                <option value="CA_NHAN">Cá nhân (đích danh người / phòng ban)</option>
+              </select>
+            </div>
+          )}
+
+          {kind === "incoming" && recipientType === "CA_NHAN" ? (
+            <div>
+              <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+                Nơi nhận <span style={{ color: "var(--ibs-danger)" }}>*</span>
+              </label>
+              <select
+                value={routedTo}
+                onChange={(e) => setRoutedTo(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-[13px]"
+                style={inputStyle}
+              >
+                <option value="">Chọn cá nhân / phòng ban...</option>
+                <optgroup label="Phòng ban">
+                  {depts.map((d) => <option key={d.id} value={`dept:${d.id}`}>{d.name}</option>)}
+                </optgroup>
+                <optgroup label="Nhân viên">
+                  {emps.map((e) => <option key={e.id} value={`emp:${e.id}`}>{e.fullName} — {e.code}{e.department?.name ? ` · ${e.department.name}` : ""}</option>)}
+                </optgroup>
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+                {kind === "incoming" ? "Đơn vị chuyển" : "Đơn vị nhận / Nơi nhận"}
+              </label>
+              <input
+                type="text"
+                value={entity}
+                onChange={(e) => setEntity(e.target.value)}
+                placeholder={kind === "incoming" ? "Đơn vị gửi đến (VD: Sở LĐ-TBXH Hải Phòng)" : "Đơn vị nhận (VD: BHXH TP. Hải Phòng)"}
+                className="w-full px-3 py-2 rounded-lg text-[13px]"
+                style={inputStyle}
+              />
+            </div>
+          )}
+
+          {kind === "outgoing" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+                  Hình thức vận chuyển
+                </label>
+                <select
+                  value={transportMethod}
+                  onChange={(e) => setTransportMethod(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg text-[13px]"
+                  style={inputStyle}
+                >
+                  <option value="">-- Chọn --</option>
+                  {TRANSPORT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+                  Đơn vị vận chuyển
+                </label>
+                <input
+                  type="text"
+                  value={transportUnit}
+                  onChange={(e) => setTransportUnit(e.target.value)}
+                  placeholder="VD: VNPost, Viettel Post, GHN..."
+                  className="w-full px-3 py-2 rounded-lg text-[13px]"
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>

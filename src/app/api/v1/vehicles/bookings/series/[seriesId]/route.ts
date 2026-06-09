@@ -66,30 +66,42 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Series không có phiếu chờ duyệt" } }, { status: 404 });
   }
 
-  let approved = 0;
-  const conflicts: { id: string; date: string; conflictDestination: string }[] = [];
-
+  // Tối ưu: gộp còn 2 query (thay vì N query/phiếu — chậm 30s–1p với DB từ xa).
+  const pendingIds = new Set(pending.map((b) => b.id));
+  const vehicleIds = Array.from(new Set(pending.map((b) => b.vehicleId)));
+  let minStart = pending[0].startDate, maxEnd = pending[0].endDate;
   for (const b of pending) {
-    const c = await prisma.vehicleBooking.findFirst({
-      where: {
-        id: { not: b.id },
-        vehicleId: b.vehicleId,
-        status: "APPROVED",
-        startDate: { lt: b.endDate },
-        endDate: { gt: b.startDate },
-      },
-      select: { destination: true },
-    });
+    if (b.startDate < minStart) minStart = b.startDate;
+    if (b.endDate > maxEnd) maxEnd = b.endDate;
+  }
+
+  const approvedOthers = (await prisma.vehicleBooking.findMany({
+    where: {
+      vehicleId: { in: vehicleIds },
+      status: "APPROVED",
+      startDate: { lt: maxEnd },
+      endDate: { gt: minStart },
+    },
+    select: { id: true, vehicleId: true, startDate: true, endDate: true, destination: true },
+  })).filter((o) => !pendingIds.has(o.id));
+
+  const toApprove: string[] = [];
+  const conflicts: { id: string; date: string; conflictDestination: string }[] = [];
+  for (const b of pending) {
+    const c = approvedOthers.find((o) => o.vehicleId === b.vehicleId && o.startDate < b.endDate && o.endDate > b.startDate);
     if (c) {
       conflicts.push({ id: b.id, date: b.startDate.toISOString().slice(0, 10), conflictDestination: c.destination });
       continue;
     }
-    await prisma.vehicleBooking.update({
-      where: { id: b.id },
-      data: { status: "APPROVED", approvedBy: userId, approvedAt: new Date() },
-    });
-    approved++;
+    toApprove.push(b.id);
   }
 
-  return NextResponse.json({ data: { seriesId, approved, skipped: conflicts.length, conflicts } });
+  if (toApprove.length > 0) {
+    await prisma.vehicleBooking.updateMany({
+      where: { id: { in: toApprove } },
+      data: { status: "APPROVED", approvedBy: userId, approvedAt: new Date() },
+    });
+  }
+
+  return NextResponse.json({ data: { seriesId, approved: toApprove.length, skipped: conflicts.length, conflicts } });
 }

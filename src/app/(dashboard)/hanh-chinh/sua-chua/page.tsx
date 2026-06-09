@@ -5,11 +5,11 @@ export default function SuaChuaPage() {
   return (
     <div>
       <PageTitle
-        title="Yêu cầu sửa chữa"
-        description="Đề xuất sửa chữa cơ sở vật chất, thiết bị; phân công đội kỹ thuật và theo dõi tiến độ"
+        title="Yêu cầu cấp phát, sửa chữa thiết bị VP"
+        description="Đề xuất cấp phát / sửa chữa thiết bị văn phòng, cơ sở vật chất; phân công đội kỹ thuật và theo dõi tiến độ"
       />
       <ComingSoon
-        title="Module Yêu cầu sửa chữa"
+        title="Module Yêu cầu cấp phát, sửa chữa thiết bị VP"
         description="Owner: Tùng — đang chờ cấu hình danh mục thiết bị + đội kỹ thuật"
         features={[
           "Tạo yêu cầu sửa chữa: mô tả + ảnh + mức độ ưu tiên",

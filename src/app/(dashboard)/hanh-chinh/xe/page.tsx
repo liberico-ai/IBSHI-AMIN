@@ -4,11 +4,12 @@ import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, formatDateTime, apiError } from "@/lib/utils";
-import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench } from "lucide-react";
+import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench, Download } from "lucide-react";
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
 import { canApproveRoomVehicle } from "@/lib/access";
+import { VEHICLE_DRIVERS } from "@/lib/constants";
 import { alertDialog } from "@/lib/confirm-dialog";
 
 // Vietnamese number formatting helpers
@@ -46,6 +47,7 @@ type VehicleBooking = {
   startDatetime?: string; endDatetime?: string;
   origin?: string | null; destination: string; purpose: string; passengers: number; status: string;
   approvedAt?: string; actualKm?: number; returnTime?: string; notes?: string; seriesId?: string | null;
+  driverName?: string | null; priority?: string;
   vehicle: { licensePlate: string; model: string };
   requester: { id?: string; code: string; fullName: string; department: { name: string } };
 };
@@ -74,6 +76,75 @@ const VEHICLE_PURPOSE_LABELS: Record<string, string> = {
   PROCUREMENT: "Mua vật tư",
   OTHER: "Khác",
 };
+const VEHICLE_PRIORITY: { value: string; label: string; color: string }[] = [
+  { value: "NONE", label: "Không", color: "#6b7280" },
+  { value: "NORMAL", label: "Bình thường", color: "var(--ibs-accent)" },
+  { value: "PRIORITY", label: "Ưu tiên", color: "var(--ibs-danger)" },
+];
+const VEHICLE_PRIORITY_LABEL: Record<string, string> = Object.fromEntries(VEHICLE_PRIORITY.map((p) => [p.value, p.label]));
+
+// Tải Excel từ 1 endpoint export trả {title, columns, rows}.
+async function downloadExportExcel(url: string, sheetName: string, filename: string) {
+  const res = await fetch(url);
+  const json = await res.json();
+  if (!res.ok) throw new Error(apiError(res.status, json?.error));
+  const { title, columns, rows } = json.data as { title: string; columns: { header: string; key: string; width?: number }[]; rows: Record<string, unknown>[] };
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "IBS ONE Platform";
+  wb.created = new Date();
+  const ws = wb.addWorksheet(sheetName);
+  ws.mergeCells(1, 1, 1, columns.length);
+  const tc = ws.getCell(1, 1);
+  tc.value = title;
+  tc.font = { bold: true, size: 14 };
+  ws.addRow([]);
+  const hr = ws.addRow(columns.map((c) => c.header));
+  hr.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  hr.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } }; });
+  for (const r of rows) ws.addRow(columns.map((c) => (r[c.key] ?? "") as any));
+  columns.forEach((c, i) => { ws.getColumn(i + 1).width = c.width || 16; });
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Xuất Excel lịch sử đặt xe: gọi API export rồi dựng workbook tải về.
+async function exportVehicleBookings(vehicleId: string, from: string, to: string) {
+  const res = await fetch(`/api/v1/vehicles/bookings/export?vehicleId=${vehicleId}&from=${from}&to=${to}`);
+  const json = await res.json();
+  if (!res.ok) throw new Error(apiError(res.status, json?.error));
+  const { title, columns, rows } = json.data as { title: string; columns: { header: string; key: string; width?: number }[]; rows: Record<string, unknown>[] };
+
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "IBS ONE Platform";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Lịch sử đặt xe");
+
+  ws.mergeCells(1, 1, 1, columns.length);
+  const tc = ws.getCell(1, 1);
+  tc.value = title;
+  tc.font = { bold: true, size: 14 };
+  ws.addRow([]);
+  const hr = ws.addRow(columns.map((c) => c.header));
+  hr.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  hr.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } }; });
+  for (const r of rows) ws.addRow(columns.map((c) => (r[c.key] ?? "") as any));
+  columns.forEach((c, i) => { ws.getColumn(i + 1).width = c.width || 16; });
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `lich-su-dat-xe_${from}_${to}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 export default function XePage() {
   const [tab, setTab] = useState<"bookings" | "fleet" | "fuel" | "maintenance" | "calendar">("bookings");
@@ -82,19 +153,28 @@ export default function XePage() {
   const [fuelLogs, setFuelLogs] = useState<FuelLog[]>([]);
   const [fuelMeta, setFuelMeta] = useState<{ totalLiters: number; totalCost: number } | null>(null);
   const [fuelVehicleId, setFuelVehicleId] = useState("");
+  const [fuelFrom, setFuelFrom] = useState("");
+  const [fuelTo, setFuelTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState("");
   const [employeeCode, setEmployeeCode] = useState("");
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
   const [showNewBooking, setShowNewBooking] = useState(false);
+  const [assignTarget, setAssignTarget] = useState<VehicleBooking | null>(null);
+  const [showExport, setShowExport] = useState(false);
   const [showNewVehicle, setShowNewVehicle] = useState(false);
   const [showNewFuel, setShowNewFuel] = useState(false);
   const [viewInvoice, setViewInvoice] = useState<string | null>(null);
   const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([]);
   const [maintenanceMeta, setMaintenanceMeta] = useState<{ totalCost: number; count: number } | null>(null);
   const [maintenanceVehicleId, setMaintenanceVehicleId] = useState("");
+  const [maintFrom, setMaintFrom] = useState("");
+  const [maintTo, setMaintTo] = useState("");
   const [showNewMaintenance, setShowNewMaintenance] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterVehicleId, setFilterVehicleId] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
   const [completingBooking, setCompletingBooking] = useState<VehicleBooking | null>(null);
   const [vehicleHistoryModal, setVehicleHistoryModal] = useState<Vehicle | null>(null);
 
@@ -102,6 +182,9 @@ export default function XePage() {
     setLoading(true);
     const params = new URLSearchParams();
     if (filterStatus) params.set("status", filterStatus);
+    if (filterVehicleId) params.set("vehicleId", filterVehicleId);
+    if (filterFrom) params.set("from", filterFrom);
+    if (filterTo) params.set("to", filterTo);
     fetch(`/api/v1/vehicles/bookings?${params}`)
       .then((r) => r.json()).then((res) => setBookings(res.data || []))
       .finally(() => setLoading(false));
@@ -114,26 +197,22 @@ export default function XePage() {
       .finally(() => setLoading(false));
   }
 
-  function fetchFuelLogs(vehicleId?: string) {
-    const vid = vehicleId ?? fuelVehicleId;
-    if (!vid) {
-      fetch("/api/v1/fuel-logs")
-        .then((r) => r.json()).then((res) => { setFuelLogs(res.data || []); setFuelMeta(null); });
-    } else {
-      fetch(`/api/v1/vehicles/${vid}/fuel`)
-        .then((r) => r.json()).then((res) => { setFuelLogs(res.data || []); setFuelMeta(res.meta || null); });
-    }
+  function fetchFuelLogs() {
+    const params = new URLSearchParams();
+    if (fuelVehicleId) params.set("vehicleId", fuelVehicleId);
+    if (fuelFrom) params.set("from", fuelFrom);
+    if (fuelTo) params.set("to", fuelTo);
+    fetch(`/api/v1/fuel-logs?${params}`)
+      .then((r) => r.json()).then((res) => { setFuelLogs(res.data || []); setFuelMeta(res.meta || null); });
   }
 
-  function fetchMaintenance(vehicleId?: string) {
-    const vid = vehicleId ?? maintenanceVehicleId;
-    if (!vid) {
-      fetch("/api/v1/maintenance-records")
-        .then((r) => r.json()).then((res) => { setMaintenanceRecords(res.data || []); setMaintenanceMeta(null); });
-    } else {
-      fetch(`/api/v1/vehicles/${vid}/maintenance`)
-        .then((r) => r.json()).then((res) => { setMaintenanceRecords(res.data || []); setMaintenanceMeta(res.meta || null); });
-    }
+  function fetchMaintenance() {
+    const params = new URLSearchParams();
+    if (maintenanceVehicleId) params.set("vehicleId", maintenanceVehicleId);
+    if (maintFrom) params.set("from", maintFrom);
+    if (maintTo) params.set("to", maintTo);
+    fetch(`/api/v1/maintenance-records?${params}`)
+      .then((r) => r.json()).then((res) => { setMaintenanceRecords(res.data || []); setMaintenanceMeta(res.meta || null); });
   }
 
   useEffect(() => {
@@ -145,26 +224,32 @@ export default function XePage() {
   useEffect(() => {
     if (tab === "bookings") fetchBookings();
     else if (tab === "fleet") fetchVehicles();
-  }, [tab, filterStatus]);
+  }, [tab, filterStatus, filterVehicleId, filterFrom, filterTo]);
 
   useEffect(() => {
-    fetchFuelLogs(fuelVehicleId);
-  }, [fuelVehicleId]);
+    fetchFuelLogs();
+  }, [fuelVehicleId, fuelFrom, fuelTo]);
 
   useEffect(() => {
-    fetchMaintenance(maintenanceVehicleId);
-  }, [maintenanceVehicleId]);
+    fetchMaintenance();
+  }, [maintenanceVehicleId, maintFrom, maintTo]);
 
   const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "MANAGER";
   // Duyệt phiếu đặt xe: chỉ 3 NV được chỉ định (theo employeeCode), không theo role.
   const canApproveBooking = canApproveRoomVehicle(employeeCode);
 
-  async function handleBookingAction(id: string, action: "APPROVE" | "REJECT") {
-    await fetch(`/api/v1/vehicles/bookings/${id}`, {
+  async function handleBookingAction(id: string, action: "APPROVE" | "REJECT", driverName?: string): Promise<boolean> {
+    const res = await fetch(`/api/v1/vehicles/bookings/${id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ...(driverName ? { driverName } : {}) }),
     });
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      await alertDialog(apiError(res.status, j?.error) || "Thao tác thất bại");
+      return false;
+    }
     fetchBookings();
+    return true;
   }
   async function approveSeries(seriesId: string) {
     const res = await fetch(`/api/v1/vehicles/bookings/series/${seriesId}`, {
@@ -266,7 +351,7 @@ export default function XePage() {
         ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: "rgba(0,180,216,0.15)", color: "var(--ibs-accent)", border: "1px solid var(--ibs-accent)" }}>📅 Cố định</span>
         : <span className="text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: "rgba(0,0,0,0.04)", color: "var(--ibs-text-dim)" }}>Lẻ</span>
     ) },
-    { key: "vehicle", header: "Xe", render: (b) => <div><div className="font-mono font-semibold">{b.vehicle.licensePlate}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{b.vehicle.model}</div></div> },
+    { key: "vehicle", header: "Xe", render: (b) => <div><div className="font-mono font-semibold">{b.vehicle.licensePlate}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{b.vehicle.model}</div>{b.driverName && <div className="text-[11px] mt-0.5" style={{ color: "var(--ibs-accent)" }}>🚗 LX: {b.driverName}</div>}</div> },
     { key: "time", header: "Thời gian", render: (b) => {
       if (b.seriesId) {
         const days = Array.from(seriesDays[b.seriesId] || []);
@@ -293,7 +378,18 @@ export default function XePage() {
         </div>
       );
     } },
-    { key: "destination", header: "Hành trình", render: (b) => <div><div>{b.origin ? `${b.origin} → ` : ""}{b.destination}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{VEHICLE_PURPOSE_LABELS[b.purpose] ?? b.purpose}</div></div> },
+    { key: "destination", header: "Hành trình", render: (b) => {
+      const pr = VEHICLE_PRIORITY.find((p) => p.value === b.priority);
+      return (
+        <div>
+          <div>{b.origin ? `${b.origin} → ` : ""}{b.destination}</div>
+          <div className="text-[11px] flex items-center gap-1.5" style={{ color: "var(--ibs-text-dim)" }}>
+            <span>{VEHICLE_PURPOSE_LABELS[b.purpose] ?? b.purpose}</span>
+            {pr && b.priority !== "NORMAL" && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: `${pr.color}20`, color: pr.color }}>{pr.label}</span>}
+          </div>
+        </div>
+      );
+    } },
     { key: "passengers", header: "Hành khách", render: (b) => <span className="text-[12px]">{b.passengers} người</span> },
     { key: "status", header: "Trạng thái", render: (b) => {
       const s = BOOKING_STATUS[b.status] || { label: b.status, color: "#6b7280" };
@@ -310,13 +406,13 @@ export default function XePage() {
             <Check size={11} /> Duyệt series
           </button>
         )}
-        {/* Duyệt/Từ chối phiếu lẻ */}
+        {/* Người duyệt: Chỉ định lái xe → duyệt, hoặc Từ chối lịch (phiếu lẻ) */}
         {canApproveBooking && b.status === "PENDING" && !b.seriesId && (<>
-          <button onClick={() => handleBookingAction(b.id, "APPROVE")} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}><Check size={11} /> Duyệt</button>
-          <button onClick={() => handleBookingAction(b.id, "REJECT")} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}><XCircle size={11} /></button>
+          <button onClick={() => setAssignTarget(b)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}><Check size={11} /> Chỉ định</button>
+          <button onClick={async () => { if (!confirm("Từ chối lịch đặt xe này?")) return; handleBookingAction(b.id, "REJECT"); }} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}><XCircle size={11} /> Từ chối</button>
         </>)}
-        {/* Huỷ phiếu lẻ */}
-        {canCancel && !b.seriesId && (
+        {/* Huỷ phiếu lẻ — dành cho CHỦ ĐƠN đổi ý (không phải người duyệt) */}
+        {isOwner && (b.status === "PENDING" || b.status === "APPROVED") && !b.seriesId && (
           <button onClick={() => cancelOneBooking(b.id, false)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
             <X size={11} /> Huỷ
           </button>
@@ -378,8 +474,27 @@ export default function XePage() {
                 <option value="">Tất cả trạng thái</option>
                 {Object.entries(BOOKING_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
+              <select value={filterVehicleId} onChange={(e) => setFilterVehicleId(e.target.value)}
+                className="rounded-lg px-3 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+                <option value="">Tất cả xe</option>
+                {vehicles.map((v) => <option key={v.id} value={v.id}>{v.licensePlate}</option>)}
+              </select>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Từ</span>
+                <DateInput value={filterFrom} max={filterTo || undefined} onChange={(e) => setFilterFrom(e.target.value)}
+                  className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+                <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>đến</span>
+                <DateInput value={filterTo} min={filterFrom || undefined} onChange={(e) => setFilterTo(e.target.value)}
+                  className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+              </div>
+              {(filterStatus || filterVehicleId || filterFrom || filterTo) && (
+                <button onClick={() => { setFilterStatus(""); setFilterVehicleId(""); setFilterFrom(""); setFilterTo(""); }} className="text-[12px]" style={{ color: "var(--ibs-accent)" }}>Xóa lọc</button>
+              )}
               <button onClick={fetchBookings} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
-              <button onClick={() => setShowNewBooking(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold ml-auto" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+              <button onClick={() => setShowExport(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold border ml-auto" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)", background: "var(--ibs-bg)" }}>
+                <Download size={14} /> Export
+              </button>
+              <button onClick={() => setShowNewBooking(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
                 <Plus size={14} /> Đặt xe
               </button>
             </div>
@@ -394,7 +509,7 @@ export default function XePage() {
             .filter((b) => b.status === "APPROVED" || b.status === "COMPLETED" || b.status === "PENDING")
             .map((b) => ({
               date: b.startDate,
-              label: `${b.seriesId ? "📅 " : ""}${b.vehicle.licensePlate} — ${b.requester.fullName} → ${b.destination}${b.status === "PENDING" ? " (chờ duyệt)" : ""}`,
+              label: `${b.seriesId ? "📅 " : ""}${b.vehicle.licensePlate} — ${b.requester.fullName} → ${b.destination}${b.driverName ? ` · 🚗 LX: ${b.driverName}` : ""}${b.status === "PENDING" ? " (chờ duyệt)" : ""}`,
               color: BOOKING_STATUS[b.status]?.color,
             }))}
           onDayClick={(dateStr, evs) => void alertDialog({ title: dateStr, message: (<div className="space-y-1">{evs.map((e, i) => (<div key={i}>{e.label}</div>))}</div>) })}
@@ -452,8 +567,21 @@ export default function XePage() {
               <option value="">Tất cả xe</option>
               {vehicles.map((v) => <option key={v.id} value={v.id}>{v.licensePlate} — {v.model}</option>)}
             </select>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Từ</span>
+              <DateInput value={fuelFrom} max={fuelTo || undefined} onChange={(e) => setFuelFrom(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+              <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>đến</span>
+              <DateInput value={fuelTo} min={fuelFrom || undefined} onChange={(e) => setFuelTo(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
+            {(fuelVehicleId || fuelFrom || fuelTo) && (
+              <button onClick={() => { setFuelVehicleId(""); setFuelFrom(""); setFuelTo(""); }} className="text-[12px]" style={{ color: "var(--ibs-accent)" }}>Xóa lọc</button>
+            )}
             <button onClick={() => fetchFuelLogs()} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
-            <button onClick={() => setShowNewFuel(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold ml-auto" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+            <button onClick={() => downloadExportExcel(`/api/v1/fuel-logs/export?vehicleId=${fuelVehicleId}&from=${fuelFrom}&to=${fuelTo}`, "Nhiên liệu", "lich-su-nhien-lieu.xlsx").catch((e) => alertDialog(e?.message || "Export lỗi"))}
+              className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold border ml-auto" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)", background: "var(--ibs-bg)" }}>
+              <Download size={14} /> Export
+            </button>
+            <button onClick={() => setShowNewFuel(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
               <Plus size={14} /> Thêm
             </button>
           </div>
@@ -519,8 +647,21 @@ export default function XePage() {
               <option value="">Tất cả xe</option>
               {vehicles.map((v) => <option key={v.id} value={v.id}>{v.licensePlate} — {v.model}</option>)}
             </select>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Từ</span>
+              <DateInput value={maintFrom} max={maintTo || undefined} onChange={(e) => setMaintFrom(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+              <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>đến</span>
+              <DateInput value={maintTo} min={maintFrom || undefined} onChange={(e) => setMaintTo(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
+            {(maintenanceVehicleId || maintFrom || maintTo) && (
+              <button onClick={() => { setMaintenanceVehicleId(""); setMaintFrom(""); setMaintTo(""); }} className="text-[12px]" style={{ color: "var(--ibs-accent)" }}>Xóa lọc</button>
+            )}
             <button onClick={() => fetchMaintenance()} className="p-2 rounded-lg" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
-            <button onClick={() => setShowNewMaintenance(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold ml-auto" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+            <button onClick={() => downloadExportExcel(`/api/v1/maintenance-records/export?vehicleId=${maintenanceVehicleId}&from=${maintFrom}&to=${maintTo}`, "Bảo trì", "lich-su-bao-tri.xlsx").catch((e) => alertDialog(e?.message || "Export lỗi"))}
+              className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold border ml-auto" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)", background: "var(--ibs-bg)" }}>
+              <Download size={14} /> Export
+            </button>
+            <button onClick={() => setShowNewMaintenance(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
               <Plus size={14} /> Thêm
             </button>
           </div>
@@ -574,6 +715,12 @@ export default function XePage() {
           onClose={() => setShowNewBooking(false)}
           onSuccess={() => { setShowNewBooking(false); fetchBookings(); }} />
       )}
+      {assignTarget && (
+        <AssignDriverModal booking={assignTarget}
+          onClose={() => setAssignTarget(null)}
+          onApprove={async (driver) => { const ok = await handleBookingAction(assignTarget.id, "APPROVE", driver); if (ok) setAssignTarget(null); }} />
+      )}
+      {showExport && <ExportVehicleBookingsModal onClose={() => setShowExport(false)} />}
       {showNewVehicle && (
         <NewVehicleModal onClose={() => setShowNewVehicle(false)}
           onSuccess={() => { setShowNewVehicle(false); fetchVehicles(); }} />
@@ -865,6 +1012,114 @@ function CompleteBookingModal({ booking, onClose, onSuccess }: {
   );
 }
 
+function AssignDriverModal({ booking, onClose, onApprove }: {
+  booking: VehicleBooking; onClose: () => void; onApprove: (driver: string) => void | Promise<void>;
+}) {
+  const [driver, setDriver] = useState(booking.driverName || "");
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    if (!driver) return;
+    setSaving(true);
+    try { await onApprove(driver); } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="rounded-2xl w-full max-w-sm mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[16px] font-bold">Chỉ định lái xe</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-4 rounded-lg px-3 py-2" style={{ background: "var(--ibs-bg)", color: "var(--ibs-text-dim)" }}>
+          <div><b style={{ color: "var(--ibs-text)" }}>{booking.vehicle.licensePlate}</b> · {booking.destination}</div>
+          <div>{formatDateTime(booking.startDate)} → {formatDateTime(booking.endDate)}</div>
+          <div>Người đặt: {booking.requester.fullName} ({booking.requester.department.name})</div>
+        </div>
+        <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Lái xe *</label>
+        <select value={driver} onChange={(e) => setDriver(e.target.value)} className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+          <option value="">Chọn lái xe...</option>
+          {VEHICLE_DRIVERS.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <div className="flex gap-2 justify-end mt-5">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button type="button" onClick={submit} disabled={!driver || saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold flex items-center gap-1" style={{ background: "var(--ibs-success)", color: "#fff", opacity: (!driver || saving) ? 0.5 : 1, cursor: (!driver || saving) ? "not-allowed" : "pointer" }}>
+            <Check size={14} /> {saving ? "Đang duyệt..." : "Duyệt"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExportVehicleBookingsModal({ onClose }: { onClose: () => void }) {
+  const [vehicles, setVehicles] = useState<{ id: string; licensePlate: string; model: string }[]>([]);
+  const today = new Date().toISOString().slice(0, 10);
+  const [vehicleId, setVehicleId] = useState("");
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(today);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/v1/vehicles").then((r) => r.json()).then((res) => setVehicles(res.data || []));
+  }, []);
+
+  async function doExport() {
+    setError("");
+    if (from > to) { setError("Từ ngày phải ≤ Đến ngày"); return; }
+    setBusy(true);
+    try {
+      await exportVehicleBookings(vehicleId, from, to);
+      onClose();
+    } catch (e: any) {
+      setError(e?.message || "Có lỗi khi export");
+    } finally { setBusy(false); }
+  }
+
+  const ic = "w-full rounded-lg px-3 py-2 text-[13px] border";
+  const is = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const lc = "text-[12px] font-medium mb-1 block";
+  const ls = { color: "var(--ibs-text-dim)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="rounded-2xl w-full max-w-md mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-5">
+          <div className="text-[16px] font-bold">Export lịch sử đặt xe</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className={lc} style={ls}>Xe</label>
+            <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className={ic} style={is}>
+              <option value="">Tất cả xe</option>
+              {vehicles.map((v) => <option key={v.id} value={v.id}>{v.licensePlate} — {v.model}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lc} style={ls}>Từ ngày *</label>
+              <DateInput value={from} max={to} onChange={(e) => setFrom(e.target.value)} className={ic} style={is} />
+            </div>
+            <div>
+              <label className={lc} style={ls}>Đến ngày *</label>
+              <DateInput value={to} min={from} onChange={(e) => setTo(e.target.value)} className={ic} style={is} />
+            </div>
+          </div>
+          {error && <div className="text-[12px] text-red-500">{error}</div>}
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+            <button type="button" onClick={doExport} disabled={busy} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: busy ? 0.5 : 1 }}>
+              <Download size={14} /> {busy ? "Đang xuất..." : "Tải Excel"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]; onClose: () => void; onSuccess: () => void }) {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -884,7 +1139,7 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
   })();
 
   const [form, setForm] = useState({
-    vehicleId: "", origin: "Trụ sở Công ty", destination: "", purpose: "", passengers: "1",
+    vehicleId: "", origin: "Trụ sở Công ty", destination: "", purpose: "", passengers: "1", priority: "NORMAL",
     startDatePart: todayStr, startTimePart: nowTime,
     endDatePart: todayStr, endTimePart: plusHour,
   });
@@ -909,6 +1164,10 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
     e.preventDefault(); setSaving(true);
     const startDate = `${form.startDatePart}T${form.startTimePart}`;
     const endDate = `${form.endDatePart}T${form.endTimePart}`;
+    // Phải đặt trước tối thiểu 30 phút, không đặt giờ trong quá khứ.
+    if (new Date(startDate).getTime() < Date.now() + 30 * 60_000) {
+      setError("Phải đặt trước ít nhất 30 phút (không đặt giờ trong quá khứ)."); setSaving(false); return;
+    }
     // Sanitize: chỉ giữ thứ 1..6 (KHÔNG cho CN=0)
     const cleanDays = recurrenceDays.filter((d) => d >= 1 && d <= 6);
     if (recurrenceOn) {
@@ -918,7 +1177,7 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         vehicleId: form.vehicleId, origin: form.origin, destination: form.destination,
-        purpose: form.purpose, passengers: parseInt(form.passengers), startDate, endDate,
+        purpose: form.purpose, passengers: parseInt(form.passengers), priority: form.priority, startDate, endDate,
         ...(recurrenceOn ? { recurrence: { daysOfWeek: cleanDays, ...(recurrenceUntil ? { until: recurrenceUntil } : {}) } } : {}),
       }),
     });
@@ -1005,6 +1264,13 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
               <input type="number" min="1" value={form.passengers} onChange={(e) => setForm({ ...form, passengers: e.target.value })}
                 className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
             </div>
+          </div>
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Mức độ ưu tiên</label>
+            <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}
+              className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+              {VEHICLE_PRIORITY.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
           </div>
           {/* Lặp lại — đặt lịch cố định */}
           <div className="rounded-lg p-3 border" style={{ background: "rgba(0,180,216,0.04)", borderColor: "var(--ibs-border)" }}>

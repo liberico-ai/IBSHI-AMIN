@@ -24,7 +24,20 @@ export async function GET(request: NextRequest) {
   const canApprove = await isStationeryApprover(userId);
 
   // Mặc định: HCNS staff chỉ thấy phiếu mình tạo. TP HCNS / BOM thấy tất cả.
-  const where = canApprove ? {} : { createdById: userId };
+  const where: any = canApprove ? {} : { createdById: userId };
+
+  // Filter theo trạng thái + khoảng ngày (createdAt).
+  const { searchParams } = new URL(request.url);
+  const status = searchParams.get("status");
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
+  if (status) where.status = status;
+  if (from || to) {
+    where.createdAt = {
+      ...(from && { gte: new Date(new Date(from).setHours(0, 0, 0, 0)) }),
+      ...(to && { lte: new Date(new Date(to).setHours(23, 59, 59, 999)) }),
+    };
+  }
 
   const data = await prisma.stationeryRequest.findMany({
     where,
