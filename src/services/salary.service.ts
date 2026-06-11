@@ -206,15 +206,25 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const leaveDays = (leavePaidMap[emp.id] || 0) + (holidayRestMap[emp.id] || 0);
     const ot = otMap[emp.id] || { weekday: 0, sunday: 0, holiday: 0 };
 
-    // BÙ CÔNG theo HR (chốt 2026-06-08, refined):
-    //   - NV có KL (ABSENT_UNAPPROVED T2-T7) → bù bằng OT (Lễ → CN → thường)
-    //   - bù cộng vào workDays (NV nhận 1× dailyRate cho ngày bù)
-    //   - OT × hệ số vẫn pay đầy đủ (HR "double count")
-    //   - Logic này khớp output Excel HR (vd Phương Anh 22.92 ngày)
+    // BÙ CÔNG theo HR (chốt 2026-06-11, fix double-count):
+    //   - NV có KL (ABSENT_UNAPPROVED T2-T7, KHÔNG rơi lễ/CN) → bù bằng OT.
+    //   - Bù lấy giờ OT hệ số CAO NHẤT trước (Lễ → CN → thường).
+    //   - Phần OT dùng bù: cộng vào workDays (NV nhận 1× dailyRate) VÀ bị TIÊU HAO
+    //     khỏi OT quy đổi → KHÔNG trả thêm hệ số (tránh tính 2 lần).
+    //   - Chỉ phần OT DÔI ra (sau bù) mới được × hệ số.
     const klHours = (unpaidWeekdayMap[emp.id] || 0) * 8;
     const otTotal = (ot.weekday || 0) + (ot.sunday || 0) + (ot.holiday || 0);
     const buHours = Math.min(klHours, otTotal);
     const workDaysActual = workDaysActualRaw + buHours / 8;
+
+    // Tiêu hao buHours khỏi OT — hệ số cao nhất trước (Lễ → CN → thường).
+    let remainBu = buHours;
+    const otAfter = { weekday: ot.weekday || 0, sunday: ot.sunday || 0, holiday: ot.holiday || 0 };
+    for (const k of ["holiday", "sunday", "weekday"] as const) {
+      const take = Math.min(otAfter[k], remainBu);
+      otAfter[k] -= take;
+      remainBu -= take;
+    }
 
     const input: SalaryInput = {
       totalIncome,
@@ -222,15 +232,14 @@ export async function calculatePayrollForPeriod(periodId: string) {
       standardDays: CC,
       workDaysActual,
       leaveDays,
-      // unpaidWeekdayDays = 0 vì bù đã được tính vào workDaysActual trên
-      // → calc KHÔNG trừ OT pay nữa, OT × hệ số được pay đầy đủ (theo HR Excel)
+      // Bù đã cộng vào workDaysActual + đã tiêu hao OT trong otAfter → unpaidWeekdayDays = 0.
       unpaidWeekdayDays: 0,
       ot: {
-        weekday: ot.weekday,
+        weekday: otAfter.weekday,
         weekdayNight: 0,   // ca đêm chờ máy chấm công
-        sunday: ot.sunday,
+        sunday: otAfter.sunday,
         sundayNight: 0,
-        holiday: ot.holiday,
+        holiday: otAfter.holiday,
         holidayNight: 0,
       },
       dependentsCount: emp.dependents || 0,
@@ -265,10 +274,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
       standardDays: CC,
       workDays: workDaysActual,
       leaveDays: input.leaveDays,
-      // OT giờ thô tách theo loại
-      otWeekday: ot.weekday, otWeekdayNight: 0,
-      otSunday: ot.sunday, otSundayNight: 0,
-      otHoliday: ot.holiday, otHolidayNight: 0,
+      // OT giờ tách theo loại (sau khi đã tiêu hao phần bù công — khớp OT quy đổi)
+      otWeekday: otAfter.weekday, otWeekdayNight: 0,
+      otSunday: otAfter.sunday, otSundayNight: 0,
+      otHoliday: otAfter.holiday, otHolidayNight: 0,
       otHoursTotal: out.otHoursTotal,
       otConvertedHours: out.otConvertedHours,        // giờ; /8 = ngày OT quy đổi
       otFillHours: out.otFillHours,                  // giờ OT dùng bù (1×)
