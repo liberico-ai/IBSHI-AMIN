@@ -30,10 +30,12 @@ export async function GET(request: NextRequest) {
       orderBy: { sortOrder: "asc" },
     });
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Cho phép chọn ngày bất kỳ (?date=YYYY-MM-DD); mặc định hôm nay.
+    const dateParam = searchParams.get("date");
+    const dayStart = dateParam ? new Date(dateParam) : new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
 
     const results = await Promise.all(
       departments.map(async (dept) => {
@@ -43,7 +45,7 @@ export async function GET(request: NextRequest) {
         const present = await prisma.attendanceRecord.count({
           where: {
             employee: { departmentId: dept.id },
-            date: { gte: today, lt: tomorrow },
+            date: { gte: dayStart, lt: dayEnd },
             status: { in: ["PRESENT", "LATE", "HALF_DAY"] },
           },
         });

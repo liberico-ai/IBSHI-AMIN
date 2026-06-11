@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, Fragment, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { DataTable, Column } from "@/components/shared/data-table";
@@ -743,12 +744,99 @@ function AttendanceGridCard({
   );
 }
 
+// ── Card: So sánh đi làm vs số chuẩn theo ngày ───────────────────────────────
+function AttendanceByDayCard() {
+  const vnToday = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const [date, setDate] = useState(vnToday);
+  const [rows, setRows] = useState<AttendanceSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/v1/attendance?summary=true&date=${date}`)
+      .then((r) => r.json()).then((res) => setRows(res.data || []))
+      .finally(() => setLoading(false));
+  }, [date]);
+
+  const tStd = rows.reduce((s, d) => s + d.total, 0);
+  const tPresent = rows.reduce((s, d) => s + d.present, 0);
+  const tAbsent = Math.max(0, tStd - tPresent);
+
+  return (
+    <div className="rounded-xl border overflow-hidden" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+      <div className="px-5 py-4 border-b flex flex-wrap gap-3 justify-between items-center" style={{ borderColor: "var(--ibs-border)" }}>
+        <h3 className="text-sm font-semibold">📊 So sánh đi làm vs số chuẩn theo ngày</h3>
+        <div className="flex items-center gap-2">
+          <span className="text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>Chọn ngày:</span>
+          <DateInput value={date} max={vnToday} onChange={(e) => setDate(e.target.value)}
+            className="px-3 py-1.5 rounded-lg text-[13px] outline-none"
+            style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }} />
+        </div>
+      </div>
+      <div className="p-5">
+        {loading ? (
+          <div className="flex items-center justify-center py-10 text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>
+            <RefreshCw size={16} className="animate-spin mr-2" /> Đang tải...
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="text-[11px] uppercase" style={{ color: "var(--ibs-text-dim)" }}>
+                  <th className="text-left px-3 py-2 font-medium">Phòng ban</th>
+                  <th className="text-center px-3 py-2 font-medium">Số chuẩn</th>
+                  <th className="text-center px-3 py-2 font-medium">Đi làm</th>
+                  <th className="text-center px-3 py-2 font-medium">Vắng</th>
+                  <th className="text-right px-3 py-2 font-medium">Tỷ lệ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((d) => {
+                  const absent = Math.max(0, d.total - d.present);
+                  const color = d.rate >= 100 ? "var(--ibs-success)" : d.rate >= 90 ? "var(--ibs-accent)" : "var(--ibs-warning)";
+                  return (
+                    <tr key={d.departmentId} className="border-t" style={{ borderColor: "rgba(51,65,85,0.3)" }}>
+                      <td className="px-3 py-2 font-medium">{d.departmentName}</td>
+                      <td className="px-3 py-2 text-center" style={{ color: "var(--ibs-text-muted)" }}>{d.total}</td>
+                      <td className="px-3 py-2 text-center font-semibold" style={{ color: "var(--ibs-accent)" }}>{d.present}</td>
+                      <td className="px-3 py-2 text-center font-semibold" style={{ color: absent > 0 ? "var(--ibs-warning)" : "var(--ibs-text-dim)" }}>{absent}</td>
+                      <td className="px-3 py-2 text-right font-semibold" style={{ color }}>{d.rate}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 font-semibold" style={{ borderColor: "var(--ibs-border)" }}>
+                  <td className="px-3 py-2">Tổng</td>
+                  <td className="px-3 py-2 text-center">{tStd}</td>
+                  <td className="px-3 py-2 text-center" style={{ color: "var(--ibs-accent)" }}>{tPresent}</td>
+                  <td className="px-3 py-2 text-center" style={{ color: "var(--ibs-warning)" }}>{tAbsent}</td>
+                  <td className="px-3 py-2 text-right">{tStd > 0 ? Math.round((tPresent / tStd) * 100) : 0}%</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AttendancePage() {
+  return (
+    <Suspense fallback={<div />}>
+      <AttendancePageInner />
+    </Suspense>
+  );
+}
+
+function AttendancePageInner() {
   const { canDo } = usePermission();
+  const searchParams = useSearchParams();
+  const activeTab = (searchParams.get("tab") === "grid" ? "grid" : "attendance") as Tab;
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
-  const [activeTab, setActiveTab] = useState<Tab>("attendance");
   const [summary, setSummary] = useState<AttendanceSummary[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [otRequests, setOTRequests] = useState<OTRequest[]>([]);
@@ -946,13 +1034,6 @@ export default function AttendancePage() {
     },
   ];
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "attendance", label: "Tổng hợp hôm nay" },
-    { key: "grid", label: `Bảng công T${month}/${year}` },
-    { key: "leave", label: `Đơn nghỉ phép${pendingLeaveCount ? ` (${pendingLeaveCount})` : ""}` },
-    { key: "ot", label: `Đề xuất OT${pendingOTCount ? ` (${pendingOTCount})` : ""}` },
-  ];
-
   return (
     <div>
       <PageTitle title="M3 - Chấm công & Nghỉ phép" description="Theo dõi chấm công, đơn nghỉ phép và tăng ca" />
@@ -987,22 +1068,9 @@ export default function AttendancePage() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
-        {tabs.map((t) => {
-          const isActive = activeTab === t.key;
-          return (
-            <button key={t.key} onClick={() => setActiveTab(t.key)}
-              className="flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors"
-              style={{ borderBottomColor: isActive ? "var(--ibs-accent)" : "transparent", color: isActive ? "var(--ibs-accent)" : "var(--ibs-text-muted)", marginBottom: "-1px" }}>
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
-
       {/* ── Tab: Tổng hợp ── */}
       {activeTab === "attendance" && (
+        <div className="space-y-5">
         <div className="rounded-xl border overflow-hidden"
           style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
           <div className="px-5 py-4 border-b flex justify-between items-center"
@@ -1038,6 +1106,8 @@ export default function AttendancePage() {
               </div>
             )}
           </div>
+        </div>
+        <AttendanceByDayCard />
         </div>
       )}
 
@@ -1083,7 +1153,7 @@ export default function AttendancePage() {
           style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
           <div className="px-5 py-4 border-b flex justify-between items-center"
             style={{ borderColor: "var(--ibs-border)" }}>
-            <h3 className="text-sm font-semibold">📋 Đơn nghỉ phép</h3>
+            <h3 className="text-sm font-semibold">📋 Xin Nghỉ</h3>
             <button onClick={() => setShowLeaveForm(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold text-white"
               style={{ background: "var(--ibs-accent)" }}>

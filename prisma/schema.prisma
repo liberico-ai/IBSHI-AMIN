@@ -293,6 +293,7 @@ model Employee {
   taxCode             String?
   bankAccount         String?
   bankName            String?
+  bankAccounts        Json   @default("[]") // Tối đa 5 TK lương: [{ bank, accountNumber }]
   insuranceNumber     String?
   emergencyContact    String?
   emergencyPhone      String?
@@ -337,6 +338,7 @@ model Employee {
   onboardingChecklist OnboardingChecklist?
   probationEvaluations ProbationEvaluation[]
   dependentsList      Dependent[]
+  children            Child[]
 
   @@index([departmentId])
   @@index([code])
@@ -414,12 +416,49 @@ model Dependent {
   relationship String    // "Con", "Bố", "Mẹ", "Vợ", "Chồng", "Khác"
   dateOfBirth  DateTime?
   taxCode      String?   // MST người phụ thuộc
+  documentUrls String[]  @default([]) // Giấy tờ hợp lệ (giấy khai sinh, CCCD, xác nhận...)
+  declaration  String?   // Khai báo lý do (bắt buộc khi NPT trên 18 tuổi)
+  registeredAt DateTime? // Ngày đăng ký NPT
+  stoppedAt    DateTime? // Ngày dừng NPT (null = đang hiệu lực)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
+}
+
+// Khai báo CON CÁI của nhân sự — theo dõi đầy đủ (kể cả khi NPT đăng ký nơi khác).
+model Child {
+  id           String    @id @default(uuid())
+  employeeId   String
+  fullName     String
+  dateOfBirth  DateTime?
+  taxCode      String?   // MST (nếu có)
+  idNumber     String?   // CCCD (nếu có)
+  documentUrls String[]  @default([]) // Giấy tờ chứng minh: sổ hộ khẩu / giấy khai sinh
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+}
+
+// Snapshot sĩ số phòng ban / tổ sản xuất theo tháng (chốt từ tháng này trở đi).
+model OrgSnapshot {
+  id          String   @id @default(uuid())
+  period      String   // "YYYY-MM"
+  scope       String   // "DEPT" | "TEAM"
+  refId       String   // departmentId hoặc productionTeamId
+  refName     String
+  refCode     String?
+  activeCount Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([period, scope, refId])
+  @@index([period])
 }
 
 model Certificate {
@@ -491,6 +530,9 @@ model LeaveRequest {
   approvedBy     String?
   approvedAt     DateTime?
   rejectedReason String?
+  proofUrls        String[]  @default([]) // Giấy tờ chứng minh (ốm/thai sản/đám ma/đám cưới)
+  proofDeadline    DateTime? // Hạn bổ sung = ngày nghỉ cuối + 7 ngày
+  proofSubmittedAt DateTime? // Đã nộp giấy tờ lúc nào
   createdAt      DateTime       @default(now())
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
@@ -501,13 +543,17 @@ model LeaveRequest {
 
 model OTRequest {
   id         String         @id @default(uuid())
-  employeeId String
+  employeeId String // người đề xuất (Tổ trưởng/Trưởng phòng)
   date       DateTime
   startTime  String // "17:30"
   endTime    String // "20:00"
   hours      Float
   reason     String
   otRate     Float // 1.5, 2.0, 3.0
+  teamId      String?  // Tổ được đề xuất tăng ca
+  teamName    String?  // Tên tổ (snapshot)
+  memberIds   String[] @default([]) // NV trong đơn OT nhóm
+  memberNames String[] @default([]) // Tên NV (snapshot) để hiển thị
   status     ApprovalStatus @default(DRAFT)
   approvedBy String?
   createdAt  DateTime       @default(now())
@@ -580,9 +626,15 @@ model RecruitmentRequest {
   id           String         @id @default(uuid())
   departmentId String
   positionName String
+  jobDescription    String    @default("") // Mô tả vị trí công việc
   quantity     Int            @default(1)
   reason       String
-  requirements String         @default("")
+  requirements String         @default("") // Yêu cầu ứng viên (chung)
+  degreeRequirement String    @default("") // Yêu cầu về bằng cấp
+  salaryMin    Int?           // Mức lương từ
+  salaryMax    Int?           // đến
+  recruitFrom  DateTime?      // Thời gian tuyển từ ngày
+  recruitTo    DateTime?      // đến ngày
   status       ApprovalStatus @default(PENDING)
   requestedBy  String // FK → Employee.id
   approvedBy   String? // FK → User.id
@@ -607,7 +659,11 @@ model Candidate {
   referredBy      String?
   status          CandidateStatus @default(NEW)
   interviewDate   DateTime?
+  interviewTime     String?  // Giờ phỏng vấn (vd "09:00")
+  interviewLocation String?  // Địa điểm phỏng vấn
+  interviewContact  String?  // Người phỏng vấn / liên hệ
   interviewNote   String?
+  interviewInviteSentAt DateTime? // Đã gửi thư mời PV lúc nào
   interviewScore  Int? // 1-10
   createdAt       DateTime        @default(now())
 

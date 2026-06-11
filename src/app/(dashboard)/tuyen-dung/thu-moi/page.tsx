@@ -296,14 +296,14 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
   const [kpiAllowance, setKpiAllowance] = useState("");
   const [positionAllowance, setPositionAllowance] = useState("");
   const [probDays, setProbDays] = useState("60");
+  const [probSalary, setProbSalary] = useState(""); // lương thử việc — HCNS tự nhập
   const [startDate, setStartDate] = useState("");
   const [benefits, setBenefits] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Lương chính thức = tổng các thành phần; lương thử việc = 85% (làm tròn nghìn)
+  // Lương chính thức = tổng các thành phần. Lương thử việc do HCNS tự nhập (không tự tính 85%).
   const officialSalary = (Number(baseSalary) || 0) + (Number(farAllowance) || 0) + (Number(kpiAllowance) || 0) + (Number(positionAllowance) || 0);
-  const probSalary = Math.round((officialSalary * 0.85) / 1000) * 1000;
 
   const probationEnd = useMemo(() => {
     if (!startDate || !probDays) return null;
@@ -315,6 +315,10 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
   async function handleSubmit(submit: boolean) {
     if (officialSalary <= 0 || !startDate || !position) {
       setError("Cần điền vị trí, ít nhất 1 khoản lương, và ngày bắt đầu");
+      return;
+    }
+    if (!(Number(probSalary) > 0)) {
+      setError("Vui lòng nhập lương thử việc");
       return;
     }
     if (!candidate.email) {
@@ -332,7 +336,7 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
         jobRole,
         departmentName: department,
         officialSalary: officialSalary,
-        probationarySalary: probSalary,
+        probationarySalary: Number(probSalary) || 0,
         salaryBreakdown: {
           baseSalary: Number(baseSalary) || 0,
           farAllowance: Number(farAllowance) || 0,
@@ -357,7 +361,7 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
     <ModalShell title={`Soạn thư mời nhận việc — ${candidate.fullName}`} onClose={onClose} size="lg">
       <div className="text-[12px] mb-3 p-3 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
         ⓘ UV: <strong>{candidate.fullName}</strong> · {candidate.phone}{candidate.email ? ` · ${candidate.email}` : " · ⚠ chưa có email"}<br/>
-        Số thư mời sẽ được tự động sinh khi lưu (vd: 703/2026/TM-IBSHI). Lương thử việc gợi ý = <strong>85% lương chính thức</strong>.
+        Số thư mời sẽ được tự động sinh khi lưu (vd: 703/2026/TM-IBSHI). <strong>Lương thử việc do HCNS tự nhập</strong> (có nút ≈85% điền nhanh nếu cần).
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
@@ -414,8 +418,23 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
           <div className="text-[18px] font-bold mt-0.5" style={{ color: "var(--ibs-accent)" }}>{formatVND(officialSalary)} đ</div>
         </div>
         <div className="p-3 rounded-lg border" style={{ background: "rgba(245,158,11,0.06)", borderColor: "rgba(245,158,11,0.3)" }}>
-          <div className="text-[11px] uppercase font-semibold" style={{ color: "var(--ibs-text-dim)" }}>Lương thử việc (85%)</div>
-          <div className="text-[18px] font-bold mt-0.5" style={{ color: "#f59e0b" }}>{formatVND(probSalary)} đ</div>
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="text-[11px] uppercase font-semibold" style={{ color: "var(--ibs-text-dim)" }}>Lương thử việc *</span>
+            {officialSalary > 0 && (
+              <button type="button" onClick={() => setProbSalary(String(Math.round((officialSalary * 0.85) / 1000) * 1000))}
+                className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ color: "#f59e0b", background: "rgba(245,158,11,0.18)" }}
+                title="Điền nhanh 85% lương chính thức">
+                ≈85%
+              </button>
+            )}
+          </div>
+          <div className="relative">
+            <input type="text" inputMode="numeric" value={probSalary ? formatVND(Number(probSalary)) : ""}
+              onChange={(e) => setProbSalary(e.target.value.replace(/[^\d]/g, ""))} placeholder="Nhập lương thử việc"
+              className="w-full rounded-lg px-2 py-1.5 pr-6 text-[16px] font-bold border"
+              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "#f59e0b" }} />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold pointer-events-none" style={{ color: "var(--ibs-text-dim)" }}>đ</span>
+          </div>
         </div>
       </div>
 

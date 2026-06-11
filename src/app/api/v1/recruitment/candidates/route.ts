@@ -49,6 +49,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
   }
 
+  // Chặn thêm ứng viên nếu đề xuất đã HẾT HẠN tuyển dụng (quá ngày "tuyển đến").
+  const req = await prisma.recruitmentRequest.findUnique({
+    where: { id: parsed.data.recruitmentId },
+    select: { recruitTo: true, status: true },
+  });
+  if (!req) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy đề xuất tuyển dụng" } }, { status: 404 });
+  if (req.recruitTo) {
+    const end = new Date(req.recruitTo);
+    end.setHours(23, 59, 59, 999);
+    if (end.getTime() < Date.now()) {
+      return NextResponse.json({ error: { code: "EXPIRED", message: "Đề xuất đã hết thời gian tuyển dụng — không thể thêm ứng viên" } }, { status: 400 });
+    }
+  }
+
   const candidate = await prisma.candidate.create({
     data: { ...parsed.data, status: "NEW" },
     include: { recruitment: true },

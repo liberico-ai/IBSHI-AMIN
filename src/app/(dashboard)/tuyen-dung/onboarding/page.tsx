@@ -513,7 +513,7 @@ function ProbationContractModal({ rows, onClose, onCreated }: { rows: ProbationR
           <button onClick={onClose}><X size={18} /></button>
         </div>
         <div className="text-[12px] mb-3 p-2.5 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
-          ⓘ Chọn NV thử việc → kiểm tra thông tin (lương 85% tự fill, thời hạn 2 tháng) → <strong>Phát hành</strong>. HĐ sẽ chờ <strong>TP HCNS duyệt</strong> trước khi onboard.
+          ⓘ Chọn NV thử việc → kiểm tra thông tin (lương thử việc lấy từ thư mời, có thể sửa) → <strong>Phát hành</strong>. HĐ sẽ chờ <strong>TP HCNS duyệt</strong> trước khi onboard.
         </div>
 
         {!empId ? (
@@ -540,7 +540,7 @@ function ProbationContractModal({ rows, onClose, onCreated }: { rows: ProbationR
               <div><L>Loại HĐ</L><input value="Thử việc" readOnly className={fcls} style={{ ...fst, opacity: 0.75 }} /></div>
               <div><L>Ngày bắt đầu *</L><DateInput value={startDate} onChange={(e) => setStartDate(e.target.value)} className={fcls} style={fst} /></div>
               <div><L>Ngày kết thúc (2 tháng) *</L><DateInput value={endDate} onChange={(e) => setEndDate(e.target.value)} className={fcls} style={fst} /></div>
-              <div><L>Lương thử việc (85%)</L><input type="text" inputMode="numeric" value={baseSalary} onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setBaseSalary(d ? Number(d).toLocaleString("vi-VN") : ""); }} className={fcls} style={fst} /></div>
+              <div><L>Lương thử việc</L><input type="text" inputMode="numeric" value={baseSalary} onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setBaseSalary(d ? Number(d).toLocaleString("vi-VN") : ""); }} className={fcls} style={fst} /></div>
               <div><L>Chức danh</L><input value={position} onChange={(e) => setPosition(e.target.value)} className={fcls} style={fst} /></div>
             </div>
             <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>NỘI DUNG HĐ THỬ VIỆC (sửa trực tiếp như Word)</div>

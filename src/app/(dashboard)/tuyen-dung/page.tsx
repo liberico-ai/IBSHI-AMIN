@@ -4,18 +4,27 @@ import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
-import { Plus, RefreshCw, X, Check, ChevronRight, Users, ClipboardList } from "lucide-react";
+import { Plus, RefreshCw, X, Check, ChevronRight, Users, ClipboardList, FileText, Download } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { DateInput } from "@/components/shared/date-input";
+import { FileUpload } from "@/components/shared/file-upload";
+import { BUCKETS } from "@/lib/minio-constants";
+import { viewUrl } from "@/lib/use-presigned-url";
 
 type Department = { id: string; code: string; name: string };
 
 type RecruitmentRequest = {
   id: string;
   positionName: string;
+  jobDescription?: string;
   quantity: number;
   reason: string;
   requirements: string;
+  degreeRequirement?: string;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  recruitFrom?: string | null;
+  recruitTo?: string | null;
   status: string;
   createdAt: string;
   approvedAt?: string;
@@ -33,12 +42,16 @@ type Candidate = {
   resumeUrl?: string;
   status: string;
   interviewDate?: string;
+  interviewTime?: string;
+  interviewLocation?: string;
+  interviewContact?: string;
+  interviewInviteSentAt?: string;
   interviewNote?: string;
   interviewScore?: number;
   createdAt: string;
   recruitment: {
     positionName: string;
-    department: { name: string };
+    department: { id: string; name: string };
   };
 };
 
@@ -59,6 +72,29 @@ const CANDIDATE_STATUS_COLORS: Record<string, string> = {
   REJECTED: "#ef4444", WITHDRAWN: "#6b7280",
 };
 
+// Các mốc giờ phỏng vấn (07:00–18:00, mỗi 30 phút).
+const INTERVIEW_TIME_OPTIONS: string[] = (() => {
+  const arr: string[] = [];
+  for (let h = 7; h <= 18; h++) {
+    for (const m of [0, 30]) arr.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+  }
+  return arr;
+})();
+
+// Đề xuất hết hạn tuyển: quá ngày "tuyển đến" (và không phải đã từ chối).
+function isReqExpired(r: { recruitTo?: string | null; status: string }): boolean {
+  if (!r.recruitTo || r.status === "REJECTED") return false;
+  const end = new Date(r.recruitTo);
+  end.setHours(23, 59, 59, 999);
+  return end.getTime() < Date.now();
+}
+const fmtSalary = (n?: number | null) => (n ? n.toLocaleString("vi-VN") : "");
+function salaryRange(min?: number | null, max?: number | null): string {
+  if (!min && !max) return "—";
+  if (min && max) return `${fmtSalary(min)} – ${fmtSalary(max)}`;
+  return min ? `Từ ${fmtSalary(min)}` : `Đến ${fmtSalary(max)}`;
+}
+
 type Tab = "requests" | "pipeline";
 
 export default function TuyenDungPage() {
@@ -68,6 +104,9 @@ export default function TuyenDungPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loadingReqs, setLoadingReqs] = useState(true);
   const [loadingCands, setLoadingCands] = useState(true);
+  const [candStatusFilter, setCandStatusFilter] = useState("");
+  const [candFrom, setCandFrom] = useState("");
+  const [candTo, setCandTo] = useState("");
   const { canDo, hasRole } = usePermission();
 
   // Modals
@@ -141,18 +180,78 @@ export default function TuyenDungPage() {
     { key: "pipeline", label: "Pipeline ứng viên", icon: <Users size={15} />, count: candidates.filter(c => !["ACCEPTED","REJECTED","WITHDRAWN"].includes(c.status)).length },
   ];
 
+  // Lọc ứng viên theo trạng thái + ngày nộp.
+  const filteredCandidates = useMemo(() => candidates.filter((c) => {
+    if (candStatusFilter && c.status !== candStatusFilter) return false;
+    if (candFrom && new Date(c.createdAt) < new Date(candFrom)) return false;
+    if (candTo) { const end = new Date(candTo); end.setHours(23, 59, 59, 999); if (new Date(c.createdAt) > end) return false; }
+    return true;
+  }), [candidates, candStatusFilter, candFrom, candTo]);
+
+  async function handleExportCandidates() {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Ứng viên");
+    ws.columns = [
+      { header: "Họ tên", key: "fullName", width: 24 },
+      { header: "SĐT", key: "phone", width: 14 },
+      { header: "Email", key: "email", width: 26 },
+      { header: "Vị trí ứng tuyển", key: "position", width: 22 },
+      { header: "Phòng ban", key: "dept", width: 18 },
+      { header: "Trạng thái", key: "status", width: 14 },
+      { header: "Ngày nộp", key: "createdAt", width: 14 },
+      { header: "Ngày PV", key: "interviewDate", width: 14 },
+      { header: "Điểm PV", key: "score", width: 10 },
+      { header: "Người giới thiệu", key: "referredBy", width: 18 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    filteredCandidates.forEach((c) => ws.addRow({
+      fullName: c.fullName, phone: c.phone, email: c.email || "",
+      position: c.recruitment?.positionName || "", dept: c.recruitment?.department?.name || "",
+      status: CANDIDATE_STATUS_LABELS[c.status] || c.status,
+      createdAt: c.createdAt ? formatDate(c.createdAt) : "",
+      interviewDate: c.interviewDate ? formatDate(c.interviewDate) : "",
+      score: c.interviewScore ?? "", referredBy: c.referredBy || "",
+    }));
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ung-vien_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const requestColumns: Column<RecruitmentRequest>[] = [
-    { key: "positionName", header: "Vị trí tuyển", render: (r) => <span className="font-semibold">{r.positionName}</span> },
+    { key: "positionName", header: "Vị trí tuyển", render: (r) => (
+      <div className="min-w-0">
+        <div className="font-semibold">{r.positionName}</div>
+        {r.jobDescription && <div className="text-[11px] truncate max-w-[240px]" title={r.jobDescription} style={{ color: "var(--ibs-text-dim)" }}>{r.jobDescription}</div>}
+        {r.degreeRequirement && <div className="text-[11px] truncate max-w-[240px]" title={r.degreeRequirement} style={{ color: "var(--ibs-text-dim)" }}>🎓 {r.degreeRequirement}</div>}
+      </div>
+    )},
     { key: "department", header: "Phòng ban", render: (r) => r.department.name },
     { key: "quantity", header: "SL", render: (r) => r.quantity },
-    { key: "status", header: "Trạng thái", render: (r) => (
-      <span className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{
-        background: r.status === "APPROVED" ? "rgba(34,197,94,0.12)" : r.status === "REJECTED" ? "rgba(239,68,68,0.12)" : "rgba(0,180,216,0.12)",
-        color: r.status === "APPROVED" ? "var(--ibs-success)" : r.status === "REJECTED" ? "var(--ibs-danger)" : "var(--ibs-accent)",
-      }}>
-        {REQUEST_STATUS_LABELS[r.status] || r.status}
-      </span>
+    { key: "salary", header: "Mức lương", render: (r) => <span className="text-[12px]">{salaryRange(r.salaryMin, r.salaryMax)}</span> },
+    { key: "period", header: "Thời gian tuyển", render: (r) => (
+      (r.recruitFrom || r.recruitTo)
+        ? <span className="text-[12px]">{r.recruitFrom ? formatDate(r.recruitFrom) : "…"} – {r.recruitTo ? formatDate(r.recruitTo) : "…"}</span>
+        : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>
     )},
+    { key: "status", header: "Trạng thái", render: (r) => {
+      if (isReqExpired(r)) return (
+        <span className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{ background: "rgba(148,163,184,0.18)", color: "var(--ibs-text-muted)" }}>Hết hạn</span>
+      );
+      return (
+        <span className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{
+          background: r.status === "APPROVED" ? "rgba(34,197,94,0.12)" : r.status === "REJECTED" ? "rgba(239,68,68,0.12)" : "rgba(0,180,216,0.12)",
+          color: r.status === "APPROVED" ? "var(--ibs-success)" : r.status === "REJECTED" ? "var(--ibs-danger)" : "var(--ibs-accent)",
+        }}>
+          {REQUEST_STATUS_LABELS[r.status] || r.status}
+        </span>
+      );
+    }},
     { key: "candidates", header: "Ứng viên", render: (r) => (
       <span className="text-[12px]">{r.candidates.length} UV</span>
     )},
@@ -169,10 +268,13 @@ export default function TuyenDungPage() {
             </button>
           </>
         )}
-        {r.status === "APPROVED" && canDo("recruitment", "create") && (
+        {r.status === "APPROVED" && !isReqExpired(r) && canDo("recruitment", "create") && (
           <button onClick={() => { setShowNewCandidate(true); }} className="text-[11px] px-2 py-1 rounded-lg" style={{ background: "rgba(0,180,216,0.1)", color: "var(--ibs-accent)" }}>
             + Ứng viên
           </button>
+        )}
+        {r.status === "APPROVED" && isReqExpired(r) && (
+          <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: "rgba(148,163,184,0.15)", color: "var(--ibs-text-muted)" }} title="Đã hết thời gian tuyển dụng">Hết hạn tuyển</span>
         )}
       </div>
     )},
@@ -192,6 +294,9 @@ export default function TuyenDungPage() {
       </span>
     )},
     { key: "referredBy", header: "Người giới thiệu", render: (c) => c.referredBy || "—" },
+    { key: "cv", header: "CV", render: (c) => c.resumeUrl
+      ? <a href={viewUrl(c.resumeUrl)} target="_blank" rel="noreferrer" download onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md font-semibold" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}><FileText size={11} /> Tải</a>
+      : <span style={{ color: "var(--ibs-text-dim)" }}>—</span> },
     { key: "interviewDate", header: "Ngày PV", render: (c) => c.interviewDate ? formatDate(c.interviewDate) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span> },
     { key: "interviewScore", header: "Điểm PV", render: (c) => c.interviewScore ? <span style={{ color: "var(--ibs-accent)", fontWeight: 600 }}>{c.interviewScore}/10</span> : <span style={{ color: "var(--ibs-text-dim)" }}>—</span> },
     { key: "createdAt", header: "Ngày nộp", render: (c) => formatDate(c.createdAt) },
@@ -280,7 +385,28 @@ export default function TuyenDungPage() {
             })}
           </div>
 
-          <DataTable columns={candidateColumns} data={candidates.filter(c => !["ACCEPTED","REJECTED","WITHDRAWN"].includes(c.status))} loading={loadingCands} emptyText="Chưa có ứng viên" onRowClick={(c) => setShowCandidateDetail({ candidate: c })} />
+          {/* Filter ứng viên: trạng thái + ngày nộp + export */}
+          <div className="flex flex-wrap items-center gap-3 px-5 pb-3">
+            <select value={candStatusFilter} onChange={(e) => setCandStatusFilter(e.target.value)} className="px-3 py-2 rounded-lg text-[13px] outline-none" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }}>
+              <option value="">Tất cả trạng thái</option>
+              {Object.entries(CANDIDATE_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <div className="flex items-center gap-2">
+              <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Ngày nộp:</span>
+              <DateInput value={candFrom} onChange={(e) => setCandFrom(e.target.value)} className="px-3 py-2 rounded-lg text-[13px] outline-none" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }} />
+              <span style={{ color: "var(--ibs-text-dim)" }}>–</span>
+              <DateInput value={candTo} min={candFrom} onChange={(e) => setCandTo(e.target.value)} className="px-3 py-2 rounded-lg text-[13px] outline-none" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
+            {(candStatusFilter || candFrom || candTo) && (
+              <button onClick={() => { setCandStatusFilter(""); setCandFrom(""); setCandTo(""); }} className="text-[12px] underline" style={{ color: "var(--ibs-text-muted)" }}>Xóa lọc</button>
+            )}
+            <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{filteredCandidates.length} ứng viên</span>
+            <button onClick={handleExportCandidates} className="ml-auto flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-medium border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
+              <Download size={14} /> Export Excel
+            </button>
+          </div>
+
+          <DataTable columns={candidateColumns} data={filteredCandidates} loading={loadingCands} emptyText="Không có ứng viên khớp bộ lọc" onRowClick={(c) => setShowCandidateDetail({ candidate: c })} />
         </div>
       )}
 
@@ -311,33 +437,43 @@ export default function TuyenDungPage() {
           onClose={() => setShowCandidateDetail(null)}
           onUpdateStatus={handleUpdateCandidateStatus}
           onSaveInterview={async (id, data) => {
-            const payload: Record<string, unknown> = { ...data };
             const cs = showCandidateDetail.candidate.status;
-            // SCREENING + có ngày PV → INTERVIEW (hẹn lịch PV)
+            // SCREENING + có ngày PV → soạn & GỬI THƯ MỜI PHỎNG VẤN (email) + chuyển sang Hẹn PV.
             if (data.interviewDate && cs === "SCREENING") {
-              payload.status = "INTERVIEW";
+              const res = await fetch(`/api/v1/recruitment/candidates/${id}/send-interview-invite`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  interviewDate: data.interviewDate,
+                  interviewTime: data.interviewTime,
+                  interviewLocation: data.interviewLocation,
+                  interviewContact: data.interviewContact,
+                  interviewNote: data.interviewNote,
+                }),
+              });
+              if (!res.ok) {
+                const j = await res.json().catch(() => null);
+                alert(apiError(res.status, j?.error) || "Gửi thư mời phỏng vấn thất bại");
+                return;
+              }
+              fetchCandidates();
+              setShowCandidateDetail(null);
+              return;
             }
-            // INTERVIEW → INTERVIEWED (đánh dấu Đã PV)
-            if (cs === "INTERVIEW") {
-              payload.status = "INTERVIEWED";
-            }
+            // Các trường hợp khác (vd INTERVIEW → INTERVIEWED): cập nhật thường.
+            const payload: Record<string, unknown> = { ...data };
+            if (cs === "INTERVIEW") payload.status = "INTERVIEWED";
             await fetch(`/api/v1/recruitment/candidates/${id}`, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload),
             });
             fetchCandidates();
-            // Sau khi hẹn lịch PV (SCREENING → INTERVIEW) → ĐÓNG modal.
-            // User bấm vào tên ứng viên (giờ ở trạng thái Hẹn PV) thì mới mở modal đánh giá PV.
-            if (data.interviewDate && cs === "SCREENING") {
-              setShowCandidateDetail(null);
-            } else {
-              setShowCandidateDetail((prev) =>
-                prev && prev.candidate.id === id
-                  ? { ...prev, candidate: { ...prev.candidate, ...payload } as Candidate }
-                  : prev
-              );
-            }
+            setShowCandidateDetail((prev) =>
+              prev && prev.candidate.id === id
+                ? { ...prev, candidate: { ...prev.candidate, ...payload } as Candidate }
+                : prev
+            );
           }}
         />
       )}
@@ -400,7 +536,7 @@ function NewRequestModal({ departments, onClose, onSuccess }: {
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [form, setForm] = useState({ departmentId: "", positionName: "", quantity: 1, reason: "", requirements: "" });
+  const [form, setForm] = useState({ departmentId: "", positionName: "", jobDescription: "", quantity: 1, reason: "", requirements: "", degreeRequirement: "", salaryMin: "", salaryMax: "", recruitFrom: "", recruitTo: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -410,7 +546,14 @@ function NewRequestModal({ departments, onClose, onSuccess }: {
     const res = await fetch("/api/v1/recruitment/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, quantity: Number(form.quantity) }),
+      body: JSON.stringify({
+        ...form,
+        quantity: Number(form.quantity),
+        salaryMin: form.salaryMin ? Number(form.salaryMin) : null,
+        salaryMax: form.salaryMax ? Number(form.salaryMax) : null,
+        recruitFrom: form.recruitFrom || null,
+        recruitTo: form.recruitTo || null,
+      }),
     });
     setSaving(false);
     if (res.ok) { onSuccess(); } else {
@@ -421,7 +564,7 @@ function NewRequestModal({ departments, onClose, onSuccess }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="rounded-2xl w-full max-w-lg mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+      <div className="rounded-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-5">
           <div className="text-[16px] font-bold">Tạo đề xuất tuyển dụng</div>
           <button onClick={onClose}><X size={18} /></button>
@@ -442,9 +585,37 @@ function NewRequestModal({ departments, onClose, onSuccess }: {
               placeholder="VD: Công nhân hàn MIG" />
           </div>
           <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Mô tả vị trí công việc</label>
+            <textarea rows={2} value={form.jobDescription} onChange={(e) => setForm({ ...form, jobDescription: e.target.value })}
+              className="w-full rounded-lg px-3 py-2 text-[13px] border resize-none" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
+              placeholder="Mô tả công việc, nhiệm vụ chính của vị trí..." />
+          </div>
+          <div>
             <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Số lượng *</label>
             <input type="number" required min={1} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })}
               className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Mức lương (VNĐ/tháng)</label>
+            <div className="flex items-center gap-2">
+              <input type="text" inputMode="numeric" value={form.salaryMin ? Number(form.salaryMin).toLocaleString("vi-VN") : ""}
+                onChange={(e) => setForm({ ...form, salaryMin: e.target.value.replace(/\D/g, "") })} placeholder="Từ"
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+              <span style={{ color: "var(--ibs-text-dim)" }}>–</span>
+              <input type="text" inputMode="numeric" value={form.salaryMax ? Number(form.salaryMax).toLocaleString("vi-VN") : ""}
+                onChange={(e) => setForm({ ...form, salaryMax: e.target.value.replace(/\D/g, "") })} placeholder="Đến"
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
+          </div>
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Thời gian tuyển</label>
+            <div className="flex items-center gap-2">
+              <DateInput value={form.recruitFrom} onChange={(e) => setForm({ ...form, recruitFrom: e.target.value })}
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+              <span style={{ color: "var(--ibs-text-dim)" }}>–</span>
+              <DateInput value={form.recruitTo} onChange={(e) => setForm({ ...form, recruitTo: e.target.value })}
+                className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+            </div>
           </div>
           <div>
             <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Lý do tuyển *</label>
@@ -456,7 +627,13 @@ function NewRequestModal({ departments, onClose, onSuccess }: {
             <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Yêu cầu ứng viên</label>
             <textarea rows={2} value={form.requirements} onChange={(e) => setForm({ ...form, requirements: e.target.value })}
               className="w-full rounded-lg px-3 py-2 text-[13px] border resize-none" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
-              placeholder="Kinh nghiệm, kỹ năng, bằng cấp..." />
+              placeholder="Kinh nghiệm, kỹ năng..." />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Yêu cầu về bằng cấp</label>
+            <textarea rows={2} value={form.degreeRequirement} onChange={(e) => setForm({ ...form, degreeRequirement: e.target.value })}
+              className="w-full rounded-lg px-3 py-2 text-[13px] border resize-none" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
+              placeholder="VD: Tốt nghiệp CĐ/ĐH chuyên ngành cơ khí; chứng chỉ hàn..." />
           </div>
           {error && <div className="text-[12px] text-red-500">{error}</div>}
           <div className="flex gap-2 justify-end mt-2">
@@ -540,6 +717,17 @@ function NewCandidateModal({ requests, onClose, onSuccess }: {
             <input value={form.referredBy} onChange={(e) => setForm({ ...form, referredBy: e.target.value })}
               className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
           </div>
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>File CV ứng viên</label>
+            {form.resumeUrl ? (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-[12px]" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}>
+                <a href={viewUrl(form.resumeUrl)} target="_blank" rel="noreferrer" className="flex items-center gap-1 truncate" style={{ color: "var(--ibs-accent)" }}><FileText size={12} /> Đã tải CV — bấm để xem</a>
+                <button type="button" onClick={() => setForm((f) => ({ ...f, resumeUrl: "" }))} style={{ color: "var(--ibs-danger)" }}><X size={13} /></button>
+              </div>
+            ) : (
+              <FileUpload bucket={BUCKETS.HR_DOCUMENTS} folder="cv" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" label="Tải CV lên (PDF / DOC / ảnh)" onUploaded={(r) => setForm((f) => ({ ...f, resumeUrl: r.url }))} onError={(msg) => setError(msg)} />
+            )}
+          </div>
           {error && <div className="text-[12px] text-red-500">{error}</div>}
           <div className="flex gap-2 justify-end mt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
@@ -584,7 +772,22 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
 }) {
   const [interviewDate, setInterviewDate] = useState(candidate.interviewDate ? candidate.interviewDate.slice(0, 10) : "");
   const [interviewNote, setInterviewNote] = useState(candidate.interviewNote || "");
+  const [interviewTime, setInterviewTime] = useState(candidate.interviewTime || "");
+  const [interviewLocation, setInterviewLocation] = useState(candidate.interviewLocation || "");
+  const [interviewContact, setInterviewContact] = useState(candidate.interviewContact || "");
+  const [interviewers, setInterviewers] = useState<{ id: string; fullName: string; code?: string; jobRole?: string | null }[]>([]);
   const [interviewScore, setInterviewScore] = useState(candidate.interviewScore?.toString() || "");
+
+  // Người phỏng vấn: chỉ NV (đang làm) thuộc phòng ban của đề xuất tuyển dụng.
+  useEffect(() => {
+    if (candidate.status !== "SCREENING") return;
+    const deptId = candidate.recruitment.department?.id;
+    if (!deptId) return;
+    fetch(`/api/v1/employees?departmentId=${deptId}&limit=500`)
+      .then((r) => r.json())
+      .then((res) => setInterviewers((res.data || []).filter((e: any) => ["ACTIVE", "PROBATION"].includes(e.status))))
+      .catch(() => {});
+  }, [candidate.status, candidate.recruitment.department?.id]);
   const [saving, setSaving] = useState(false);
   const [showEvalTable, setShowEvalTable] = useState(false);
   const [evalScores, setEvalScores] = useState<Record<string, number>>({});
@@ -611,6 +814,9 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
     setSaving(true);
     await onSaveInterview(candidate.id, {
       interviewDate: interviewDate || null,
+      interviewTime: interviewTime || null,
+      interviewLocation: interviewLocation || null,
+      interviewContact: interviewContact || null,
       interviewNote: interviewNote || null,
       interviewScore: interviewScore ? Number(interviewScore) : null,
     });
@@ -641,6 +847,29 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
           } />
         </div>
 
+        {candidate.resumeUrl ? (
+          <a href={viewUrl(candidate.resumeUrl)} target="_blank" rel="noreferrer" download
+            className="flex items-center justify-center gap-2 mb-4 px-3 py-2.5 rounded-lg text-[13px] font-semibold border"
+            style={{ background: "rgba(0,180,216,0.1)", borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }}>
+            <FileText size={15} /> Xem / Tải CV ứng viên
+          </a>
+        ) : (
+          <div className="mb-4 px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg)", color: "var(--ibs-text-dim)" }}>
+            Ứng viên này chưa có file CV.
+          </div>
+        )}
+
+        {candidate.interviewDate && ["INTERVIEW", "INTERVIEWED", "OFFERED"].includes(candidate.status) && (
+          <div className="mb-4 px-3 py-2.5 rounded-lg text-[12px]" style={{ background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.25)" }}>
+            <div className="font-semibold mb-0.5" style={{ color: "var(--ibs-success)" }}>📅 Lịch phỏng vấn{candidate.interviewInviteSentAt ? " · ✓ đã gửi thư mời" : ""}</div>
+            <div style={{ color: "var(--ibs-text-dim)" }}>
+              {candidate.interviewTime ? `${candidate.interviewTime} · ` : ""}{formatDate(candidate.interviewDate)}
+              {candidate.interviewLocation ? ` · ${candidate.interviewLocation}` : ""}
+              {candidate.interviewContact ? ` · LH: ${candidate.interviewContact}` : ""}
+            </div>
+          </div>
+        )}
+
         {canEdit && (
           <>
             {/* Form chỉ hiện khi cần — SCREENING (hẹn PV) hoặc INTERVIEW (đánh giá) */}
@@ -657,6 +886,41 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
                   <DateInput value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)}
                     className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
                 </div>
+                {candidate.status === "SCREENING" && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Giờ phỏng vấn <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+                        <select value={interviewTime} onChange={(e) => setInterviewTime(e.target.value)}
+                          className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+                          <option value="">-- Chọn giờ --</option>
+                          {INTERVIEW_TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                          {interviewTime && !INTERVIEW_TIME_OPTIONS.includes(interviewTime) && <option value={interviewTime}>{interviewTime}</option>}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Người phỏng vấn <span style={{ color: "var(--ibs-text-dim)" }}>({candidate.recruitment.department.name})</span></label>
+                        <select value={interviewContact} onChange={(e) => setInterviewContact(e.target.value)}
+                          className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+                          <option value="">-- Chọn người phỏng vấn --</option>
+                          {interviewers.map((e) => {
+                            const label = `${e.fullName}${e.jobRole ? ` — ${e.jobRole}` : ""}`;
+                            return <option key={e.id} value={label}>{label}</option>;
+                          })}
+                          {/* Giữ giá trị cũ nếu không nằm trong danh sách (vd đã chọn trước đó) */}
+                          {interviewContact && !interviewers.some((e) => `${e.fullName}${e.jobRole ? ` — ${e.jobRole}` : ""}` === interviewContact) && (
+                            <option value={interviewContact}>{interviewContact}</option>
+                          )}
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Địa điểm phỏng vấn</label>
+                      <input value={interviewLocation} onChange={(e) => setInterviewLocation(e.target.value)} placeholder="Để trống = VP Công ty (Km6 QL5, Hồng Bàng, Hải Phòng)"
+                        className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+                    </div>
+                  </>
+                )}
                 {candidate.status === "INTERVIEW" && (
                 <div>
                   <label className="text-[11px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>
@@ -849,11 +1113,11 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
                 )}
 
                 {candidate.status === "SCREENING" && (
-                  <button type="button" onClick={handleSave} disabled={saving || !interviewDate}
-                    title={!interviewDate ? "Vui lòng chọn Ngày phỏng vấn trước" : ""}
+                  <button type="button" onClick={handleSave} disabled={saving || !interviewDate || !interviewTime}
+                    title={!interviewDate ? "Vui lòng chọn Ngày phỏng vấn" : !interviewTime ? "Vui lòng chọn Giờ phỏng vấn" : ""}
                     className="px-4 py-2 rounded-lg text-[13px] font-semibold"
-                    style={{ background: "var(--ibs-accent)", color: "#fff", opacity: saving || !interviewDate ? 0.5 : 1 }}>
-                    {saving ? "Đang lưu..." : "Lưu & Hẹn phỏng vấn"}
+                    style={{ background: "var(--ibs-accent)", color: "#fff", opacity: saving || !interviewDate || !interviewTime ? 0.5 : 1 }}>
+                    {saving ? "Đang gửi..." : "Lưu & Gửi thư mời PV"}
                   </button>
                 )}
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 export interface ModuleTab {
   href: string;
@@ -16,6 +16,8 @@ interface ModuleTabsProps {
 
 export function ModuleTabs({ tabs }: ModuleTabsProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const currentTab = searchParams.get("tab") || "";
 
   return (
     <div
@@ -23,8 +25,10 @@ export function ModuleTabs({ tabs }: ModuleTabsProps) {
       style={{ borderColor: "var(--ibs-border)" }}
     >
       {tabs.map((tab) => {
-        // Active when path matches exactly OR is a deeper sub-route
-        const isActive = pathname === tab.href;
+        // Active khi khớp path; nếu href có ?tab=... thì so cả query (vd Bảng công).
+        const [tabPath, tabQs = ""] = tab.href.split("?");
+        const tabParam = new URLSearchParams(tabQs).get("tab") || "";
+        const isActive = pathname === tabPath && tabParam === currentTab;
 
         const badgeColor =
           tab.badgeType === "warn"

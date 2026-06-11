@@ -3,12 +3,14 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { isInPast } from "@/lib/validation";
+import { leaveRequiresProof, proofDeadlineFrom } from "@/lib/leave-proof";
 
 const CreateLeaveSchema = z.object({
   leaveType: z.enum(["ANNUAL", "SICK", "PERSONAL", "WEDDING", "FUNERAL", "MATERNITY", "PATERNITY", "UNPAID", "WORK_ACCIDENT", "STUDY"]),
   startDate: z.string().transform((s) => new Date(s)),
   endDate: z.string().transform((s) => new Date(s)),
   reason: z.string().min(5, "Lý do phải ít nhất 5 ký tự"),
+  proofUrls: z.array(z.string()).optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { leaveType, startDate, endDate, reason } = parsed.data;
+  const { leaveType, startDate, endDate, reason, proofUrls } = parsed.data;
 
   if (endDate < startDate) {
     return NextResponse.json(
@@ -161,6 +163,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Loại nghỉ cần giấy tờ chứng minh → đặt hạn bổ sung (ngày nghỉ cuối + 7 ngày).
+  const needsProof = leaveRequiresProof(leaveType);
+  const submittedProof = (proofUrls?.length ?? 0) > 0;
+
   const leaveRequest = await prisma.leaveRequest.create({
     data: {
       employeeId: employee.id,
@@ -170,9 +176,27 @@ export async function POST(request: NextRequest) {
       totalDays,
       reason,
       status: "PENDING",
+      proofUrls: proofUrls ?? [],
+      proofDeadline: needsProof ? proofDeadlineFrom(endDate) : null,
+      proofSubmittedAt: needsProof && submittedProof ? new Date() : null,
     },
     include: { employee: { include: { department: true } } },
   });
+
+  // Nhắc bổ sung giấy tờ qua chuông cho chính NV nghỉ (nếu chưa nộp).
+  if (needsProof && !submittedProof && employee.userId) {
+    const hanStr = proofDeadlineFrom(endDate).toLocaleDateString("vi-VN");
+    await prisma.notification.create({
+      data: {
+        userId: employee.userId,
+        title: "Cần bổ sung giấy tờ chứng minh nghỉ",
+        message: `Đơn nghỉ (${new Date(startDate).toLocaleDateString("vi-VN")} - ${new Date(endDate).toLocaleDateString("vi-VN")}) cần bổ sung giấy tờ chứng minh trước ${hanStr} (7 ngày kể từ ngày nghỉ cuối).`,
+        type: "EXPIRY_WARNING",
+        referenceType: "leave_request",
+        referenceId: leaveRequest.id,
+      },
+    });
+  }
 
   // Notify manager
   const manager = await prisma.employee.findFirst({

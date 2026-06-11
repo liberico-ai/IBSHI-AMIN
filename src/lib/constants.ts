@@ -128,7 +128,7 @@ export const NAV_ITEMS = [
       { icon: "Users", label: "M4 - Tuyển dụng", href: "/tuyen-dung", badge: 3, badgeType: "warn" as const },
       { icon: "GraduationCap", label: "M5 - Đào tạo", href: "/dao-tao", badge: null },
       { icon: "Trophy", label: "M6 - Đánh giá & KPI", href: "/kpi", badge: null },
-      { icon: "Banknote", label: "M7 - Lương & Phúc lợi", href: "/luong", badge: null },
+      { icon: "Banknote", label: "M7 - Lương & BHXH", href: "/luong", badge: null },
     ],
   },
   {
