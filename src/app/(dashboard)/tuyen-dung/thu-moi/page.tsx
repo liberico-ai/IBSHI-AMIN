@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DateInput } from "@/components/shared/date-input";
 import { formatDate, formatVND, apiError } from "@/lib/utils";
+import { viewUrl } from "@/lib/use-presigned-url";
 import { usePermission } from "@/hooks/use-permission";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import {
@@ -562,7 +563,7 @@ function OfferDetailModal({ data, canEdit, canApprove, onClose, onChanged }: {
       {data.pdfUrl && (
         <div className="mb-4 flex items-center gap-2 p-3 rounded-lg" style={{ background: "var(--ibs-bg)" }}>
           <FileText size={14} style={{ color: "var(--ibs-accent)" }} />
-          <a href={data.pdfUrl} target="_blank" rel="noopener noreferrer" className="text-[12px] font-semibold hover:underline" style={{ color: "var(--ibs-accent)" }}>
+          <a href={viewUrl(data.pdfUrl)} target="_blank" rel="noopener noreferrer" className="text-[12px] font-semibold hover:underline" style={{ color: "var(--ibs-accent)" }}>
             Xem PDF thư mời đã gửi
           </a>
         </div>

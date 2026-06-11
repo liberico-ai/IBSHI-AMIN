@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { PageHeader, Button, Badge } from "@/components/ui";
 import { apiError } from "@/lib/utils";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
+import { viewUrl } from "@/lib/use-presigned-url";
 import { Plus, Upload, Check, X, ChevronDown, ChevronRight, FileText, Package, Download } from "lucide-react";
 
 type Supplier = { id: string; name: string };
@@ -729,7 +730,7 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
                       <Badge variant={st.variant}>{st.label}</Badge>
 
                       <div className="flex gap-2 shrink-0 items-center">
-                        {r.fileUrl && <a href={r.fileUrl} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 File</a>}
+                        {r.fileUrl && <a href={viewUrl(r.fileUrl)} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 File</a>}
                         {r.status === "PENDING_APPROVAL" && canApprove && r.createdById !== me?.id && (
                           <>
                             <button onClick={() => approve(r.id)} className="text-[11px] px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}>

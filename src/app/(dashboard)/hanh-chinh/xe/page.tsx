@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, formatDateTime, apiError } from "@/lib/utils";
+import { viewUrl } from "@/lib/use-presigned-url";
 import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench, Download } from "lucide-react";
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
@@ -765,7 +766,7 @@ function InvoiceViewerModal({ url, onClose }: { url: string; onClose: () => void
         <div className="flex items-center justify-between px-5 py-3 border-b flex-shrink-0" style={{ borderColor: "var(--ibs-border)" }}>
           <div className="text-[14px] font-semibold">Hóa đơn nhiên liệu</div>
           <div className="flex items-center gap-3">
-            <a href={url} target="_blank" rel="noreferrer"
+            <a href={viewUrl(url)} target="_blank" rel="noreferrer"
               className="text-[12px] px-3 py-1 rounded-lg"
               style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>
               Mở tab mới
@@ -775,9 +776,9 @@ function InvoiceViewerModal({ url, onClose }: { url: string; onClose: () => void
         </div>
         <div className="overflow-auto flex-1 flex items-center justify-center p-4" style={{ background: "#111" }}>
           {isPdf ? (
-            <iframe src={url} className="w-full" style={{ height: "70vh", border: "none" }} />
+            <iframe src={viewUrl(url)} className="w-full" style={{ height: "70vh", border: "none" }} />
           ) : (
-            <img src={url} alt="Hóa đơn" className="max-w-full max-h-[70vh] object-contain rounded-lg" />
+            <img src={viewUrl(url)} alt="Hóa đơn" className="max-w-full max-h-[70vh] object-contain rounded-lg" />
           )}
         </div>
       </div>

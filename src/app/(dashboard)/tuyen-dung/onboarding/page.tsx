@@ -5,6 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { FileUpload } from "@/components/shared/file-upload";
 import { DateInput } from "@/components/shared/date-input";
 import { BUCKETS } from "@/lib/minio-constants";
+import { viewUrl } from "@/lib/use-presigned-url";
 import { formatDate, apiError } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
@@ -664,7 +665,7 @@ function OnboardingDetailModal({ data, canEdit, onClose, onChanged }: {
               <div className="font-semibold mb-1" style={{ color: "#f59e0b" }}>Đã gia hạn — đến {data.extendedUntil && formatDate(data.extendedUntil)}</div>
               <div style={{ color: "var(--ibs-text-dim)" }}>Lý do: {data.extensionReason}</div>
               {data.extensionDocUrl && (
-                <a href={data.extensionDocUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 text-[11px] hover:underline" style={{ color: "#f59e0b" }}>
+                <a href={viewUrl(data.extensionDocUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 text-[11px] hover:underline" style={{ color: "#f59e0b" }}>
                   <FileText size={11} /> Xem file đã ký
                 </a>
               )}
@@ -780,7 +781,7 @@ function ChecklistItemRow({ item, canEdit, onUpdate, onDelete }: {
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           {item.attachmentUrl ? (
-            <a href={item.attachmentUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] px-2 py-1 rounded" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>
+            <a href={viewUrl(item.attachmentUrl)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] px-2 py-1 rounded" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>
               <FileText size={11} /> Xem file
             </a>
           ) : null}
