@@ -25,30 +25,44 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ se
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Series không có phiếu chờ duyệt" } }, { status: 404 });
   }
 
-  let approved = 0;
-  const conflicts: { id: string; date: string; conflictTitle: string }[] = [];
-
+  // Tối ưu: thay vì N query/phiếu (chậm 30s–1p với DB từ xa), gộp còn 2 query —
+  // lấy 1 lần mọi phiếu APPROVED khả nghi trong các phòng + khung thời gian, check trùng
+  // trong bộ nhớ, rồi updateMany 1 lần.
+  const pendingIds = new Set(pending.map((b) => b.id));
+  const roomIds = Array.from(new Set(pending.map((b) => b.roomId)));
+  let minStart = pending[0].startTime, maxEnd = pending[0].endTime;
   for (const b of pending) {
-    const c = await prisma.roomBooking.findFirst({
-      where: {
-        id: { not: b.id },
-        roomId: b.roomId,
-        status: "APPROVED",
-        startTime: { lt: b.endTime },
-        endTime: { gt: b.startTime },
-      },
-      select: { title: true },
-    });
+    if (b.startTime < minStart) minStart = b.startTime;
+    if (b.endTime > maxEnd) maxEnd = b.endTime;
+  }
+
+  const approvedOthers = (await prisma.roomBooking.findMany({
+    where: {
+      roomId: { in: roomIds },
+      status: "APPROVED",
+      startTime: { lt: maxEnd },
+      endTime: { gt: minStart },
+    },
+    select: { id: true, roomId: true, startTime: true, endTime: true, title: true },
+  })).filter((o) => !pendingIds.has(o.id));
+
+  const toApprove: string[] = [];
+  const conflicts: { id: string; date: string; conflictTitle: string }[] = [];
+  for (const b of pending) {
+    const c = approvedOthers.find((o) => o.roomId === b.roomId && o.startTime < b.endTime && o.endTime > b.startTime);
     if (c) {
       conflicts.push({ id: b.id, date: b.startTime.toISOString().slice(0, 10), conflictTitle: c.title });
       continue;
     }
-    await prisma.roomBooking.update({
-      where: { id: b.id },
-      data: { status: "APPROVED", approvedById: userId, approvedAt: new Date() },
-    });
-    approved++;
+    toApprove.push(b.id);
   }
 
-  return NextResponse.json({ data: { seriesId, approved, skipped: conflicts.length, conflicts } });
+  if (toApprove.length > 0) {
+    await prisma.roomBooking.updateMany({
+      where: { id: { in: toApprove } },
+      data: { status: "APPROVED", approvedById: userId, approvedAt: new Date() },
+    });
+  }
+
+  return NextResponse.json({ data: { seriesId, approved: toApprove.length, skipped: conflicts.length, conflicts } });
 }

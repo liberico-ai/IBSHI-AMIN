@@ -8,6 +8,7 @@ import { Plus, RefreshCw, X, FileText, AlertTriangle, Search } from "lucide-reac
 import { usePermission } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
+import { viewUrl } from "@/lib/use-presigned-url";
 import { DateInput } from "@/components/shared/date-input";
 import { confirmDialog } from "@/lib/confirm-dialog";
 
@@ -108,7 +109,7 @@ export default function KyLuatPage() {
     )},
     { key: "effectiveDate", header: "Ngày hiệu lực", render: (r) => formatDate(r.effectiveDate) },
     { key: "fileUrl", header: "File", render: (r) => r.fileUrl ? (
-      <a href={r.fileUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] px-2 py-0.5 rounded" style={{ color: "var(--ibs-accent)" }}>Xem file</a>
+      <a href={viewUrl(r.fileUrl)} target="_blank" rel="noopener noreferrer" className="text-[11px] px-2 py-0.5 rounded" style={{ color: "var(--ibs-accent)" }}>Xem file</a>
     ) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span> },
     { key: "actions", header: "", render: (r) => canManage ? (
       <button onClick={() => handleDeactivate(r.id)} className="text-[11px] px-2 py-0.5 rounded" style={{ color: "var(--ibs-danger)" }}>Hủy</button>

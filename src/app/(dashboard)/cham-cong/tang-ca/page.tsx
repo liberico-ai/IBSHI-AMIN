@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ApprovalWorkflow } from "@/components/shared/approval-workflow";
 import { formatDate, apiError } from "@/lib/utils";
-import { Plus, X, Clock, Calendar } from "lucide-react";
+import { Plus, X, Clock, Calendar, Lock } from "lucide-react";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
+import { canSeeOTTab } from "@/lib/ot-access";
 
 type OTRequest = {
   id: string;
@@ -18,6 +19,9 @@ type OTRequest = {
   reason: string;
   status: string;
   createdAt: string;
+  teamName?: string | null;
+  memberIds?: string[];
+  memberNames?: string[];
   employee: {
     id: string;
     code: string;
@@ -42,8 +46,41 @@ const OT_RATE_LABELS: Record<string, string> = {
 // ── New OT Dialog ──────────────────────────────────────────────────────────────
 function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (item: OTRequest) => void }) {
   const [form, setForm] = useState({ date: "", startTime: "17:30", endTime: "20:00", reason: "" });
+  const [emps, setEmps] = useState<{ id: string; fullName: string; team?: { id: string; name: string } | null }[]>([]);
+  const [empsLoaded, setEmpsLoaded] = useState(false);
+  const [teamId, setTeamId] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/v1/ot-requests/team-members`).then((r) => r.json())
+      .then((res) => setEmps(res.data || [])).catch(() => {}).finally(() => setEmpsLoaded(true));
+  }, []);
+
+  const teams = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of emps) if (e.team?.id) m.set(e.team.id, e.team.name);
+    return Array.from(m.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [emps]);
+  const teamMembers = useMemo(() => emps.filter((e) => e.team?.id === teamId), [emps, teamId]);
+
+  // Tổ trưởng chỉ có 1 tổ → tự chọn sẵn.
+  useEffect(() => {
+    if (teams.length === 1 && !teamId) {
+      setTeamId(teams[0].id);
+      setMemberIds(emps.filter((e) => e.team?.id === teams[0].id).map((e) => e.id));
+    }
+  }, [teams, teamId, emps]);
+
+  function selectTeam(tid: string) {
+    setTeamId(tid);
+    setMemberIds(emps.filter((e) => e.team?.id === tid).map((e) => e.id)); // mặc định chọn cả tổ
+    setError(null);
+  }
+  function toggleMember(id: string) {
+    setMemberIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
 
   function handleChange(field: string, value: string) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -60,12 +97,16 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!teamId) { setError("Vui lòng chọn Tổ"); return; }
+    if (memberIds.length === 0) { setError("Vui lòng chọn ít nhất 1 nhân sự"); return; }
     setSaving(true);
     try {
+      const team = teams.find((t) => t.id === teamId);
+      const memberNames = emps.filter((e2) => memberIds.includes(e2.id)).map((e2) => e2.fullName);
       const res = await fetch("/api/v1/ot-requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, teamId, teamName: team?.name || null, memberIds, memberNames }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -101,6 +142,31 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           {error && (
             <div className="text-[13px] px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>
               {error}
+            </div>
+          )}
+
+          <div>
+            <label className={labelCls} style={labelStyle}>Tổ <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+            <select required value={teamId} onChange={(e) => selectTeam(e.target.value)} className={inputCls} style={inputStyle}>
+              <option value="">-- Chọn tổ --</option>
+              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            {empsLoaded && teams.length === 0 && <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Chưa có tổ sản xuất để chọn.</p>}
+          </div>
+
+          {teamId && (
+            <div>
+              <label className={labelCls} style={labelStyle}>Nhân sự tăng ca <span style={{ color: "var(--ibs-danger)" }}>*</span> <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>({memberIds.length}/{teamMembers.length})</span></label>
+              <div className="max-h-[160px] overflow-y-auto rounded-lg border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg)" }}>
+                {teamMembers.length === 0 ? (
+                  <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Tổ này chưa có nhân sự đang làm.</div>
+                ) : teamMembers.map((m) => (
+                  <label key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer hover:bg-white/[0.04]">
+                    <input type="checkbox" checked={memberIds.includes(m.id)} onChange={() => toggleMember(m.id)} />
+                    {m.fullName}
+                  </label>
+                ))}
+              </div>
             </div>
           )}
 
@@ -171,10 +237,17 @@ export default function TangCaPage() {
   const [showNew, setShowNew] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
+  const [jobRole, setJobRole] = useState<string | null>(null);
+  const [meLoaded, setMeLoaded] = useState(false);
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => { if (res.role) setUserRole(res.role); }).catch(() => {});
+    fetch("/api/v1/me").then((r) => r.json()).then((res) => {
+      if (res.role) setUserRole(res.role);
+      setJobRole(res.jobRole ?? null);
+    }).catch(() => {}).finally(() => setMeLoaded(true));
   }, []);
+
+  const canSee = canSeeOTTab({ jobRole, role: userRole });
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -208,6 +281,19 @@ export default function TangCaPage() {
   const pendingCount  = requests.filter((r) => r.status === "PENDING").length;
   const approvedCount = requests.filter((r) => r.status === "APPROVED").length;
   const totalHours    = requests.filter((r) => r.status === "APPROVED").reduce((s, r) => s + r.hours, 0);
+
+  if (meLoaded && !canSee) {
+    return (
+      <div>
+        <PageTitle title="Tăng ca (OT)" description="Quản lý đề xuất làm ngoài giờ" />
+        <div className="rounded-xl border p-10 text-center" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+          <Lock size={28} className="mx-auto mb-3" style={{ color: "var(--ibs-text-dim)" }} />
+          <div className="text-[14px] font-semibold mb-1">Không có quyền truy cập</div>
+          <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Chỉ <strong>Tổ trưởng / Trưởng phòng</strong> (và HCNS/BGĐ) mới xem được mục Tăng ca.</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -255,7 +341,7 @@ export default function TangCaPage() {
             <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  {["Nhân viên", "Ngày", "Giờ làm", "Thời lượng", "Hệ số", "Lý do", "Trạng thái", ""].map((h) => (
+                  {["Tổ / Nhân sự", "Ngày", "Giờ làm", "Thời lượng", "Hệ số", "Lý do", "Trạng thái", ""].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-[11px] uppercase tracking-wider font-semibold border-b"
                       style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>{h}</th>
                   ))}
@@ -266,10 +352,22 @@ export default function TangCaPage() {
                   <tr key={r.id} className="border-b transition-colors hover:bg-white/[0.02]"
                     style={{ borderColor: "rgba(51,65,85,0.4)" }}>
                     <td className="px-4 py-3">
-                      <div className="text-[13px] font-medium">{r.employee.fullName}</div>
-                      <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
-                        {r.employee.code} · {r.employee.department.name}
-                      </div>
+                      {(r.memberNames?.length ?? 0) > 0 ? (
+                        <>
+                          <div className="text-[13px] font-medium">{r.teamName || "Nhóm"} <span className="text-[11px] font-normal" style={{ color: "var(--ibs-text-dim)" }}>({r.memberNames!.length} người)</span></div>
+                          <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }} title={r.memberNames!.join(", ")}>
+                            {r.memberNames!.slice(0, 3).join(", ")}{r.memberNames!.length > 3 ? `, +${r.memberNames!.length - 3}` : ""}
+                          </div>
+                          <div className="text-[10px]" style={{ color: "var(--ibs-text-dim)" }}>Đề xuất: {r.employee.fullName}</div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-[13px] font-medium">{r.employee.fullName}</div>
+                          <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
+                            {r.employee.code} · {r.employee.department.name}
+                          </div>
+                        </>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-[13px]">
                       <span className="flex items-center gap-1" style={{ color: "var(--ibs-text-muted)" }}>

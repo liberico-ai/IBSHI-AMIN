@@ -10,6 +10,10 @@ const CreateOTSchema = z.object({
   endTime: z.string().regex(/^\d{2}:\d{2}$/, "Giờ kết thúc không hợp lệ (HH:mm)"),
   reason: z.string().min(5, "Lý do phải ít nhất 5 ký tự"),
   otRate: z.number().optional(),
+  teamId: z.string().optional().nullable(),
+  teamName: z.string().optional().nullable(),
+  memberIds: z.array(z.string()).optional(),
+  memberNames: z.array(z.string()).optional(),
 });
 
 function timeToMinutes(t: string): number {
@@ -67,7 +71,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { date, startTime, endTime, reason, otRate } = parsed.data;
+  const { date, startTime, endTime, reason, otRate, teamId, teamName, memberIds, memberNames } = parsed.data;
 
   if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
     return NextResponse.json(
@@ -122,6 +126,10 @@ export async function POST(request: NextRequest) {
       hours,
       reason,
       otRate: rate,
+      teamId: teamId || null,
+      teamName: teamName || null,
+      memberIds: memberIds ?? [],
+      memberNames: memberNames ?? [],
       status: "PENDING",
     },
     include: { employee: { include: { department: true } } },

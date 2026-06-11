@@ -83,8 +83,8 @@ export default function VeSinhPage() {
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => {
-      setUserRole(res.data?.role || "");
-      setMyEmployeeId(res.data?.employeeId || null);
+      setUserRole(res.role || "");
+      setMyEmployeeId(res.employeeId || null);
     });
     fetchZones();
   }, []);

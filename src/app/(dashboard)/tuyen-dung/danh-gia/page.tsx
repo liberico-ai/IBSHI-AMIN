@@ -5,6 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { FileUpload } from "@/components/shared/file-upload";
 import { DateInput } from "@/components/shared/date-input";
 import { BUCKETS } from "@/lib/minio-constants";
+import { viewUrl } from "@/lib/use-presigned-url";
 import { formatDate, formatVND, apiError } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
@@ -578,7 +579,7 @@ function EvalDetailModal({ data, isBOM, canEdit, onClose, onChanged }: {
           {data.contractEndDate && <div>Hết hạn: {formatDate(data.contractEndDate)}</div>}
           {!data.contractEndDate && <div>HĐ không thời hạn</div>}
           {data.signedContractUrl && (
-            <a href={data.signedContractUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 hover:underline" style={{ color: "var(--ibs-success)" }}>
+            <a href={viewUrl(data.signedContractUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 hover:underline" style={{ color: "var(--ibs-success)" }}>
               <FileText size={11} /> Xem HĐ đã ký
             </a>
           )}

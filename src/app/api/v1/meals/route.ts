@@ -5,6 +5,7 @@ import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR } from "@/lib/constants";
 import { computeFifo } from "@/lib/food-inventory";
+import { isAfterMealCutoff } from "@/services/meal.service";
 
 const RegisterSchema = z.object({
   departmentId: z.string().uuid(),
@@ -278,6 +279,11 @@ export async function POST(request: NextRequest) {
   }
 
   const { departmentId, date, lunchCount, dinnerCount, guestCount, subcontractorCount, subcontractorName, guestUnitPrice, specialNote } = parsed.data;
+
+  // Chốt 9h: sau 9h (hoặc ngày đã qua) KHÓA đăng ký thường với TẤT CẢ → dùng Đăng ký bổ sung.
+  if (isAfterMealCutoff(date)) {
+    return NextResponse.json({ error: { code: "MEAL_CUTOFF", message: "Đã quá giờ đăng ký suất ăn (chốt 9h sáng). Sau 9h vui lòng dùng Đăng ký bổ sung." } }, { status: 403 });
+  }
 
   // MANAGER can only register for their own department
   if (!canDo(userRole, "meals", "manageCosts")) {

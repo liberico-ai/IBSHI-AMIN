@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { Upload, X, FileText, Image, Loader2 } from "lucide-react";
 import { BUCKETS } from "@/lib/minio-constants";
+import { viewUrl } from "@/lib/use-presigned-url";
 
 type BucketName = (typeof BUCKETS)[keyof typeof BUCKETS];
 
@@ -187,7 +188,7 @@ export function FileUpload({
       {/* Show current URL link if no new file selected */}
       {currentUrl && !fileName && (
         <a
-          href={currentUrl}
+          href={viewUrl(currentUrl)}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-1 text-xs text-blue-600 hover:underline"

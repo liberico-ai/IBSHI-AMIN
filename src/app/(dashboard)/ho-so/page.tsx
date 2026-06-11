@@ -6,18 +6,23 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { getInitials, apiError } from "@/lib/utils";
-import { UserPlus, Eye, RefreshCw, X, Download } from "lucide-react";
+import { UserPlus, Eye, RefreshCw, X, Download, SlidersHorizontal } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { DateInput } from "@/components/shared/date-input";
+import { BankAccountsEditor, type BankAccount } from "@/components/shared/bank-accounts-editor";
 
 type Employee = {
   id: string; code: string; fullName: string; gender: string; status: string;
   startDate: string;
   idNumber?: string | null; taxCode?: string | null; address?: string | null;
   insuranceNumber?: string | null; dateOfBirth?: string | null;
+  dependents?: number; // số NPT đang hiệu lực
+  children?: { dateOfBirth?: string | null }[];
   department: { id: string; name: string };
   position: { name: string };
   jobRole?: string | null;
+  salaryGrade?: number | null;
+  team?: { id: string; name: string } | null;
   contracts: { contractType: string; status: string; baseSalary: number; endDate?: string | null }[];
 };
 
@@ -53,6 +58,28 @@ const CONTRACT_TYPE_LABELS: Record<string, string> = {
   INDEFINITE: "Không XĐ", PROBATION: "Thử việc",
 };
 
+// Khoảng độ tuổi con cái cho dropdown lọc export.
+const CHILD_AGE_RANGES: { value: string; label: string; min?: number; max?: number }[] = [
+  { value: "", label: "Con: mọi độ tuổi" },
+  { value: "u3", label: "Con dưới 3 tuổi", max: 2 },
+  { value: "u6", label: "Con dưới 6 tuổi", max: 5 },
+  { value: "u15", label: "Con dưới 15 tuổi", max: 14 },
+  { value: "u18", label: "Con dưới 18 tuổi", max: 17 },
+  { value: "o18", label: "Con từ 18 tuổi trở lên", min: 18 },
+];
+
+// Tuổi tính đến hôm nay từ chuỗi ngày sinh.
+function ageFromDob(dob?: string | null): number | null {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (isNaN(d.getTime())) return null;
+  const n = new Date();
+  let a = n.getFullYear() - d.getFullYear();
+  const m = n.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && n.getDate() < d.getDate())) a--;
+  return a;
+}
+
 export default function EmployeesPage() {
   const router = useRouter();
   const { canDo } = usePermission();
@@ -61,6 +88,21 @@ export default function EmployeesPage() {
   const [loading, setLoading] = useState(true);
   const [deptFilter, setDeptFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [nptFilter, setNptFilter] = useState(""); // "" | "yes" | "no"
+  const [childAgeRange, setChildAgeRange] = useState(""); // key trong CHILD_AGE_RANGES
+  const [tableSearch, setTableSearch] = useState(""); // từ khoá ô tìm kiếm trong bảng
+  // Bộ lọc nâng cao
+  const [showFilters, setShowFilters] = useState(false);
+  const [joinFrom, setJoinFrom] = useState("");
+  const [joinTo, setJoinTo] = useState("");
+  const [gradeFilter, setGradeFilter] = useState("");
+  const [jobRoleFilter, setJobRoleFilter] = useState("");
+  const [positionFilter, setPositionFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [contractFilter, setContractFilter] = useState("");
+  const [genderFilter, setGenderFilter] = useState("");
+  const [ageMin, setAgeMin] = useState("");
+  const [ageMax, setAgeMax] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [view, setView] = useState<"all" | "incomplete" | "expiring">("all");
   const incompleteOnly = view === "incomplete";
@@ -79,6 +121,11 @@ export default function EmployeesPage() {
     () => Array.from(new Set(allEmployees.map((e) => e.department?.name).filter(Boolean))) as string[],
     [allEmployees]
   );
+  const uniq = (vals: (string | null | undefined)[]) => Array.from(new Set(vals.filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "vi"));
+  const jobRoleOptions = useMemo(() => uniq(allEmployees.map((e) => e.jobRole)), [allEmployees]);
+  const positionOptions = useMemo(() => uniq(allEmployees.map((e) => e.position?.name)), [allEmployees]);
+  const teamOptions = useMemo(() => uniq(allEmployees.map((e) => e.team?.name)), [allEmployees]);
+  const gradeOptions = useMemo(() => Array.from(new Set(allEmployees.map((e) => e.salaryGrade).filter((g): g is number => typeof g === "number"))).sort((a, b) => a - b), [allEmployees]);
 
   // Đếm NV chưa cập nhật thông tin cơ bản (chỉ tính NV đang làm/thử việc)
   const incompleteCount = useMemo(
@@ -92,13 +139,57 @@ export default function EmployeesPage() {
     [allEmployees]
   );
 
+  // NV đã nghỉ (Đã nghỉ / Sa thải) luôn xếp xuống dưới cùng; NV đang làm lên trên.
+  // sort ổn định nên trong từng nhóm vẫn giữ thứ tự mã (code) như API trả về.
+  const LEFT_STATUSES = ["RESIGNED", "TERMINATED"];
   const filtered = useMemo(() => allEmployees.filter((emp) => {
     if (deptFilter && emp.department?.name !== deptFilter) return false;
     if (statusFilter && emp.status !== statusFilter) return false;
+    if (nptFilter === "yes" && !((emp.dependents || 0) > 0)) return false;
+    if (nptFilter === "no" && (emp.dependents || 0) > 0) return false;
+    if (childAgeRange) {
+      const r = CHILD_AGE_RANGES.find((x) => x.value === childAgeRange);
+      const min = r?.min ?? null, max = r?.max ?? null;
+      const ok = (emp.children || []).some((c) => {
+        const a = ageFromDob(c.dateOfBirth);
+        if (a === null) return false;
+        if (min !== null && a < min) return false;
+        if (max !== null && a > max) return false;
+        return true;
+      });
+      if (!ok) return false;
+    }
+    // Ngày vào làm trong khoảng
+    if (joinFrom && (!emp.startDate || emp.startDate.slice(0, 10) < joinFrom)) return false;
+    if (joinTo && (!emp.startDate || emp.startDate.slice(0, 10) > joinTo)) return false;
+    // Cấp bậc thợ (bậc lương), vị trí, chức vụ, tổ đội
+    if (gradeFilter && String(emp.salaryGrade ?? "") !== gradeFilter) return false;
+    if (jobRoleFilter && (emp.jobRole || "") !== jobRoleFilter) return false;
+    if (positionFilter && (emp.position?.name || "") !== positionFilter) return false;
+    if (teamFilter && (emp.team?.name || "") !== teamFilter) return false;
+    // Loại hợp đồng (HĐ mới nhất)
+    if (contractFilter && (emp.contracts?.[0]?.contractType || "") !== contractFilter) return false;
+    if (genderFilter && emp.gender !== genderFilter) return false;
+    // Độ tuổi nhân sự
+    if (ageMin || ageMax) {
+      const a = ageFromDob(emp.dateOfBirth);
+      if (a === null) return false;
+      if (ageMin && a < Number(ageMin)) return false;
+      if (ageMax && a > Number(ageMax)) return false;
+    }
     if (view === "incomplete" && !(["ACTIVE", "PROBATION"].includes(emp.status) && missingFields(emp).length > 0)) return false;
     if (view === "expiring" && !isExpiringSoon(emp)) return false;
     return true;
-  }), [allEmployees, deptFilter, statusFilter, view]);
+  }).sort((a, b) => (LEFT_STATUSES.includes(a.status) ? 1 : 0) - (LEFT_STATUSES.includes(b.status) ? 1 : 0)),
+  [allEmployees, deptFilter, statusFilter, nptFilter, childAgeRange, view, joinFrom, joinTo, gradeFilter, jobRoleFilter, positionFilter, teamFilter, contractFilter, genderFilter, ageMin, ageMax]);
+
+  // Đếm số filter đang bật (cho badge) + reset.
+  const activeFilterCount = [deptFilter, statusFilter, nptFilter, childAgeRange, joinFrom, joinTo, gradeFilter, jobRoleFilter, positionFilter, teamFilter, contractFilter, genderFilter, ageMin, ageMax].filter(Boolean).length;
+  function clearAllFilters() {
+    setDeptFilter(""); setStatusFilter(""); setNptFilter(""); setChildAgeRange("");
+    setJoinFrom(""); setJoinTo(""); setGradeFilter(""); setJobRoleFilter(""); setPositionFilter("");
+    setTeamFilter(""); setContractFilter(""); setGenderFilter(""); setAgeMin(""); setAgeMax("");
+  }
 
   async function handleExport() {
     const { default: ExcelJS } = await import("exceljs");
@@ -114,7 +205,12 @@ export default function EmployeesPage() {
       { header: "Ngày vào", key: "startDate", width: 12 },
     ];
     ws.getRow(1).font = { bold: true };
-    filtered.forEach((emp) => {
+    // Xuất ĐÚNG danh sách đang lọc, kể cả từ khoá ô tìm kiếm trong bảng.
+    const sLower = tableSearch.trim().toLowerCase();
+    const exportList = sLower
+      ? filtered.filter((e) => e.code.toLowerCase().includes(sLower) || e.fullName.toLowerCase().includes(sLower))
+      : filtered;
+    exportList.forEach((emp) => {
       ws.addRow({
         code: emp.code,
         fullName: emp.fullName,
@@ -130,6 +226,88 @@ export default function EmployeesPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url;
     a.download = `danh-sach-cbnv-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  // Export danh sách NGƯỜI PHỤ THUỘC của tất cả nhân sự (mỗi NPT 1 dòng).
+  async function handleExportDependents() {
+    const res = await fetch("/api/v1/employees/dependents-export").then((r) => r.json()).catch(() => null);
+    const rows: any[] = res?.data || [];
+    const { default: ExcelJS } = await import("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Người phụ thuộc");
+    ws.columns = [
+      { header: "Mã NV", key: "code", width: 10 },
+      { header: "Tên nhân sự", key: "fullName", width: 24 },
+      { header: "Phòng ban", key: "department", width: 18 },
+      { header: "Số NPT", key: "depCount", width: 8 },
+      { header: "Tên NPT", key: "depName", width: 24 },
+      { header: "Quan hệ", key: "relationship", width: 10 },
+      { header: "Ngày sinh", key: "dateOfBirth", width: 12 },
+      { header: "MST NPT", key: "taxCode", width: 14 },
+      { header: "Trạng thái", key: "status", width: 14 },
+      { header: "Ngày đăng ký", key: "registeredAt", width: 12 },
+      { header: "Ngày dừng", key: "stoppedAt", width: 12 },
+      { header: "Khai báo (NPT >18 tuổi)", key: "declaration", width: 32 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    const fmt = (s: string) => s ? new Date(s).toLocaleDateString("vi-VN") : "";
+    rows.forEach((r) => ws.addRow({ ...r, dateOfBirth: fmt(r.dateOfBirth), registeredAt: fmt(r.registeredAt), stoppedAt: fmt(r.stoppedAt) }));
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `nguoi-phu-thuoc-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  // Export danh sách CON CÁI của tất cả nhân sự (mỗi con 1 dòng).
+  async function handleExportChildren() {
+    const res = await fetch("/api/v1/employees/children-export").then((r) => r.json()).catch(() => null);
+    const rows: any[] = res?.data || [];
+    const { default: ExcelJS } = await import("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Con cái");
+    ws.columns = [
+      { header: "Mã NV", key: "code", width: 10 },
+      { header: "Tên nhân sự", key: "fullName", width: 24 },
+      { header: "Phòng ban", key: "department", width: 18 },
+      { header: "Số con", key: "childCount", width: 8 },
+      { header: "Tên con", key: "childName", width: 24 },
+      { header: "Ngày sinh", key: "dateOfBirth", width: 12 },
+      { header: "Tuổi", key: "age", width: 6 },
+      { header: "MST", key: "taxCode", width: 14 },
+      { header: "CCCD", key: "idNumber", width: 16 },
+      { header: "Giấy tờ", key: "hasDocs", width: 8 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    const fmt = (s: string) => s ? new Date(s).toLocaleDateString("vi-VN") : "";
+    const ageOf = (s: string) => {
+      if (!s) return "";
+      const d = new Date(s), n = new Date();
+      let a = n.getFullYear() - d.getFullYear();
+      const m = n.getMonth() - d.getMonth();
+      if (m < 0 || (m === 0 && n.getDate() < d.getDate())) a--;
+      return a;
+    };
+    const range = CHILD_AGE_RANGES.find((r) => r.value === childAgeRange);
+    const minA = range?.min ?? null;
+    const maxA = range?.max ?? null;
+    rows.forEach((r) => {
+      const a = ageOf(r.dateOfBirth);
+      if (typeof a === "number") {
+        if (minA !== null && a < minA) return;
+        if (maxA !== null && a > maxA) return;
+      } else if (minA !== null || maxA !== null) {
+        return; // đang lọc tuổi mà con chưa có ngày sinh → bỏ qua
+      }
+      ws.addRow({ ...r, age: a, dateOfBirth: fmt(r.dateOfBirth) });
+    });
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `con-cai-nhan-su-${new Date().toISOString().slice(0, 10)}.xlsx`;
     a.click(); URL.revokeObjectURL(url);
   }
 
@@ -254,22 +432,18 @@ export default function EmployeesPage() {
       </div>
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
-          className="px-3 py-2 rounded-lg text-[13px] outline-none border"
-          style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
-          <option value="">Tất cả phòng ban</option>
-          {deptOptions.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 rounded-lg text-[13px] outline-none border"
-          style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
-          <option value="">Tất cả trạng thái</option>
-          <option value="ACTIVE">Đang làm</option>
-          <option value="PROBATION">Thử việc</option>
-          <option value="ON_LEAVE">Tạm nghỉ</option>
-          <option value="RESIGNED">Đã nghỉ</option>
-          <option value="TERMINATED">Sa thải</option>
-        </select>
+        <button onClick={() => setShowFilters((v) => !v)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border font-medium"
+          style={{ background: showFilters ? "rgba(0,180,216,0.1)" : "var(--ibs-bg-card)", borderColor: showFilters ? "var(--ibs-accent)" : "var(--ibs-border)", color: showFilters ? "var(--ibs-accent)" : "var(--ibs-text-muted)" }}>
+          <SlidersHorizontal size={14} /> Bộ lọc
+          {activeFilterCount > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold text-white" style={{ background: "var(--ibs-accent)" }}>{activeFilterCount}</span>}
+        </button>
+        {activeFilterCount > 0 && (
+          <button onClick={clearAllFilters} className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-[13px] border"
+            style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
+            <X size={13} /> Xóa lọc
+          </button>
+        )}
         <button onClick={fetchEmployees}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border"
           style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
@@ -283,6 +457,20 @@ export default function EmployeesPage() {
               <Download size={13} /> Export Excel
             </button>
           )}
+          {canDo("employees", "readAll") && (
+            <button onClick={handleExportDependents}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border transition-colors"
+              style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
+              <Download size={13} /> Export NPT
+            </button>
+          )}
+          {canDo("employees", "readAll") && (
+            <button onClick={handleExportChildren}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border transition-colors"
+              style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
+              <Download size={13} /> Export Con cái
+            </button>
+          )}
           {canDo("employees", "create") && (
             <button onClick={() => setShowCreate(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
@@ -292,6 +480,115 @@ export default function EmployeesPage() {
           )}
         </div>
       </div>
+
+      {showFilters && (() => {
+        const fCls = "w-full px-2.5 py-1.5 rounded-lg text-[12px] outline-none border";
+        const fSt = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" } as React.CSSProperties;
+        const lCls = "block text-[11px] font-semibold mb-1";
+        const lSt = { color: "var(--ibs-text-dim)" } as React.CSSProperties;
+        return (
+          <div className="mb-4 p-4 rounded-xl border grid grid-cols-2 md:grid-cols-4 gap-3" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+            <div>
+              <label className={lCls} style={lSt}>Phòng ban</label>
+              <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                {deptOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Trạng thái</label>
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                <option value="ACTIVE">Đang làm</option>
+                <option value="PROBATION">Thử việc</option>
+                <option value="ON_LEAVE">Tạm nghỉ</option>
+                <option value="RESIGNED">Đã nghỉ</option>
+                <option value="TERMINATED">Sa thải</option>
+              </select>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Giới tính</label>
+              <select value={genderFilter} onChange={(e) => setGenderFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                <option value="MALE">Nam</option>
+                <option value="FEMALE">Nữ</option>
+              </select>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Tổ / Đội / Bộ phận</label>
+              <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Chức vụ</label>
+              <select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                {positionOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Vị trí làm việc</label>
+              <select value={jobRoleFilter} onChange={(e) => setJobRoleFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                {jobRoleOptions.map((j) => <option key={j} value={j}>{j}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Cấp bậc thợ (bậc lương)</label>
+              <select value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                {gradeOptions.map((g) => <option key={g} value={String(g)}>Bậc {g}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Loại hợp đồng</label>
+              <select value={contractFilter} onChange={(e) => setContractFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                {Object.entries(CONTRACT_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Độ tuổi nhân sự</label>
+              <div className="flex items-center gap-1">
+                <input type="number" min="0" value={ageMin} onChange={(e) => setAgeMin(e.target.value)} placeholder="từ" className={fCls} style={fSt} />
+                <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>–</span>
+                <input type="number" min="0" value={ageMax} onChange={(e) => setAgeMax(e.target.value)} placeholder="đến" className={fCls} style={fSt} />
+              </div>
+            </div>
+            <div className="col-span-2">
+              <label className={lCls} style={lSt}>Ngày vào làm (từ – đến)</label>
+              <div className="flex items-center gap-1">
+                <DateInput value={joinFrom} onChange={(e) => setJoinFrom(e.target.value)} className={fCls} style={fSt} />
+                <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>–</span>
+                <DateInput value={joinTo} onChange={(e) => setJoinTo(e.target.value)} className={fCls} style={fSt} />
+              </div>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Người phụ thuộc (NPT)</label>
+              <select value={nptFilter} onChange={(e) => setNptFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                <option value="yes">Có NPT</option>
+                <option value="no">Không có NPT</option>
+              </select>
+            </div>
+            <div>
+              <label className={lCls} style={lSt}>Có con theo độ tuổi</label>
+              <select value={childAgeRange} onChange={(e) => setChildAgeRange(e.target.value)} className={fCls} style={fSt}>
+                {CHILD_AGE_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </div>
+            <div className="col-span-2 md:col-span-4 flex justify-end">
+              {activeFilterCount > 0 && (
+                <button onClick={clearAllFilters} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[12px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
+                  <X size={12} /> Xóa tất cả lọc ({activeFilterCount})
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="rounded-xl border overflow-hidden"
         style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
@@ -310,7 +607,8 @@ export default function EmployeesPage() {
             </div>
           ) : (
             <DataTable columns={columns} data={filtered as unknown as Record<string, unknown>[]}
-              searchPlaceholder="Tìm mã NV, họ tên..." searchKeys={["code", "fullName"]} pageSize={20} />
+              searchPlaceholder="Tìm mã NV, họ tên..." searchKeys={["code", "fullName"]} pageSize={20}
+              onSearchChange={setTableSearch} />
           )}
         </div>
       </div>
@@ -339,6 +637,7 @@ function CreateEmployeeDialog({ onClose, onSuccess }: {
     address: "", departmentId: "", positionId: "", startDate: "",
     salaryGrade: "", salaryCoefficient: "",
   });
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
 
   useEffect(() => {
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepts(res.data || []));
@@ -364,6 +663,7 @@ function CreateEmployeeDialog({ onClose, onSuccess }: {
         ...form,
         salaryGrade: form.salaryGrade ? parseInt(form.salaryGrade) : undefined,
         salaryCoefficient: form.salaryCoefficient ? parseFloat(form.salaryCoefficient) : undefined,
+        bankAccounts,
       };
       const res = await fetch("/api/v1/employees", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -474,6 +774,12 @@ function CreateEmployeeDialog({ onClose, onSuccess }: {
                 onChange={(e) => set("salaryCoefficient", e.target.value)}
                 placeholder="3.2" className={inputClass} style={inputStyle} />
             </div>
+          </div>
+
+          {/* Tài khoản ngân hàng */}
+          <div className="mt-4">
+            <label className={labelClass} style={labelStyle}>Tài khoản ngân hàng (tối đa 5)</label>
+            <BankAccountsEditor value={bankAccounts} onChange={setBankAccounts} />
           </div>
 
           {/* Info box */}

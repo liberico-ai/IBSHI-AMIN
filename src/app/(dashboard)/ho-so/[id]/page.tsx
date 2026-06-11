@@ -24,6 +24,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { FileUpload } from "@/components/shared/file-upload";
+import { BankAccountsEditor, normalizeBankAccounts, type BankAccount } from "@/components/shared/bank-accounts-editor";
 import { BUCKETS } from "@/lib/minio-constants";
 import { DateInput } from "@/components/shared/date-input";
 import { viewUrl } from "@/lib/use-presigned-url";
@@ -44,6 +45,7 @@ type Employee = {
   salaryCoefficient?: number;
   bankAccount?: string;
   bankName?: string;
+  bankAccounts?: unknown;
   insuranceNumber?: string;
   emergencyContact?: string;
   emergencyPhone?: string;
@@ -84,6 +86,18 @@ type Employee = {
     relationship: string;
     dateOfBirth?: string | null;
     taxCode?: string | null;
+    documentUrls?: string[];
+    declaration?: string | null;
+    registeredAt?: string | null;
+    stoppedAt?: string | null;
+  }[];
+  children: {
+    id: string;
+    fullName: string;
+    dateOfBirth?: string | null;
+    taxCode?: string | null;
+    idNumber?: string | null;
+    documentUrls?: string[];
   }[];
   certificates: {
     id: string;
@@ -642,7 +656,7 @@ function AddCertificateDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleChange = (field: string, value: string) =>
+  const handleChange = (field: string, value: any) =>
     setForm((f) => ({ ...f, [field]: value }));
 
   async function handleSubmit(e: React.FormEvent) {
@@ -816,6 +830,10 @@ function EditEmployeeDialog({
     startDate: employee.startDate ? String(employee.startDate).slice(0, 10) : "",
     bankAccount: employee.bankAccount || "",
     bankName: employee.bankName || "",
+    bankAccounts: ((): BankAccount[] => {
+      const a = normalizeBankAccounts(employee.bankAccounts);
+      return a.length ? a : (employee.bankAccount ? [{ bank: employee.bankName || "", accountNumber: employee.bankAccount }] : []);
+    })(),
     taxCode: employee.taxCode || "",
     insuranceNumber: employee.insuranceNumber || "",
     emergencyContact: employee.emergencyContact || "",
@@ -836,7 +854,7 @@ function EditEmployeeDialog({
     }).catch(() => {});
   }, []);
 
-  const handleChange = (field: string, value: string) =>
+  const handleChange = (field: string, value: any) =>
     setForm((f) => ({ ...f, [field]: value }));
 
   async function handleSubmit(e: React.FormEvent) {
@@ -859,8 +877,7 @@ function EditEmployeeDialog({
         if (form.departmentId) body.departmentId = form.departmentId;
         body.teamId = form.teamId || null;
         if (form.startDate) body.startDate = form.startDate;
-        body.bankAccount = form.bankAccount;
-        body.bankName = form.bankName;
+        body.bankAccounts = form.bankAccounts;
         body.taxCode = form.taxCode;
         body.insuranceNumber = form.insuranceNumber;
         body.status = form.status;
@@ -986,15 +1003,9 @@ function EditEmployeeDialog({
                     <option value="RESIGNED">Đã nghỉ việc</option>
                   </select>
                 </div>
-                <div>
-                  <label className={labelCls} style={labelStyle}>Số tài khoản</label>
-                  <input value={form.bankAccount} onChange={(e) => handleChange("bankAccount", e.target.value)}
-                    className={inputCls} style={inputStyle} />
-                </div>
-                <div>
-                  <label className={labelCls} style={labelStyle}>Ngân hàng</label>
-                  <input value={form.bankName} onChange={(e) => handleChange("bankName", e.target.value)}
-                    placeholder="VD: Vietcombank" className={inputCls} style={inputStyle} />
+                <div className="col-span-2">
+                  <label className={labelCls} style={labelStyle}>Tài khoản ngân hàng (tối đa 5)</label>
+                  <BankAccountsEditor value={form.bankAccounts} onChange={(v) => handleChange("bankAccounts", v)} />
                 </div>
                 <div>
                   <label className={labelCls} style={labelStyle}>Mã số thuế</label>
@@ -1037,13 +1048,11 @@ function EditEmployeeDialog({
                   <input value={form.jobPosition} onChange={(e) => handleChange("jobPosition", e.target.value)}
                     placeholder="VD: Thợ hàn / Thợ mài" className={inputCls} style={inputStyle} />
                 </div>
-                {form.jobRole === "Công nhân" && (
-                  <div>
-                    <label className={labelCls} style={labelStyle}>Cấp bậc</label>
-                    <input value={form.skillLevel} onChange={(e) => handleChange("skillLevel", e.target.value)}
-                      placeholder="VD: Bậc 5" className={inputCls} style={inputStyle} />
-                  </div>
-                )}
+                <div>
+                  <label className={labelCls} style={labelStyle}>Cấp bậc (bậc thợ)</label>
+                  <input value={form.skillLevel} onChange={(e) => handleChange("skillLevel", e.target.value)}
+                    placeholder="VD: Bậc 5" className={inputCls} style={inputStyle} />
+                </div>
               </div>
             </div>
           )}
@@ -1110,6 +1119,8 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
   const [showAddCertificate, setShowAddCertificate] = useState(false);
   const [showEditEmployee, setShowEditEmployee] = useState(false);
   const [showDependentForm, setShowDependentForm] = useState<null | { mode: "create" } | { mode: "edit"; dep: any }>(null);
+  const [viewDocsDep, setViewDocsDep] = useState<any>(null);
+  const [showChildForm, setShowChildForm] = useState<null | { mode: "create" } | { mode: "edit"; child: any }>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
   const [canViewPayroll, setCanViewPayroll] = useState(false);
 
@@ -1369,6 +1380,54 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
         />
       )}
 
+      {showChildForm && employee && (
+        <ChildFormDialog
+          employeeId={employee.id}
+          mode={showChildForm.mode}
+          initial={showChildForm.mode === "edit" ? showChildForm.child : null}
+          onClose={() => setShowChildForm(null)}
+          onSaved={(child, isEdit) => {
+            setEmployee((prev) => {
+              if (!prev) return prev;
+              const list = isEdit
+                ? prev.children.map((x) => (x.id === child.id ? child : x))
+                : [...prev.children, child];
+              return { ...prev, children: list };
+            });
+            setShowChildForm(null);
+          }}
+        />
+      )}
+
+      {viewDocsDep && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => setViewDocsDep(null)}>
+          <div className="w-full max-w-[460px] rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+              <h3 className="text-[15px] font-semibold">Giấy tờ — {viewDocsDep.fullName}</h3>
+              <button onClick={() => setViewDocsDep(null)} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              {viewDocsDep.declaration && (
+                <div className="text-[12px] p-3 rounded-lg" style={{ background: "var(--ibs-bg)", color: "var(--ibs-text-muted)" }}>
+                  <span className="font-semibold">Khai báo:</span> {viewDocsDep.declaration}
+                </div>
+              )}
+              {(!viewDocsDep.documentUrls || viewDocsDep.documentUrls.length === 0) ? (
+                <div className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có giấy tờ đính kèm.</div>
+              ) : (
+                <div className="space-y-2">
+                  {viewDocsDep.documentUrls.map((u: string, i: number) => (
+                    <a key={i} href={viewUrl(u)} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-medium" style={{ background: "rgba(0,180,216,0.1)", color: "var(--ibs-accent)" }}>
+                      <FileText size={14} /> Giấy tờ {i + 1}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tab Content */}
       <div
         className="rounded-xl border p-6"
@@ -1415,8 +1474,16 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
               <h4 className="text-[11px] uppercase tracking-wider font-semibold mb-3 mt-6" style={{ color: "var(--ibs-text-dim)" }}>
                 Thông tin ngân hàng & BH
               </h4>
-              <InfoRow label="Số tài khoản" value={employee.bankAccount} icon={CreditCard} />
-              <InfoRow label="Ngân hàng" value={employee.bankName} />
+              {(() => {
+                const accts = normalizeBankAccounts(employee.bankAccounts);
+                const list: BankAccount[] = accts.length
+                  ? accts
+                  : (employee.bankAccount ? [{ bank: employee.bankName || "", accountNumber: employee.bankAccount }] : []);
+                if (list.length === 0) return <InfoRow label="Tài khoản ngân hàng" value={null} icon={CreditCard} />;
+                return list.map((a, i) => (
+                  <InfoRow key={i} label={a.bank || "Ngân hàng"} value={a.accountNumber} icon={i === 0 ? CreditCard : undefined} />
+                ));
+              })()}
               <InfoRow label="Mã số thuế" value={employee.taxCode} />
               <InfoRow label="Số BHXH" value={employee.insuranceNumber} />
 
@@ -1438,36 +1505,112 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
               ) : (
                 <div className="space-y-2">
                   {employee.dependentsList.map((d) => (
-                    <div key={d.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}>
+                    <div key={d.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", opacity: d.stoppedAt ? 0.7 : 1 }}>
                       <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-medium">
-                          {d.fullName}
-                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>{d.relationship}</span>
+                        <div className="text-[13px] font-medium flex items-center gap-2 flex-wrap">
+                          <button onClick={() => setViewDocsDep(d)} className="hover:underline text-left" title="Bấm để xem giấy tờ" style={{ color: "var(--ibs-text)" }}>{d.fullName}</button>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>{d.relationship}</span>
+                          {d.stoppedAt && <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: "rgba(148,163,184,0.2)", color: "var(--ibs-text-muted)" }}>Đã dừng</span>}
                         </div>
                         <div className="text-[11px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
                           {d.dateOfBirth && <>Sinh: {formatDate(new Date(d.dateOfBirth))}</>}
                           {d.taxCode && <> · MST: {d.taxCode}</>}
                         </div>
+                        {(d.registeredAt || d.stoppedAt) && (
+                          <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
+                            {d.registeredAt && <>Đăng ký: {formatDate(new Date(d.registeredAt))}</>}
+                            {d.stoppedAt && <> · Dừng: {formatDate(new Date(d.stoppedAt))}</>}
+                          </div>
+                        )}
                       </div>
-                      <button
-                        onClick={() => setShowDependentForm({ mode: "edit", dep: d })}
-                        className="p-1.5 rounded-md hover:bg-white/[0.05]"
-                        title="Sửa"
-                        style={{ color: "var(--ibs-text-dim)" }}
-                      >
-                        <Pencil size={13} />
-                      </button>
+                      {!d.stoppedAt && (
+                        <button
+                          onClick={() => setShowDependentForm({ mode: "edit", dep: d })}
+                          className="p-1.5 rounded-md hover:bg-white/[0.05]"
+                          title="Sửa"
+                          style={{ color: "var(--ibs-text-dim)" }}
+                        >
+                          <Pencil size={13} />
+                        </button>
+                      )}
+                      {!d.stoppedAt && (
+                        <button
+                          onClick={async () => {
+                            if (!(await confirmDialog({ message: `Dừng người phụ thuộc "${d.fullName}"? Vẫn lưu lại lịch sử (ngày đăng ký & ngày dừng).`, confirmText: "Dừng" }))) return;
+                            const res = await fetch(`/api/v1/employees/${employee.id}/dependents/${d.id}`, {
+                              method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stoppedAt: new Date().toISOString() }),
+                            });
+                            if (res.ok) {
+                              const j = await res.json();
+                              setEmployee((prev) => prev ? { ...prev, dependentsList: prev.dependentsList.map((x) => x.id === d.id ? j.data : x) } : prev);
+                            }
+                          }}
+                          className="px-2 py-1 rounded-md text-[11px] font-semibold"
+                          title="Dừng người phụ thuộc"
+                          style={{ background: "rgba(234,179,8,0.15)", color: "var(--ibs-warning)" }}
+                        >
+                          Dừng
+                        </button>
+                      )}
                       <button
                         onClick={async () => {
-                          if (!(await confirmDialog({ message: "Xoá người phụ thuộc này?", tone: "danger", confirmText: "Xoá" }))) return;
+                          if (!(await confirmDialog({ message: "Xoá hẳn người phụ thuộc này (mất lịch sử)?", tone: "danger", confirmText: "Xoá" }))) return;
                           const res = await fetch(`/api/v1/employees/${employee.id}/dependents/${d.id}`, { method: "DELETE" });
                           if (res.ok) {
                             setEmployee((prev) => prev ? { ...prev, dependentsList: prev.dependentsList.filter((x) => x.id !== d.id) } : prev);
                           }
                         }}
                         className="p-1.5 rounded-md hover:bg-white/[0.05]"
-                        title="Xoá"
+                        title="Xoá hẳn"
                         style={{ color: "var(--ibs-danger)" }}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Con cái */}
+              <h4 className="text-[11px] uppercase tracking-wider font-semibold mb-3 mt-6 flex items-center justify-between" style={{ color: "var(--ibs-text-dim)" }}>
+                <span>Con cái ({employee.children?.length || 0})</span>
+                <button
+                  onClick={() => setShowChildForm({ mode: "create" })}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-white normal-case"
+                  style={{ background: "var(--ibs-accent)" }}
+                >
+                  <Plus size={11} /> Thêm
+                </button>
+              </h4>
+              {(!employee.children || employee.children.length === 0) ? (
+                <div className="text-[12px] py-3 px-3 rounded-lg" style={{ background: "var(--ibs-bg)", color: "var(--ibs-text-dim)" }}>
+                  Chưa khai báo con cái
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {employee.children.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-medium flex items-center gap-2 flex-wrap">
+                          <button onClick={() => setViewDocsDep(c)} className="hover:underline text-left" title="Bấm để xem giấy tờ" style={{ color: "var(--ibs-text)" }}>{c.fullName}</button>
+                          {c.dateOfBirth && <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>{depAge(String(c.dateOfBirth))} tuổi</span>}
+                        </div>
+                        <div className="text-[11px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
+                          {c.dateOfBirth && <>Sinh: {formatDate(new Date(c.dateOfBirth))}</>}
+                          {c.taxCode && <> · MST: {c.taxCode}</>}
+                          {c.idNumber && <> · CCCD: {c.idNumber}</>}
+                        </div>
+                      </div>
+                      <button onClick={() => setShowChildForm({ mode: "edit", child: c })} className="p-1.5 rounded-md hover:bg-white/[0.05]" title="Sửa" style={{ color: "var(--ibs-text-dim)" }}>
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!(await confirmDialog({ message: "Xoá khai báo con này?", tone: "danger", confirmText: "Xoá" }))) return;
+                          const res = await fetch(`/api/v1/employees/${employee.id}/children/${c.id}`, { method: "DELETE" });
+                          if (res.ok) setEmployee((prev) => prev ? { ...prev, children: prev.children.filter((x) => x.id !== c.id) } : prev);
+                        }}
+                        className="p-1.5 rounded-md hover:bg-white/[0.05]" title="Xoá" style={{ color: "var(--ibs-danger)" }}
                       >
                         <X size={13} />
                       </button>
@@ -1801,6 +1944,18 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
 // ============== DEPENDENT FORM DIALOG ==============
 const RELATIONSHIP_OPTIONS = ["Con", "Bố", "Mẹ", "Vợ", "Chồng", "Anh", "Chị", "Em", "Khác"];
 
+// Tuổi tính đến hôm nay từ chuỗi ngày sinh (yyyy-mm-dd). null nếu không có.
+function depAge(dob: string): number | null {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  let a = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
+  return a;
+}
+
 function DependentFormDialog({
   employeeId,
   mode,
@@ -1819,18 +1974,29 @@ function DependentFormDialog({
     relationship: initial?.relationship || "Con",
     dateOfBirth: initial?.dateOfBirth ? String(initial.dateOfBirth).slice(0, 10) : "",
     taxCode: initial?.taxCode || "",
+    declaration: initial?.declaration || "",
+    registeredAt: initial?.registeredAt ? String(initial.registeredAt).slice(0, 10) : new Date().toISOString().slice(0, 10),
   });
+  const [docUrls, setDocUrls] = useState<string[]>(initial?.documentUrls || []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const age = depAge(form.dateOfBirth);
+  const isOver18 = age !== null && age >= 18;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (docUrls.length === 0) { setError("Vui lòng đính kèm giấy tờ hợp lệ của người phụ thuộc"); return; }
+    if (isOver18 && !form.declaration.trim()) { setError("Người phụ thuộc trên 18 tuổi cần khai báo lý do (đang đi học, mất khả năng lao động...)"); return; }
     setSaving(true);
     try {
       const body: any = {
         fullName: form.fullName.trim(),
         relationship: form.relationship,
+        documentUrls: docUrls,
+        registeredAt: form.registeredAt ? new Date(form.registeredAt).toISOString() : null,
+        declaration: form.declaration.trim() || null,
       };
       if (form.dateOfBirth) body.dateOfBirth = new Date(form.dateOfBirth).toISOString();
       if (form.taxCode.trim()) body.taxCode = form.taxCode.trim();
@@ -1910,14 +2076,68 @@ function DependentFormDialog({
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>MST người phụ thuộc</label>
+              <input
+                value={form.taxCode}
+                onChange={(e) => setForm((f) => ({ ...f, taxCode: e.target.value }))}
+                placeholder="VD: 8123456789"
+                className="w-full px-3 py-2 rounded-lg text-[13px] outline-none"
+                style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }}
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>Ngày đăng ký NPT</label>
+              <DateInput
+                value={form.registeredAt}
+                onChange={(e) => setForm((f) => ({ ...f, registeredAt: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg text-[13px] outline-none"
+                style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }}
+              />
+            </div>
+          </div>
+
+          {isOver18 && (
+            <div>
+              <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>
+                Khai báo (NPT trên 18 tuổi) <span style={{ color: "var(--ibs-danger)" }}>*</span>
+              </label>
+              <textarea
+                value={form.declaration}
+                onChange={(e) => setForm((f) => ({ ...f, declaration: e.target.value }))}
+                rows={2}
+                placeholder="Lý do là người phụ thuộc: đang đi học, mất/hạn chế khả năng lao động, không có thu nhập..."
+                className="w-full px-3 py-2 rounded-lg text-[13px] outline-none resize-none"
+                style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }}
+              />
+            </div>
+          )}
+
           <div>
-            <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>MST người phụ thuộc</label>
-            <input
-              value={form.taxCode}
-              onChange={(e) => setForm((f) => ({ ...f, taxCode: e.target.value }))}
-              placeholder="VD: 8123456789"
-              className="w-full px-3 py-2 rounded-lg text-[13px] outline-none"
-              style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }}
+            <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-muted)" }}>
+              Giấy tờ hợp lệ <span style={{ color: "var(--ibs-danger)" }}>*</span>
+              <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}> (giấy khai sinh, CCCD, xác nhận...)</span>
+            </label>
+            {docUrls.length > 0 && (
+              <div className="space-y-1 mb-2">
+                {docUrls.map((u, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[12px]" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)" }}>
+                    <a href={viewUrl(u)} target="_blank" rel="noreferrer" className="truncate flex items-center gap-1" style={{ color: "var(--ibs-accent)" }}>
+                      <FileText size={12} /> Giấy tờ {i + 1}
+                    </a>
+                    <button type="button" onClick={() => setDocUrls((p) => p.filter((_, idx) => idx !== i))} style={{ color: "var(--ibs-danger)" }}><X size={13} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <FileUpload
+              bucket={BUCKETS.HR_DOCUMENTS}
+              folder="dependents"
+              accept=".pdf,.jpg,.jpeg,.png"
+              label="Tải giấy tờ lên"
+              onUploaded={(r) => setDocUrls((p) => [...p, r.url])}
+              onError={(msg) => setError(msg)}
             />
           </div>
 
@@ -1930,6 +2150,117 @@ function DependentFormDialog({
               style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}>
               {saving ? "Đang lưu..." : (mode === "edit" ? "Cập nhật" : "Thêm")}
             </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ChildFormDialog({
+  employeeId,
+  mode,
+  initial,
+  onClose,
+  onSaved,
+}: {
+  employeeId: string;
+  mode: "create" | "edit";
+  initial: any;
+  onClose: () => void;
+  onSaved: (child: any, isEdit: boolean) => void;
+}) {
+  const [form, setForm] = useState({
+    fullName: initial?.fullName || "",
+    dateOfBirth: initial?.dateOfBirth ? String(initial.dateOfBirth).slice(0, 10) : "",
+    taxCode: initial?.taxCode || "",
+    idNumber: initial?.idNumber || "",
+  });
+  const [docUrls, setDocUrls] = useState<string[]>(initial?.documentUrls || []);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const age = depAge(form.dateOfBirth);
+  const fcls = "w-full px-3 py-2 rounded-lg text-[13px] outline-none";
+  const fst = { background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" } as React.CSSProperties;
+  const lcls = "block text-[12px] font-medium mb-1.5";
+  const lst = { color: "var(--ibs-text-muted)" } as React.CSSProperties;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      const body: any = {
+        fullName: form.fullName.trim(),
+        documentUrls: docUrls,
+        taxCode: form.taxCode.trim() || null,
+        idNumber: form.idNumber.trim() || null,
+      };
+      if (form.dateOfBirth) body.dateOfBirth = new Date(form.dateOfBirth).toISOString();
+      const url = mode === "edit"
+        ? `/api/v1/employees/${employeeId}/children/${initial.id}`
+        : `/api/v1/employees/${employeeId}/children`;
+      const res = await fetch(url, {
+        method: mode === "edit" ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      onSaved(json.data, mode === "edit");
+    } catch {
+      setError("Lỗi kết nối");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+      <div className="w-full max-w-[460px] rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <h3 className="text-[15px] font-semibold">{mode === "edit" ? "Sửa thông tin con" : "Thêm con cái"}</h3>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {error && (
+            <div className="text-[13px] px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>
+          )}
+          <div>
+            <label className={lcls} style={lst}>Họ tên con *</label>
+            <input required value={form.fullName} onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))} placeholder="VD: Nguyễn Văn B" className={fcls} style={fst} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={lcls} style={lst}>Ngày sinh{age !== null && <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}> · {age} tuổi</span>}</label>
+              <DateInput value={form.dateOfBirth} onChange={(e) => setForm((f) => ({ ...f, dateOfBirth: e.target.value }))} className={fcls} style={fst} />
+            </div>
+            <div>
+              <label className={lcls} style={lst}>CCCD (nếu có)</label>
+              <input value={form.idNumber} onChange={(e) => setForm((f) => ({ ...f, idNumber: e.target.value }))} placeholder="012345678901" className={fcls} style={fst} />
+            </div>
+          </div>
+          <div>
+            <label className={lcls} style={lst}>MST (nếu có)</label>
+            <input value={form.taxCode} onChange={(e) => setForm((f) => ({ ...f, taxCode: e.target.value }))} placeholder="VD: 8123456789" className={fcls} style={fst} />
+          </div>
+          <div>
+            <label className={lcls} style={lst}>Giấy tờ chứng minh <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>(sổ hộ khẩu / giấy khai sinh)</span></label>
+            {docUrls.length > 0 && (
+              <div className="space-y-1 mb-2">
+                {docUrls.map((u, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[12px]" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)" }}>
+                    <a href={viewUrl(u)} target="_blank" rel="noreferrer" className="truncate flex items-center gap-1" style={{ color: "var(--ibs-accent)" }}><FileText size={12} /> Giấy tờ {i + 1}</a>
+                    <button type="button" onClick={() => setDocUrls((p) => p.filter((_, idx) => idx !== i))} style={{ color: "var(--ibs-danger)" }}><X size={13} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <FileUpload bucket={BUCKETS.HR_DOCUMENTS} folder="children" accept=".pdf,.jpg,.jpeg,.png" label="Tải giấy tờ lên" onUploaded={(r) => setDocUrls((p) => [...p, r.url])} onError={(msg) => setError(msg)} />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 py-2 rounded-lg text-[13px] font-medium" style={{ border: "1px solid var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Hủy</button>
+            <button type="submit" disabled={saving} className="flex-1 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}>{saving ? "Đang lưu..." : (mode === "edit" ? "Cập nhật" : "Thêm")}</button>
           </div>
         </form>
       </div>

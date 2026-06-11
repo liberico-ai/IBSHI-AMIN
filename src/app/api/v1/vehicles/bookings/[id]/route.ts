@@ -9,6 +9,7 @@ const UpdateSchema = z.object({
   rejectedReason: z.string().optional(),
   actualKm: z.number().int().min(0).optional(),
   returnTime: z.string().optional(),
+  driverName: z.string().optional().nullable(),
   status: z.enum(["PENDING", "APPROVED", "REJECTED", "COMPLETED", "CANCELLED"]).optional(),
 });
 
@@ -36,7 +37,12 @@ export async function PUT(
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
   }
 
-  const { action, rejectedReason, actualKm, returnTime } = parsed.data;
+  const { action, rejectedReason, actualKm, returnTime, driverName } = parsed.data;
+
+  // Duyệt phải kèm chỉ định lái xe.
+  if (action === "APPROVE" && !driverName?.trim()) {
+    return NextResponse.json({ error: { code: "DRIVER_REQUIRED", message: "Cần chỉ định lái xe trước khi duyệt" } }, { status: 422 });
+  }
 
   // CANCEL — owner cũng được. APPROVE/REJECT/COMPLETE chỉ approver.
   const isOwner = booking.requester?.user?.id === userId;
@@ -58,6 +64,7 @@ export async function PUT(
     updateData.approvedAt = new Date();
   }
   if (rejectedReason && action === "REJECT") updateData.rejectedReason = rejectedReason;
+  if (action === "APPROVE" && driverName) updateData.driverName = driverName.trim();
   if (actualKm !== undefined) updateData.actualKm = actualKm;
   if (returnTime !== undefined) updateData.returnTime = returnTime;
 

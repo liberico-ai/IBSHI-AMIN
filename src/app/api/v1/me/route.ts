@@ -10,10 +10,12 @@ export async function GET() {
   }
   const userId = (session.user as any).id;
   const employeeCode = (session.user as any).employeeCode;
-  const emp = await prisma.employee.findFirst({ where: { userId }, select: { id: true } });
+  const emp = await prisma.employee.findFirst({ where: { userId }, select: { id: true, jobRole: true, departmentId: true } });
   return NextResponse.json({
     id: userId,
     employeeId: emp?.id ?? null,
+    jobRole: emp?.jobRole ?? null,
+    departmentId: emp?.departmentId ?? null,
     name: session.user.name,
     email: session.user.email,
     role: (session.user as any).role,

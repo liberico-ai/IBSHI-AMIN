@@ -1,5 +1,18 @@
 import prisma from "@/lib/prisma";
-import { MEAL_UNIT_PRICE } from "@/lib/constants";
+import { MEAL_UNIT_PRICE, MEAL_CUTOFF_HOUR } from "@/lib/constants";
+
+// Chốt giờ đăng ký suất ăn THƯỜNG: trước 9h (giờ VN) ai cũng đăng ký được; từ 9h (cùng ngày)
+// hoặc ngày đã qua → KHÓA với TẤT CẢ (kể cả HCNS), phải chuyển sang Đăng ký bổ sung.
+// Tính theo UTC+7 để đúng giờ VN bất kể múi giờ server. Ngày tương lai vẫn cho đăng ký.
+export function isAfterMealCutoff(dateStr: string): boolean {
+  const nowVN = new Date(Date.now() + 7 * 3600 * 1000);
+  const todayNum = nowVN.getUTCFullYear() * 10000 + nowVN.getUTCMonth() * 100 + nowVN.getUTCDate();
+  const target = new Date(dateStr);
+  const targetNum = target.getUTCFullYear() * 10000 + target.getUTCMonth() * 100 + target.getUTCDate();
+  if (targetNum < todayNum) return true;   // ngày đã qua
+  if (targetNum > todayNum) return false;  // ngày tương lai → cho phép
+  return nowVN.getUTCHours() >= MEAL_CUTOFF_HOUR; // hôm nay: từ 9h trở đi
+}
 
 // Sentinel dùng ở dropdown "Phòng ban" của form đăng ký suất ăn: chọn "Thầu phụ"
 // thay vì một phòng ban thật. Backend ánh xạ sang phòng ban ẩn "Thầu phụ".

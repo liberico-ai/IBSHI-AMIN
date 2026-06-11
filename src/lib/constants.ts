@@ -65,6 +65,12 @@ export const MEAL_CUTOFF_HOUR = 9;
 export const MEAL_SUPP_CUTOFF_HOUR = 10;
 export const MEAL_SUPP_CUTOFF_MINUTE = 30;
 
+// Danh sách lái xe — người duyệt chỉ định lái xe khi duyệt phiếu đặt xe. Cập nhật khi cần.
+export const VEHICLE_DRIVERS = [
+  "Nguyễn Ngọc Toàn",
+  "Lê Ngọc Khanh",
+];
+
 export const SALARY_CONFIG = {
   STANDARD_WORK_DAYS: 26,
   BHXH_MIN_DAYS: 14,                // ≥14 công (đi làm + phép + lễ) mới đóng/trừ BHXH
@@ -122,7 +128,7 @@ export const NAV_ITEMS = [
       { icon: "Users", label: "M4 - Tuyển dụng", href: "/tuyen-dung", badge: 3, badgeType: "warn" as const },
       { icon: "GraduationCap", label: "M5 - Đào tạo", href: "/dao-tao", badge: null },
       { icon: "Trophy", label: "M6 - Đánh giá & KPI", href: "/kpi", badge: null },
-      { icon: "Banknote", label: "M7 - Lương & Phúc lợi", href: "/luong", badge: null },
+      { icon: "Banknote", label: "M7 - Lương & BHXH", href: "/luong", badge: null },
     ],
   },
   {
@@ -135,7 +141,7 @@ export const NAV_ITEMS = [
     subItems: [
       { icon: "DoorOpen", label: "Đặt phòng họp", href: "/hanh-chinh/phong-hop", badge: null },
       { icon: "Car", label: "Quản lý xe", href: "/hanh-chinh/xe", badge: null },
-      { icon: "Wrench", label: "Yêu cầu sửa chữa", href: "/hanh-chinh/sua-chua", badge: null },
+      { icon: "Wrench", label: "Yêu cầu cấp phát, sửa chữa thiết bị VP", href: "/hanh-chinh/sua-chua", badge: null },
       { icon: "Package", label: "Văn phòng phẩm", href: "/hanh-chinh/vpp", badge: null },
       { icon: "UtensilsCrossed", label: "Nhà ăn", href: "/hanh-chinh/nha-an", badge: null },
       { icon: "Sparkles", label: "Vệ sinh", href: "/hanh-chinh/ve-sinh", badge: null },

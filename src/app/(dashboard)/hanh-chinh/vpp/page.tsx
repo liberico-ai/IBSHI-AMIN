@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo } from "react";
 import { PageHeader, Button, Badge } from "@/components/ui";
 import { apiError } from "@/lib/utils";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
-import { Plus, Upload, Check, X, ChevronDown, ChevronRight, FileText, Package } from "lucide-react";
+import { viewUrl } from "@/lib/use-presigned-url";
+import { Plus, Upload, Check, X, ChevronDown, ChevronRight, FileText, Package, Download } from "lucide-react";
 
 type Supplier = { id: string; name: string };
 type Item = { id: string; name: string; unit: string; note?: string | null; currentStock: number };
@@ -32,13 +33,47 @@ const STATUS_BADGE: Record<string, { label: string; variant: "warning" | "info" 
 
 const fmt = (n: number) => Number.isInteger(n) ? n.toString() : n.toFixed(2);
 
+// Dựng & tải Excel từ dữ liệu sẵn có (title + columns + rows).
+async function downloadExcelData(
+  title: string,
+  columns: { header: string; key: string; width?: number }[],
+  rows: Record<string, unknown>[],
+  sheetName: string,
+  filename: string,
+) {
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "IBS ONE Platform";
+  wb.created = new Date();
+  const ws = wb.addWorksheet(sheetName);
+  ws.mergeCells(1, 1, 1, columns.length);
+  const tc = ws.getCell(1, 1);
+  tc.value = title;
+  tc.font = { bold: true, size: 14 };
+  ws.addRow([]);
+  const hr = ws.addRow(columns.map((c) => c.header));
+  hr.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  hr.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } }; });
+  for (const r of rows) ws.addRow(columns.map((c) => (r[c.key] ?? "") as any));
+  columns.forEach((c, i) => { ws.getColumn(i + 1).width = c.width || 16; });
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+const vnDateTime = (d: string) => new Date(d).toLocaleString("vi-VN");
+
 export default function VppPage() {
   const [tab, setTab] = useState<"stock" | "stockIn" | "requests">("stock");
-  const [me, setMe] = useState<{ id: string; role: string } | null>(null);
+  const [me, setMe] = useState<{ id: string; role: string; employeeId: string | null } | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => {
-      if (res?.id) setMe({ id: res.id, role: res.role });
+      if (res?.id) setMe({ id: res.id, role: res.role, employeeId: res.employeeId ?? null });
     });
   }, []);
 
@@ -243,14 +278,19 @@ function StockInTab() {
   const [issuing, setIssuing] = useState(false);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [qty, setQty] = useState<Record<string, string>>({});
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   function load() {
     setLoading(true);
-    fetch("/api/v1/stationery/requests").then((r) => r.json())
+    const params = new URLSearchParams();
+    if (fromDate) params.set("from", fromDate);
+    if (toDate) params.set("to", toDate);
+    fetch(`/api/v1/stationery/requests?${params}`).then((r) => r.json())
       .then((res) => { setRequests(res.data || []); setCanApprove(!!res.canApprove); setSelected({}); setQty({}); })
       .finally(() => setLoading(false));
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [fromDate, toDate]);
 
   // Cộng dồn VPP còn thiếu (quantity − đã cấp) từ các yêu cầu chưa hoàn thành
   const pending = requests.filter((r) => ["PENDING_APPROVAL", "APPROVED"].includes(r.status));
@@ -274,6 +314,20 @@ function StockInTab() {
     return next;
   });
   const checkedCount = agg.filter((a) => selected[a.id]).length;
+
+  function exportExcel() {
+    const rows = agg.map((a) => ({ item: a.name, unit: a.unit, remaining: a.remaining, requesters: Array.from(a.requesters).join(", ") }));
+    downloadExcelData(
+      `DANH SÁCH YÊU CẦU VPP CHỜ CẤP — ${agg.length} loại`,
+      [
+        { header: "VPP", key: "item", width: 28 },
+        { header: "ĐVT", key: "unit", width: 8 },
+        { header: "SL chờ cấp", key: "remaining", width: 12 },
+        { header: "Người yêu cầu", key: "requesters", width: 40 },
+      ],
+      rows, "Yêu cầu VPP", "danh-sach-yeu-cau-vpp.xlsx",
+    ).catch((e) => alertDialog(e?.message || "Export lỗi"));
+  }
 
   async function issueSelected() {
     const items = agg.filter((a) => selected[a.id]).map((a) => {
@@ -301,24 +355,36 @@ function StockInTab() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-4 gap-2">
+      <div className="flex justify-between items-center mb-4 gap-2 flex-wrap">
         <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
           {agg.length} loại VPP chờ cấp (đã cộng dồn){checkedCount > 0 ? ` · đã chọn ${checkedCount}` : ""}
         </span>
-        {canApprove && agg.length > 0 && (
-          <div className="flex gap-2">
-            <button onClick={issueSelected} disabled={issuing || checkedCount === 0}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold border disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}>
-              <Check size={14} /> Cấp phát{checkedCount > 0 ? ` (${checkedCount})` : ""}
-            </button>
-            <button onClick={issueAll} disabled={issuing}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ background: "var(--ibs-accent)" }}>
-              <Check size={14} /> Cấp phát toàn bộ
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Từ</span>
+          <input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>đến</span>
+          <input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          {(fromDate || toDate) && (
+            <button onClick={() => { setFromDate(""); setToDate(""); }} className="text-[11px]" style={{ color: "var(--ibs-accent)" }}>Xóa lọc</button>
+          )}
+          <button onClick={exportExcel} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)", background: "var(--ibs-bg)" }}>
+            <Download size={14} /> Export
+          </button>
+          {canApprove && agg.length > 0 && (
+            <>
+              <button onClick={issueSelected} disabled={issuing || checkedCount === 0}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold border disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}>
+                <Check size={14} /> Cấp phát{checkedCount > 0 ? ` (${checkedCount})` : ""}
+              </button>
+              <button onClick={issueAll} disabled={issuing}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ background: "var(--ibs-accent)" }}>
+                <Check size={14} /> Cấp phát toàn bộ
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="rounded-xl border overflow-hidden" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
@@ -508,20 +574,56 @@ function StockInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   );
 }
 
-function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
+function RequestsTab({ me }: { me: { id: string; role: string; employeeId: string | null } | null }) {
   const [requests, setRequests] = useState<Request[]>([]);
   const [canApprove, setCanApprove] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [statusF, setStatusF] = useState("");
 
   function load() {
     setLoading(true);
-    fetch("/api/v1/stationery/requests").then((r) => r.json()).then((res) => {
+    const params = new URLSearchParams();
+    if (statusF) params.set("status", statusF);
+    if (fromDate) params.set("from", fromDate);
+    if (toDate) params.set("to", toDate);
+    fetch(`/api/v1/stationery/requests?${params}`).then((r) => r.json()).then((res) => {
       setRequests(res.data || []); setCanApprove(!!res.canApprove);
     }).finally(() => setLoading(false));
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [fromDate, toDate, statusF]);
+
+  function exportExcel() {
+    const rows = requests.flatMap((r) => r.items.map((it) => ({
+      date: vnDateTime(r.createdAt),
+      requester: r.requester.fullName,
+      code: r.requester.code,
+      department: r.requester.department.name,
+      status: STATUS_BADGE[r.status]?.label || r.status,
+      reason: r.reason || "",
+      item: it.item.name,
+      quantity: it.quantity,
+      unit: it.item.unit,
+    })));
+    downloadExcelData(
+      `PHIẾU XUẤT VPP — ${requests.length} phiếu`,
+      [
+        { header: "Ngày tạo", key: "date", width: 18 },
+        { header: "Người yêu cầu", key: "requester", width: 22 },
+        { header: "Mã NV", key: "code", width: 12 },
+        { header: "Phòng ban", key: "department", width: 20 },
+        { header: "Trạng thái", key: "status", width: 12 },
+        { header: "Lý do", key: "reason", width: 28 },
+        { header: "VPP", key: "item", width: 26 },
+        { header: "Số lượng", key: "quantity", width: 10 },
+        { header: "ĐVT", key: "unit", width: 8 },
+      ],
+      rows, "Phiếu xuất VPP", "phieu-xuat-vpp.xlsx",
+    ).catch((e) => alertDialog(e?.message || "Export lỗi"));
+  }
 
   async function approve(id: string) {
     await fetch(`/api/v1/stationery/requests/${id}/approve`, { method: "POST" });
@@ -536,7 +638,7 @@ function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
     load();
   }
   async function complete(id: string) {
-    if (!(await confirmDialog("Xác nhận đã cấp VPP cho nhân viên?"))) return;
+    if (!(await confirmDialog("Xác nhận bạn đã nhận ĐỦ số VPP đã yêu cầu?"))) return;
     const res = await fetch(`/api/v1/stationery/requests/${id}/complete`, { method: "POST" });
     if (!res.ok) {
       const d = await res.json();
@@ -568,15 +670,31 @@ function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
 
   return (
     <div>
-      <div className="flex justify-between mb-4">
+      <div className="flex justify-between items-center mb-4 gap-2 flex-wrap">
         <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
           {requests.length} phiếu — {canApprove ? "Xem tất cả (quyền duyệt)" : "Chỉ phiếu bạn tạo"}
         </span>
-        <button onClick={() => setShowNew(true)}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
-          style={{ background: "var(--ibs-accent)" }}>
-          <Plus size={14} /> Tạo phiếu xuất
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+            <option value="">Tất cả trạng thái</option>
+            {Object.entries(STATUS_BADGE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Từ</span>
+          <input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>đến</span>
+          <input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+          {(statusF || fromDate || toDate) && (
+            <button onClick={() => { setStatusF(""); setFromDate(""); setToDate(""); }} className="text-[11px]" style={{ color: "var(--ibs-accent)" }}>Xóa lọc</button>
+          )}
+          <button onClick={exportExcel} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)", background: "var(--ibs-bg)" }}>
+            <Download size={14} /> Export
+          </button>
+          <button onClick={() => setShowNew(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
+            style={{ background: "var(--ibs-accent)" }}>
+            <Plus size={14} /> Tạo phiếu xuất
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -591,7 +709,6 @@ function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
               <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ibs-text-dim)", borderBottom: "1px solid var(--ibs-border)" }}>Đang xử lý</div>
               {others.map((r) => {
                 const st = STATUS_BADGE[r.status] || { label: r.status, variant: "default" as const };
-                const isOwner = me?.id === r.createdById;
                 return (
                   <div key={r.id} className="border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }}>
                     <div className="px-4 py-3 flex items-center justify-between gap-4">
@@ -613,21 +730,21 @@ function RequestsTab({ me }: { me: { id: string; role: string } | null }) {
                       <Badge variant={st.variant}>{st.label}</Badge>
 
                       <div className="flex gap-2 shrink-0 items-center">
-                        {r.fileUrl && <a href={r.fileUrl} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 File</a>}
+                        {r.fileUrl && <a href={viewUrl(r.fileUrl)} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 File</a>}
                         {r.status === "PENDING_APPROVAL" && canApprove && r.createdById !== me?.id && (
                           <>
-                            <Button size="sm" onClick={() => approve(r.id)} style={{ background: "var(--success)" }}>
+                            <button onClick={() => approve(r.id)} className="text-[11px] px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}>
                               <Check size={12} /> Duyệt
-                            </Button>
-                            <Button variant="danger" size="sm" onClick={() => reject(r.id)}>
+                            </button>
+                            <button onClick={() => reject(r.id)} className="text-[11px] px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
                               <X size={12} /> Từ chối
-                            </Button>
+                            </button>
                           </>
                         )}
-                        {r.status === "APPROVED" && (isOwner || me?.role === "BOM") && (
-                          <Button variant="accent" size="sm" onClick={() => complete(r.id)}>
-                            <Check size={12} /> Hoàn thành
-                          </Button>
+                        {r.status === "APPROVED" && me?.employeeId === r.requester.id && (
+                          <button onClick={() => complete(r.id)} className="text-[11px] px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1" style={{ background: "rgba(16,185,129,0.15)", color: "var(--ibs-success)" }}>
+                            <Check size={12} /> Xác nhận
+                          </button>
                         )}
                       </div>
                     </div>

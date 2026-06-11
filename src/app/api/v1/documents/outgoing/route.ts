@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { docDate, docNumber, subject, toEntity, scanFileUrl } = body || {};
+  const { docDate, docNumber, subject, toEntity, senderType, senderName, transportMethod, transportUnit, scanFileUrl } = body || {};
   if (!scanFileUrl) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Vui lòng upload file scan công văn" } }, { status: 400 });
   }
@@ -67,6 +67,10 @@ export async function POST(req: NextRequest) {
       docNumber: docNumber.trim(),
       subject: subject.trim(),
       toEntity: toEntity?.trim() || null,
+      senderType: senderType === "CA_NHAN" ? "CA_NHAN" : "CONG_TY",
+      senderName: senderName?.trim() || null,
+      transportMethod: transportMethod?.trim() || null,
+      transportUnit: transportUnit?.trim() || null,
       body: "", // schema yêu cầu nhưng MVP chỉ lưu trữ scan
       scanUrl: scanFileUrl,
       status: "STORED",

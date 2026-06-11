@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { buildContractHtml, COMPANY_INFO } from "@/lib/contract-doc";
 
-// GET — nội dung HĐ THỬ VIỆC pre-fill cho 1 nhân viên (thời hạn 2 tháng, lương 85% từ thư mời).
+// GET — nội dung HĐ THỬ VIỆC pre-fill cho 1 nhân viên (thời hạn 2 tháng, lương thử việc lấy từ thư mời).
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   });
   if (!emp) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
-  // Lấy lương thử việc (85%) từ Thư mời khớp tên ứng viên
+  // Lấy lương thử việc (HCNS đã nhập) từ Thư mời khớp tên ứng viên
   const offer = await prisma.offerLetter.findFirst({
     where: { candidate: { fullName: emp.fullName } },
     orderBy: { createdAt: "desc" },

@@ -53,7 +53,7 @@ export default function KhachPage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.data?.role || ""));
+    fetch("/api/v1/me").then((r) => r.json()).then((res) => setUserRole(res.role || ""));
     fetch("/api/v1/employees?limit=300").then((r) => r.json()).then((res) => setEmployees(res.data || []));
   }, []);
   useEffect(() => { fetchVisitors(); }, [filterDate, filterStatus]);

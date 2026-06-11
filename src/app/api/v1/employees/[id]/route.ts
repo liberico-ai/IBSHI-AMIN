@@ -30,6 +30,7 @@ export async function GET(
       workHistory: { orderBy: { effectiveDate: "desc" } },
       leaveBalances: { where: { year: new Date().getFullYear() } },
       dependentsList: { orderBy: { createdAt: "asc" } },
+      children: { orderBy: { dateOfBirth: "asc" } },
     },
   });
 
@@ -76,6 +77,7 @@ const UpdateEmployeeSchema = z.object({
   // HR khác
   bankAccount: z.string().optional(),
   bankName: z.string().optional(),
+  bankAccounts: z.array(z.object({ bank: z.string(), accountNumber: z.string() })).max(5).optional(),
   taxCode: z.string().optional(),
   insuranceNumber: z.string().optional(),
   emergencyContact: z.string().optional(),
@@ -124,6 +126,16 @@ export async function PUT(
   if (startDate) updateData.startDate = new Date(startDate);
   if (!canDo(userRole, "employees", "readAll") && updateData.status) {
     delete updateData.status;
+  }
+  // Tài khoản ngân hàng (tối đa 5): lọc TK hợp lệ + đồng bộ TK chính vào field cũ.
+  if (updateData.bankAccounts !== undefined) {
+    const cleaned = (updateData.bankAccounts || [])
+      .map((a: any) => ({ bank: (a?.bank || "").trim(), accountNumber: (a?.accountNumber || "").trim() }))
+      .filter((a: any) => a.bank && a.accountNumber)
+      .slice(0, 5);
+    updateData.bankAccounts = cleaned;
+    updateData.bankAccount = cleaned[0]?.accountNumber ?? null;
+    updateData.bankName = cleaned[0]?.bank ?? null;
   }
 
   const updated = await prisma.employee.update({

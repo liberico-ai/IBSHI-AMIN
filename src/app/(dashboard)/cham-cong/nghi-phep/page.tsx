@@ -5,8 +5,12 @@ import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ApprovalWorkflow } from "@/components/shared/approval-workflow";
 import { formatDate, apiError } from "@/lib/utils";
-import { Plus, X, Calendar, Clock, Download } from "lucide-react";
+import { Plus, X, Calendar, Clock, Download, FileText, AlertTriangle } from "lucide-react";
 import { DateInput } from "@/components/shared/date-input";
+import { FileUpload } from "@/components/shared/file-upload";
+import { BUCKETS } from "@/lib/minio-constants";
+import { viewUrl } from "@/lib/use-presigned-url";
+import { leaveRequiresProof, leaveProofState } from "@/lib/leave-proof";
 
 type LeaveRequest = {
   id: string;
@@ -17,6 +21,9 @@ type LeaveRequest = {
   reason: string;
   status: string;
   rejectedReason?: string;
+  proofUrls?: string[];
+  proofDeadline?: string | null;
+  proofSubmittedAt?: string | null;
   createdAt: string;
   employee: {
     id: string;
@@ -69,7 +76,7 @@ const STATUS_OPTIONS = [
 
 // ── New Leave Request Dialog ──────────────────────────────────────────────────
 function NewLeaveDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (item: LeaveRequest) => void }) {
-  const [form, setForm] = useState({ leaveType: "ANNUAL", startDate: "", endDate: "", reason: "" });
+  const [form, setForm] = useState({ leaveType: "ANNUAL", startDate: "", endDate: "", reason: "", proofUrls: [] as string[] });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,7 +117,7 @@ function NewLeaveDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
       <div className="w-full max-w-[480px] rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
-          <h3 className="text-[15px] font-semibold">Tạo đơn nghỉ phép</h3>
+          <h3 className="text-[15px] font-semibold">Tạo đơn xin nghỉ</h3>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
 
@@ -159,6 +166,26 @@ function NewLeaveDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess
               style={inputStyle}
             />
           </div>
+
+          {leaveRequiresProof(form.leaveType) && (
+            <div>
+              <label className={labelCls} style={labelStyle}>
+                Giấy tờ chứng minh
+                <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}> (có thể bổ sung trong 7 ngày kể từ ngày nghỉ cuối)</span>
+              </label>
+              {form.proofUrls.length > 0 && (
+                <div className="space-y-1 mb-2">
+                  {form.proofUrls.map((u, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[12px]" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)" }}>
+                      <a href={viewUrl(u)} target="_blank" rel="noreferrer" className="truncate flex items-center gap-1" style={{ color: "var(--ibs-accent)" }}><FileText size={12} /> Giấy tờ {i + 1}</a>
+                      <button type="button" onClick={() => setForm((f) => ({ ...f, proofUrls: f.proofUrls.filter((_, idx) => idx !== i) }))} style={{ color: "var(--ibs-danger)" }}><X size={13} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <FileUpload bucket={BUCKETS.HR_DOCUMENTS} folder="leave-proof" accept=".pdf,.jpg,.jpeg,.png" label="Tải giấy tờ lên (có thể bỏ qua, bổ sung sau)" onUploaded={(r) => setForm((f) => ({ ...f, proofUrls: [...f.proofUrls, r.url] }))} onError={(msg) => setError(msg)} />
+            </div>
+          )}
 
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose}
@@ -215,6 +242,58 @@ function RejectDialog({ request, onClose, onConfirm }: { request: LeaveRequest; 
   );
 }
 
+// ── Dialog bổ sung giấy tờ chứng minh ─────────────────────────────────────────
+function ProofUploadDialog({ request, onClose, onSaved }: { request: LeaveRequest; onClose: () => void; onSaved: (r: { id: string; proofUrls: string[]; proofSubmittedAt: string }) => void }) {
+  const [urls, setUrls] = useState<string[]>(request.proofUrls || []);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    if (urls.length === 0) { setError("Vui lòng đính kèm giấy tờ"); return; }
+    setSaving(true);
+    const res = await fetch(`/api/v1/leave-requests/${request.id}/submit-proof`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ proofUrls: urls }),
+    });
+    setSaving(false);
+    if (!res.ok) { const j = await res.json().catch(() => null); setError(apiError(res.status, j?.error)); return; }
+    const j = await res.json();
+    onSaved({ id: request.id, proofUrls: j.data.proofUrls, proofSubmittedAt: j.data.proofSubmittedAt });
+  }
+
+  const han = request.proofDeadline ? formatDate(new Date(request.proofDeadline)) : "";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+      <div className="w-full max-w-[440px] rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <h3 className="text-[15px] font-semibold">Bổ sung giấy tờ chứng minh</h3>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
+            Đơn nghỉ: {formatDate(new Date(request.startDate))} – {formatDate(new Date(request.endDate))}{han ? ` · Hạn bổ sung: ${han}` : ""}
+          </div>
+          {error && <div className="text-[13px] px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+          {urls.length > 0 && (
+            <div className="space-y-1">
+              {urls.map((u, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[12px]" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)" }}>
+                  <a href={viewUrl(u)} target="_blank" rel="noreferrer" className="truncate flex items-center gap-1" style={{ color: "var(--ibs-accent)" }}><FileText size={12} /> Giấy tờ {i + 1}</a>
+                  <button type="button" onClick={() => setUrls((p) => p.filter((_, idx) => idx !== i))} style={{ color: "var(--ibs-danger)" }}><X size={13} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          <FileUpload bucket={BUCKETS.HR_DOCUMENTS} folder="leave-proof" accept=".pdf,.jpg,.jpeg,.png" label="Tải giấy tờ lên" onUploaded={(r) => setUrls((p) => [...p, r.url])} onError={(msg) => setError(msg)} />
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2 rounded-lg text-[13px] font-medium border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Hủy</button>
+            <button type="button" onClick={handleSave} disabled={saving} className="flex-1 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}>{saving ? "Đang lưu..." : "Lưu giấy tờ"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function NghiPhepPage() {
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
@@ -223,6 +302,7 @@ export default function NghiPhepPage() {
   const [showNew, setShowNew] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
+  const [proofModalFor, setProofModalFor] = useState<LeaveRequest | null>(null);
   const [rejectTarget, setRejectTarget] = useState<LeaveRequest | null>(null);
 
   useEffect(() => {
@@ -316,7 +396,7 @@ export default function NghiPhepPage() {
 
   return (
     <div>
-      <PageTitle title="Nghỉ phép" description="Quản lý đơn xin nghỉ phép" />
+      <PageTitle title="Xin Nghỉ" description="Quản lý đơn xin nghỉ phép" />
 
       {/* Summary */}
       <div className="grid grid-cols-3 gap-4 mb-5">
@@ -359,7 +439,7 @@ export default function NghiPhepPage() {
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white"
             style={{ background: "var(--ibs-accent)" }}
           >
-            <Plus size={14} /> Tạo đơn nghỉ phép
+            <Plus size={14} /> Tạo đơn xin nghỉ
           </button>
         </div>
       </div>
@@ -417,13 +497,31 @@ export default function NghiPhepPage() {
                         {r.totalDays} ngày
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-[12px] max-w-[180px]" style={{ color: "var(--ibs-text-muted)" }}>
+                    <td className="px-4 py-3 text-[12px] max-w-[200px]" style={{ color: "var(--ibs-text-muted)" }}>
                       <span className="line-clamp-2">{r.reason}</span>
                       {r.status === "REJECTED" && r.rejectedReason && (
                         <span className="block text-[11px] mt-0.5" style={{ color: "var(--ibs-danger)" }}>
                           Lý do từ chối: {r.rejectedReason}
                         </span>
                       )}
+                      {(() => {
+                        const ps = leaveProofState({ leaveType: r.leaveType, proofSubmittedAt: r.proofSubmittedAt, proofUrls: r.proofUrls, proofDeadline: r.proofDeadline });
+                        if (ps === "NOT_REQUIRED") return null;
+                        if (ps === "SUBMITTED") return (
+                          <span className="mt-1 flex items-center gap-1 text-[11px]" style={{ color: "var(--ibs-success)" }}>
+                            <FileText size={11} /> Đã có giấy tờ
+                            {r.proofUrls?.[0] && <a href={viewUrl(r.proofUrls[0])} target="_blank" rel="noreferrer" className="underline">xem</a>}
+                          </span>
+                        );
+                        const hanStr = r.proofDeadline ? formatDate(new Date(r.proofDeadline)) : "";
+                        return (
+                          <span className="mt-1 flex items-center gap-1.5 flex-wrap text-[11px] font-medium" style={{ color: ps === "OVERDUE" ? "var(--ibs-danger)" : "var(--ibs-warning)" }}>
+                            <AlertTriangle size={11} />
+                            {ps === "OVERDUE" ? `Quá hạn bổ sung giấy tờ (${hanStr})` : `Cần bổ sung giấy tờ — hạn ${hanStr}`}
+                            <button onClick={() => setProofModalFor(r)} className="underline font-semibold" style={{ color: "var(--ibs-accent)" }}>Bổ sung</button>
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={r.status} />
@@ -458,6 +556,17 @@ export default function NghiPhepPage() {
           onSuccess={(item) => {
             setRequests((prev) => [item, ...prev]);
             setShowNew(false);
+          }}
+        />
+      )}
+
+      {proofModalFor && (
+        <ProofUploadDialog
+          request={proofModalFor}
+          onClose={() => setProofModalFor(null)}
+          onSaved={(updated) => {
+            setRequests((prev) => prev.map((r) => (r.id === updated.id ? { ...r, proofUrls: updated.proofUrls, proofSubmittedAt: updated.proofSubmittedAt } : r)));
+            setProofModalFor(null);
           }}
         />
       )}

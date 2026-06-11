@@ -1178,10 +1178,10 @@ export default function LuongPage() {
   if (allowed === false) {
     return (
       <div>
-        <PageTitle title="M7 - Lương & Phúc lợi" description="Quản lý lương, phúc lợi" />
+        <PageTitle title="M7 - Lương & BHXH" description="Quản lý lương, BHXH" />
         <div className="rounded-xl border p-10 text-center text-[14px]"
           style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
-          🔒 Bạn không có quyền truy cập mục Lương &amp; Phúc lợi. Vui lòng liên hệ quản trị nếu cần.
+          🔒 Bạn không có quyền truy cập mục Lương &amp; BHXH. Vui lòng liên hệ quản trị nếu cần.
         </div>
       </div>
     );
@@ -1190,7 +1190,7 @@ export default function LuongPage() {
   return (
     <div>
       <PageTitle
-        title="M7 - Lương & Phúc lợi"
+        title="M7 - Lương & BHXH"
         description="Quản lý kỳ lương, tính lương tự động từ chấm công, phê duyệt và chi trả"
       />
 

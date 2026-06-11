@@ -5,6 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { FileUpload } from "@/components/shared/file-upload";
 import { DateInput } from "@/components/shared/date-input";
 import { BUCKETS } from "@/lib/minio-constants";
+import { viewUrl } from "@/lib/use-presigned-url";
 import { formatDate, apiError } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
@@ -513,7 +514,7 @@ function ProbationContractModal({ rows, onClose, onCreated }: { rows: ProbationR
           <button onClick={onClose}><X size={18} /></button>
         </div>
         <div className="text-[12px] mb-3 p-2.5 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
-          ⓘ Chọn NV thử việc → kiểm tra thông tin (lương 85% tự fill, thời hạn 2 tháng) → <strong>Phát hành</strong>. HĐ sẽ chờ <strong>TP HCNS duyệt</strong> trước khi onboard.
+          ⓘ Chọn NV thử việc → kiểm tra thông tin (lương thử việc lấy từ thư mời, có thể sửa) → <strong>Phát hành</strong>. HĐ sẽ chờ <strong>TP HCNS duyệt</strong> trước khi onboard.
         </div>
 
         {!empId ? (
@@ -540,7 +541,7 @@ function ProbationContractModal({ rows, onClose, onCreated }: { rows: ProbationR
               <div><L>Loại HĐ</L><input value="Thử việc" readOnly className={fcls} style={{ ...fst, opacity: 0.75 }} /></div>
               <div><L>Ngày bắt đầu *</L><DateInput value={startDate} onChange={(e) => setStartDate(e.target.value)} className={fcls} style={fst} /></div>
               <div><L>Ngày kết thúc (2 tháng) *</L><DateInput value={endDate} onChange={(e) => setEndDate(e.target.value)} className={fcls} style={fst} /></div>
-              <div><L>Lương thử việc (85%)</L><input type="text" inputMode="numeric" value={baseSalary} onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setBaseSalary(d ? Number(d).toLocaleString("vi-VN") : ""); }} className={fcls} style={fst} /></div>
+              <div><L>Lương thử việc</L><input type="text" inputMode="numeric" value={baseSalary} onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setBaseSalary(d ? Number(d).toLocaleString("vi-VN") : ""); }} className={fcls} style={fst} /></div>
               <div><L>Chức danh</L><input value={position} onChange={(e) => setPosition(e.target.value)} className={fcls} style={fst} /></div>
             </div>
             <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>NỘI DUNG HĐ THỬ VIỆC (sửa trực tiếp như Word)</div>
@@ -664,7 +665,7 @@ function OnboardingDetailModal({ data, canEdit, onClose, onChanged }: {
               <div className="font-semibold mb-1" style={{ color: "#f59e0b" }}>Đã gia hạn — đến {data.extendedUntil && formatDate(data.extendedUntil)}</div>
               <div style={{ color: "var(--ibs-text-dim)" }}>Lý do: {data.extensionReason}</div>
               {data.extensionDocUrl && (
-                <a href={data.extensionDocUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 text-[11px] hover:underline" style={{ color: "#f59e0b" }}>
+                <a href={viewUrl(data.extensionDocUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 text-[11px] hover:underline" style={{ color: "#f59e0b" }}>
                   <FileText size={11} /> Xem file đã ký
                 </a>
               )}
@@ -780,7 +781,7 @@ function ChecklistItemRow({ item, canEdit, onUpdate, onDelete }: {
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           {item.attachmentUrl ? (
-            <a href={item.attachmentUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] px-2 py-1 rounded" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>
+            <a href={viewUrl(item.attachmentUrl)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] px-2 py-1 rounded" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>
               <FileText size={11} /> Xem file
             </a>
           ) : null}

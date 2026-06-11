@@ -22,6 +22,7 @@ interface DataTableProps<T extends Record<string, unknown>> {
   loading?: boolean;
   emptyText?: string;
   onRowClick?: (row: T) => void;
+  onSearchChange?: (search: string) => void;
 }
 
 export function DataTable<T extends Record<string, unknown>>({
@@ -35,6 +36,7 @@ export function DataTable<T extends Record<string, unknown>>({
   loading = false,
   emptyText,
   onRowClick,
+  onSearchChange,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -78,6 +80,7 @@ export function DataTable<T extends Record<string, unknown>>({
   function handleSearch(val: string) {
     setSearch(val);
     setPage(1);
+    onSearchChange?.(val);
   }
 
   return (

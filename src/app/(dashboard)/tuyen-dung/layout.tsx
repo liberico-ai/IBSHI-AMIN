@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { ModuleTabs, type ModuleTab } from "@/components/shared/module-tabs";
 
 const TABS: ModuleTab[] = [
@@ -10,7 +11,9 @@ const TABS: ModuleTab[] = [
 export default function TuyenDungLayout({ children }: { children: React.ReactNode }) {
   return (
     <div>
-      <ModuleTabs tabs={TABS} />
+      <Suspense fallback={<div className="mb-5 pb-3" />}>
+        <ModuleTabs tabs={TABS} />
+      </Suspense>
       {children}
     </div>
   );

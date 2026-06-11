@@ -23,10 +23,19 @@ const CreateEmployeeSchema = z.object({
   salaryCoefficient: z.number().min(1.0).max(10.0).optional(),
   bankAccount: z.string().optional(),
   bankName: z.string().optional(),
+  bankAccounts: z.array(z.object({ bank: z.string(), accountNumber: z.string() })).max(5).optional(),
   insuranceNumber: z.string().optional(),
   emergencyContact: z.string().optional(),
   emergencyPhone: z.string().optional(),
 });
+
+// Lọc TK hợp lệ (có tên ngân hàng + STK) — tối đa 5.
+function cleanBankAccounts(list?: { bank: string; accountNumber: string }[]) {
+  return (list || [])
+    .map((a) => ({ bank: (a.bank || "").trim(), accountNumber: (a.accountNumber || "").trim() }))
+    .filter((a) => a.bank && a.accountNumber)
+    .slice(0, 5);
+}
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -79,6 +88,7 @@ export async function GET(request: NextRequest) {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
+        children: { select: { dateOfBirth: true } },
       },
       orderBy: { code: "asc" },
       skip: (page - 1) * limit,
@@ -161,8 +171,10 @@ export async function POST(request: NextRequest) {
       startDate: data.startDate,
       salaryGrade: data.salaryGrade,
       salaryCoefficient: data.salaryCoefficient,
-      bankAccount: data.bankAccount,
-      bankName: data.bankName,
+      bankAccounts: cleanBankAccounts(data.bankAccounts),
+      // Đồng bộ TK chính (TK đầu) vào field cũ để tương thích các module khác.
+      bankAccount: cleanBankAccounts(data.bankAccounts)[0]?.accountNumber ?? data.bankAccount,
+      bankName: cleanBankAccounts(data.bankAccounts)[0]?.bank ?? data.bankName,
       insuranceNumber: data.insuranceNumber,
       emergencyContact: data.emergencyContact,
       emergencyPhone: data.emergencyPhone,

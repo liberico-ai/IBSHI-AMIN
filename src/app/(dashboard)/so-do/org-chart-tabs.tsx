@@ -52,16 +52,16 @@ function DeptCard({ code, name, actual, headcount, color, onClick }: {
       <div className="text-[11px] font-bold mb-0.5" style={{ color }}>{code}</div>
       <div className="text-[12px] font-medium mb-1">{name}</div>
       <div className="text-[10px]" style={{ color: "var(--ibs-text-dim)" }}>
-        {actual}/{headcount} CBNV
+        {actual} CBNV
       </div>
     </div>
   );
 }
 
 export function OrgChartTabs({
-  departments,
+  departments: liveDepartments,
   directorates,
-  productionTeams,
+  productionTeams: liveTeams,
 }: {
   departments: Dept[];
   directorates: Directorate[];
@@ -71,9 +71,76 @@ export function OrgChartTabs({
   const [selectedDept, setSelectedDept] = useState<Dept | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<{ id: string; name: string; memberCount: number; actual: number } | null>(null);
 
+  // Snapshot theo tháng
+  const [period, setPeriod] = useState("");                 // "" = hiện tại (live)
+  const [periods, setPeriods] = useState<string[]>([]);
+  const [snapMap, setSnapMap] = useState<Record<string, number> | null>(null);
+  const [canManage, setCanManage] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/v1/org-snapshots").then((r) => r.json()).then((res) => setPeriods(res.data || [])).catch(() => {});
+    fetch("/api/v1/me").then((r) => r.json()).then((res) => setCanManage(["HR_ADMIN", "BOM"].includes(res?.role))).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!period) { setSnapMap(null); return; }
+    fetch(`/api/v1/org-snapshots?period=${period}`).then((r) => r.json()).then((res) => {
+      const m: Record<string, number> = {};
+      for (const row of (res.data || [])) m[row.refId] = row.activeCount;
+      setSnapMap(m);
+    }).catch(() => {});
+  }, [period]);
+
+  // Sĩ số hiệu lực: chọn tháng đã chốt → lấy từ snapshot; mặc định → hiện tại (live).
+  const departments = snapMap ? liveDepartments.map((d) => ({ ...d, actual: snapMap[d.id] ?? 0 })) : liveDepartments;
+  const productionTeams = snapMap ? liveTeams.map((t) => ({ ...t, actual: snapMap[t.id] ?? 0 })) : liveTeams;
+
+  async function captureNow() {
+    setBusy(true);
+    const res = await fetch("/api/v1/org-snapshots", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    setBusy(false);
+    if (res.ok) {
+      const j = await res.json();
+      const list = await fetch("/api/v1/org-snapshots").then((r) => r.json());
+      setPeriods(list.data || []);
+      alert(`Đã chốt snapshot tháng ${j.data?.period}.`);
+    } else {
+      const j = await res.json().catch(() => null);
+      alert(j?.error?.message || "Chốt snapshot thất bại");
+    }
+  }
+
+  async function exportChart() {
+    const { default: ExcelJS } = await import("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Sơ đồ nhân sự");
+    const label = period || "Hiện tại";
+    ws.mergeCells(1, 1, 1, 3);
+    ws.getCell(1, 1).value = `SƠ ĐỒ NHÂN SỰ — ${label}`;
+    ws.getCell(1, 1).font = { bold: true, size: 14 };
+    ws.addRow([]);
+    const h1 = ws.addRow(["Khối", "Phòng ban", "Số NV đang làm"]);
+    h1.font = { bold: true };
+    const sorted = [...departments].sort((a, b) => (a.directorateName || "").localeCompare(b.directorateName || "", "vi"));
+    sorted.forEach((d) => ws.addRow([d.directorateName || "Ban Giám đốc", d.name, d.actual]));
+    ws.addRow(["", "TỔNG CỘNG", departments.reduce((s, d) => s + d.actual, 0)]).font = { bold: true };
+    ws.addRow([]);
+    const h2 = ws.addRow(["Tổ sản xuất", "", "Số NV đang làm"]);
+    h2.font = { bold: true };
+    productionTeams.forEach((t) => ws.addRow([t.name, "", t.actual]));
+    ws.getColumn(1).width = 22; ws.getColumn(2).width = 28; ws.getColumn(3).width = 16;
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `so-do-nhan-su-${label}.xlsx`;
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+
+  // Tạm bỏ định mức nhân sự → ẩn tab Headcount (chỉ còn sơ đồ tổ chức).
   const tabs = [
     { key: "chart" as const, label: "Sơ đồ tổ chức" },
-    { key: "headcount" as const, label: "Headcount" },
   ];
 
   // Group departments by directorate
@@ -102,6 +169,34 @@ export function OrgChartTabs({
             {t.label}
           </button>
         ))}
+      </div>
+
+      {/* Thanh: chọn tháng + chốt + export */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Xem theo tháng:</span>
+        <select value={period} onChange={(e) => setPeriod(e.target.value)}
+          className="px-3 py-2 rounded-lg text-[13px] outline-none border"
+          style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+          <option value="">Hiện tại (trực tiếp)</option>
+          {periods.map((p) => <option key={p} value={p}>Tháng {p.slice(5)}/{p.slice(0, 4)}</option>)}
+        </select>
+        {period && snapMap && (
+          <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>
+            đã chốt {period}
+          </span>
+        )}
+        <button onClick={exportChart}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border"
+          style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
+          ⤓ Export sơ đồ
+        </button>
+        {canManage && (
+          <button onClick={captureNow} disabled={busy}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-white"
+            style={{ background: "var(--ibs-accent)", opacity: busy ? 0.6 : 1 }}>
+            {busy ? "Đang chốt..." : "📌 Chốt snapshot tháng này"}
+          </button>
+        )}
       </div>
 
       {/* Tab: Sơ đồ */}
@@ -194,7 +289,7 @@ export function OrgChartTabs({
                     style={{ background: "rgba(245,158,11,0.08)", borderColor: "rgba(245,158,11,0.3)", color: "#f59e0b", cursor: "pointer" }}>
                     {team.name}
                     <span className="px-1.5 rounded-full text-[10px] font-bold" style={{ background: "rgba(245,158,11,0.2)" }}>
-                      {team.actual}/{team.memberCount}
+                      {team.actual}
                     </span>
                   </button>
                 ))}
@@ -289,10 +384,12 @@ export function OrgChartTabs({
 type EmpRow = {
   id: string;
   employeeId: string;
+  code?: string | null;
   fullName: string;
   jobRole?: string | null;
   position: { name: string } | string | null;
   email: string | null;
+  phone?: string | null;
   status: string;
 };
 
@@ -302,9 +399,9 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/v1/employees?departmentId=${dept.id}&limit=100`)
+    fetch(`/api/v1/employees?departmentId=${dept.id}&limit=1000`)
       .then((r) => r.json())
-      .then((json) => setEmployees(json.data ?? []))
+      .then((json) => setEmployees((json.data ?? []).filter((e: EmpRow) => e.status === "ACTIVE" || e.status === "PROBATION")))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [dept.id]);
@@ -325,7 +422,7 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
           <div>
             <h3 className="text-[15px] font-semibold">{dept.name}</h3>
             <p className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
-              {dept.actual} / {dept.headcount} CBNV
+              {dept.actual} CBNV
             </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 transition-colors">
@@ -347,7 +444,7 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
             <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  {["Mã NV", "Họ và tên", "Chức vụ", "Email", "Trạng thái"].map((h) => (
+                  {["Mã NV", "Họ và tên", "Chức vụ", "SĐT", "Trạng thái"].map((h) => (
                     <th key={h}
                       className="text-left px-4 py-2.5 text-[11px] uppercase tracking-[0.8px] font-semibold border-b"
                       style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>
@@ -360,21 +457,21 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
                 {employees.map((emp) => (
                   <tr key={emp.id} className="border-b hover:bg-white/2 transition-colors"
                     style={{ borderColor: "rgba(51,65,85,0.4)" }}>
-                    <td className="px-4 py-3 text-[12px] font-mono" style={{ color: "var(--ibs-accent)" }}>{emp.employeeId}</td>
+                    <td className="px-4 py-3 text-[12px] font-mono" style={{ color: "var(--ibs-accent)" }}>{emp.code ?? "—"}</td>
                     <td className="px-4 py-3 text-[13px] font-medium">{emp.fullName}</td>
                     <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>
                       {emp.jobRole || (emp.position == null ? "—" : (emp.position as any).name ?? (emp.position as string))}
                     </td>
-                    <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>{emp.email ?? "—"}</td>
+                    <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>{emp.phone ?? "—"}</td>
                     <td className="px-4 py-3">
                       <span
                         className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold"
                         style={{
-                          background: emp.status === "ACTIVE" ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)",
-                          color: emp.status === "ACTIVE" ? "var(--ibs-success)" : "var(--ibs-danger)",
+                          background: "rgba(34,197,94,0.12)",
+                          color: "var(--ibs-success)",
                         }}
                       >
-                        {emp.status === "ACTIVE" ? "Đang làm" : "Đã nghỉ"}
+                        {emp.status === "PROBATION" ? "Thử việc" : "Đang làm"}
                       </span>
                     </td>
                   </tr>
@@ -410,9 +507,9 @@ function TeamEmployeesModal({ team, onClose }: { team: { id: string; name: strin
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/v1/employees?teamId=${team.id}&limit=300`)
+    fetch(`/api/v1/employees?teamId=${team.id}&limit=1000`)
       .then((r) => r.json())
-      .then((json) => setEmps(json.data ?? []))
+      .then((json) => setEmps((json.data ?? []).filter((e: TeamEmp) => e.status === "ACTIVE" || e.status === "PROBATION")))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [team.id]);
@@ -440,7 +537,7 @@ function TeamEmployeesModal({ team, onClose }: { team: { id: string; name: strin
           <div>
             <h3 className="text-[15px] font-semibold">{team.name}</h3>
             <p className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>
-              {activeCount}/{team.memberCount} CBNV · {groups.length} nhóm thợ
+              {activeCount} CBNV · {groups.length} nhóm thợ
             </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors"><X size={18} /></button>
@@ -464,7 +561,7 @@ function TeamEmployeesModal({ team, onClose }: { team: { id: string; name: strin
                         <span><span className="font-mono text-[12px]" style={{ color: "var(--ibs-accent)" }}>{e.code}</span> · {e.fullName}</span>
                         <span className="flex items-center gap-2">
                           {e.skillLevel && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: "rgba(245,158,11,0.12)", color: "#f59e0b" }}>{e.skillLevel}</span>}
-                          {e.status !== "ACTIVE" && <span className="text-[11px]" style={{ color: "var(--ibs-danger)" }}>Đã nghỉ</span>}
+                          {e.status === "PROBATION" && <span className="text-[11px]" style={{ color: "var(--ibs-success)" }}>Thử việc</span>}
                         </span>
                       </div>
                     ))}

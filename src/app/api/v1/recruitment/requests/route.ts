@@ -7,9 +7,15 @@ import { z } from "zod";
 const CreateSchema = z.object({
   departmentId: z.string().uuid(),
   positionName: z.string().min(2),
+  jobDescription: z.string().default(""),
   quantity: z.number().int().min(1).default(1),
   reason: z.string().min(5),
   requirements: z.string().default(""),
+  degreeRequirement: z.string().default(""),
+  salaryMin: z.number().int().nonnegative().optional().nullable(),
+  salaryMax: z.number().int().nonnegative().optional().nullable(),
+  recruitFrom: z.string().optional().nullable(),
+  recruitTo: z.string().optional().nullable(),
 });
 
 export async function GET(request: NextRequest) {
@@ -59,9 +65,12 @@ export async function POST(request: NextRequest) {
   const emp = await prisma.employee.findFirst({ where: { userId: (session.user as any).id } });
   if (!emp) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
+  const { recruitFrom, recruitTo, ...rest } = parsed.data;
   const req = await prisma.recruitmentRequest.create({
     data: {
-      ...parsed.data,
+      ...rest,
+      recruitFrom: recruitFrom ? new Date(recruitFrom) : null,
+      recruitTo: recruitTo ? new Date(recruitTo) : null,
       requestedBy: emp.id,
       status: "PENDING",
     },
