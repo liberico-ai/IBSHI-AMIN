@@ -523,16 +523,16 @@ export default function EmployeesPage() {
             </div>
             <div>
               <label className={lCls} style={lSt}>Chức vụ</label>
-              <select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)} className={fCls} style={fSt}>
+              <select value={jobRoleFilter} onChange={(e) => setJobRoleFilter(e.target.value)} className={fCls} style={fSt}>
                 <option value="">Tất cả</option>
-                {positionOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                {jobRoleOptions.map((j) => <option key={j} value={j}>{j}</option>)}
               </select>
             </div>
             <div>
               <label className={lCls} style={lSt}>Vị trí làm việc</label>
-              <select value={jobRoleFilter} onChange={(e) => setJobRoleFilter(e.target.value)} className={fCls} style={fSt}>
+              <select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)} className={fCls} style={fSt}>
                 <option value="">Tất cả</option>
-                {jobRoleOptions.map((j) => <option key={j} value={j}>{j}</option>)}
+                {positionOptions.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
             <div>
