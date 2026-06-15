@@ -30,14 +30,16 @@ export async function GET(request: NextRequest) {
   const rangeLabel = `${vnDate(from)} – ${vnDate(to)}`;
 
   // ── Đăng ký suất ăn (phòng ban + thầu phụ) ─────────────────────────────────
-  if (type === "registrations") {
+  if (type === "registrations" || type === "registrations-emp") {
+    // registrations-emp = CHỈ nhân viên phòng ban (KHÔNG gồm thầu phụ).
+    const empOnly = type === "registrations-emp";
     const [regs, subMeals] = await Promise.all([
       prisma.mealRegistration.findMany({
         where: { date: { gte: from, lte: to }, department: { isActive: true } },
         include: { department: { select: { name: true } } },
         orderBy: [{ date: "asc" }],
       }),
-      prisma.subcontractorMeal.findMany({
+      empOnly ? Promise.resolve([] as { date: Date; lunchCount: number; dinnerCount: number; subcontractor: { name: string } }[]) : prisma.subcontractorMeal.findMany({
         where: { date: { gte: from, lte: to } },
         include: { subcontractor: { select: { name: true } } },
         orderBy: [{ date: "asc" }],
@@ -48,7 +50,7 @@ export async function GET(request: NextRequest) {
       ...subMeals.map((m) => ({ date: vnDate(m.date), target: `Thầu phụ: ${m.subcontractor.name}`, lunch: m.lunchCount, dinner: m.dinnerCount, guest: 0, total: m.lunchCount + m.dinnerCount })),
     ].sort((a, b) => a.date.localeCompare(b.date));
     return NextResponse.json({ data: {
-      title: `ĐĂNG KÝ SUẤT ĂN — ${rangeLabel}`,
+      title: `${empOnly ? "ĐĂNG KÝ SUẤT ĂN NHÂN VIÊN (KHÔNG THẦU PHỤ)" : "ĐĂNG KÝ SUẤT ĂN"} — ${rangeLabel}`,
       columns: [
         { header: "Ngày", key: "date", width: 14 },
         { header: "Đối tượng", key: "target", width: 28 },

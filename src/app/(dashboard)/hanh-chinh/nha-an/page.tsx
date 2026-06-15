@@ -62,6 +62,55 @@ async function exportMealData(type: string, from: string, to: string, subId?: st
   wb.created = new Date();
   const ws = wb.addWorksheet("Dữ liệu");
 
+  // ── Đăng ký suất ăn: gom theo NGÀY (header ngày + phòng ban bên dưới) + tổng hợp CBNV/Khách/Thầu phụ ──
+  if (type === "registrations" || type === "registrations-emp") {
+    const COLS = [
+      { header: "Đối tượng", width: 30 }, { header: "Trưa", width: 10 },
+      { header: "Tối OT", width: 10 }, { header: "Khách", width: 10 }, { header: "Tổng", width: 10 },
+    ];
+    ws.mergeCells(1, 1, 1, COLS.length);
+    const tc = ws.getCell(1, 1); tc.value = title; tc.font = { bold: true, size: 14 };
+    ws.addRow([]);
+    const hr = ws.addRow(COLS.map((c) => c.header));
+    hr.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    hr.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } }; });
+
+    const toSortKey = (d: string) => { const [dd, mm, yy] = d.split("/"); return `${yy}${mm}${dd}`; };
+    const dates = Array.from(new Set(rows.map((r) => String(r.date)))).sort((a, b) => toSortKey(a).localeCompare(toSortKey(b)));
+    let gEmp = 0, gGuest = 0, gSub = 0;
+    for (const date of dates) {
+      const drows = rows.filter((r) => String(r.date) === date);
+      const sr = ws.addRow([`Ngày ${date}`]);
+      ws.mergeCells(sr.number, 1, sr.number, COLS.length);
+      sr.font = { bold: true, size: 12 };
+      sr.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+      let dL = 0, dD = 0, dG = 0, dT = 0;
+      for (const r of drows) {
+        const lunch = Number(r.lunch) || 0, dinner = Number(r.dinner) || 0, guest = Number(r.guest) || 0, total = Number(r.total) || 0;
+        ws.addRow([String(r.target ?? ""), lunch, dinner, guest, total]);
+        dL += lunch; dD += dinner; dG += guest; dT += total;
+        if (String(r.target ?? "").startsWith("Thầu phụ")) gSub += lunch + dinner; else gEmp += lunch + dinner;
+        gGuest += guest;
+      }
+      const subRow = ws.addRow([`Tổng ngày ${date}`, dL, dD, dG, dT]);
+      subRow.font = { bold: true };
+      subRow.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } }; });
+    }
+    ws.addRow([]);
+    const fh = ws.addRow(["TỔNG HỢP TOÀN BỘ"]); fh.font = { bold: true, size: 12 };
+    for (const [lbl, val] of [["CBNV (trưa + tối)", gEmp], ["Khách", gGuest], ["Thầu phụ", gSub]] as [string, number][]) {
+      const r = ws.addRow([lbl, val]); r.getCell(1).font = { bold: true };
+    }
+    const tr = ws.addRow(["TỔNG CỘNG", gEmp + gGuest + gSub]); tr.font = { bold: true };
+    COLS.forEach((c, i) => { ws.getColumn(i + 1).width = c.width; });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `${type}_${from}_${to}.xlsx`; a.click(); URL.revokeObjectURL(a.href);
+    return;
+  }
+
   ws.mergeCells(1, 1, 1, columns.length);
   const titleCell = ws.getCell(1, 1);
   titleCell.value = title;
@@ -1356,7 +1405,8 @@ function ExportModal({ subcontractors, defaultFrom, defaultTo, canExportHcns, on
 }) {
   // Các loại liên quan chi phí/thực phẩm/thầu phụ chỉ HCNS được export (khớp quyền tab).
   const TYPES = [
-    { value: "registrations", label: "Đăng ký suất ăn", hcns: false },
+    { value: "registrations", label: "Đăng ký suất ăn (NV + thầu phụ)", hcns: false },
+    { value: "registrations-emp", label: "Suất ăn nhân viên (KHÔNG thầu phụ)", hcns: false },
     { value: "supplementary", label: "Đăng ký bổ sung", hcns: false },
     { value: "food-purchases", label: "Lịch sử mua thực phẩm", hcns: true },
     { value: "food-issues", label: "Lịch sử xuất thực kho", hcns: true },
