@@ -23,11 +23,17 @@ type Employee = {
   jobRole?: string | null;
   salaryGrade?: number | null;
   team?: { id: string; name: string } | null;
-  contracts: { contractType: string; status: string; baseSalary: number; endDate?: string | null }[];
+  contracts: { contractType: string; status: string; baseSalary: number; insuranceSalary?: number | null; allowance?: number | null; endDate?: string | null }[];
 };
 
 // HĐ đang hiệu lực (hoặc mới nhất) + số ngày còn lại tới hạn.
 function activeContract(e: Employee) { return e.contracts?.find((c) => c.status === "ACTIVE") || e.contracts?.[0] || null; }
+// Tổng thu nhập = Lương đóng BHXH (hoặc lương chính) + Phụ cấp (theo HĐ đang hiệu lực).
+function totalIncome(e: Employee): number {
+  const c = activeContract(e);
+  if (!c) return 0;
+  return (c.insuranceSalary ?? c.baseSalary ?? 0) + (c.allowance ?? 0);
+}
 function contractDaysLeft(e: Employee): number | null {
   const c = activeContract(e);
   if (!c?.endDate) return null; // vô thời hạn / chưa có HĐ
@@ -103,6 +109,10 @@ export default function EmployeesPage() {
   const [genderFilter, setGenderFilter] = useState("");
   const [ageMin, setAgeMin] = useState("");
   const [ageMax, setAgeMax] = useState("");
+  const [salaryMin, setSalaryMin] = useState("");
+  const [salaryMax, setSalaryMax] = useState("");
+  const [birthMonthFilter, setBirthMonthFilter] = useState("");
+  const [canViewSalary, setCanViewSalary] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [view, setView] = useState<"all" | "incomplete" | "expiring">("all");
   const incompleteOnly = view === "incomplete";
@@ -111,7 +121,7 @@ export default function EmployeesPage() {
     setLoading(true);
     fetch("/api/v1/employees?limit=1000")
       .then((r) => r.json())
-      .then((res) => { setAllEmployees(res.data || []); setTotal(res.total || 0); })
+      .then((res) => { setAllEmployees(res.data || []); setTotal(res.total || 0); setCanViewSalary(!!res.canViewPayroll); })
       .finally(() => setLoading(false));
   }
 
@@ -177,18 +187,29 @@ export default function EmployeesPage() {
       if (ageMin && a < Number(ageMin)) return false;
       if (ageMax && a > Number(ageMax)) return false;
     }
+    // Tháng sinh
+    if (birthMonthFilter) {
+      if (!emp.dateOfBirth || Number(emp.dateOfBirth.slice(5, 7)) !== Number(birthMonthFilter)) return false;
+    }
+    // Khoảng lương (Tổng thu nhập) — chỉ áp dụng khi có quyền xem lương
+    if (canViewSalary && (salaryMin || salaryMax)) {
+      const ti = totalIncome(emp);
+      if (salaryMin && ti < Number(salaryMin)) return false;
+      if (salaryMax && ti > Number(salaryMax)) return false;
+    }
     if (view === "incomplete" && !(["ACTIVE", "PROBATION"].includes(emp.status) && missingFields(emp).length > 0)) return false;
     if (view === "expiring" && !isExpiringSoon(emp)) return false;
     return true;
   }).sort((a, b) => (LEFT_STATUSES.includes(a.status) ? 1 : 0) - (LEFT_STATUSES.includes(b.status) ? 1 : 0)),
-  [allEmployees, deptFilter, statusFilter, nptFilter, childAgeRange, view, joinFrom, joinTo, gradeFilter, jobRoleFilter, positionFilter, teamFilter, contractFilter, genderFilter, ageMin, ageMax]);
+  [allEmployees, deptFilter, statusFilter, nptFilter, childAgeRange, view, joinFrom, joinTo, gradeFilter, jobRoleFilter, positionFilter, teamFilter, contractFilter, genderFilter, ageMin, ageMax, salaryMin, salaryMax, canViewSalary, birthMonthFilter]);
 
   // Đếm số filter đang bật (cho badge) + reset.
-  const activeFilterCount = [deptFilter, statusFilter, nptFilter, childAgeRange, joinFrom, joinTo, gradeFilter, jobRoleFilter, positionFilter, teamFilter, contractFilter, genderFilter, ageMin, ageMax].filter(Boolean).length;
+  const activeFilterCount = [deptFilter, statusFilter, nptFilter, childAgeRange, joinFrom, joinTo, gradeFilter, jobRoleFilter, positionFilter, teamFilter, contractFilter, genderFilter, ageMin, ageMax, salaryMin, salaryMax, birthMonthFilter].filter(Boolean).length;
   function clearAllFilters() {
     setDeptFilter(""); setStatusFilter(""); setNptFilter(""); setChildAgeRange("");
     setJoinFrom(""); setJoinTo(""); setGradeFilter(""); setJobRoleFilter(""); setPositionFilter("");
     setTeamFilter(""); setContractFilter(""); setGenderFilter(""); setAgeMin(""); setAgeMax("");
+    setSalaryMin(""); setSalaryMax(""); setBirthMonthFilter("");
   }
 
   async function handleExport() {
@@ -226,6 +247,45 @@ export default function EmployeesPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url;
     a.download = `danh-sach-cbnv-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  // Export THÔNG TIN LƯƠNG (Tổng thu nhập) — đúng danh sách đang lọc. Chỉ khi có quyền xem lương.
+  async function handleExportSalary() {
+    const { default: ExcelJS } = await import("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Thông tin lương");
+    ws.columns = [
+      { header: "Mã NV", key: "code", width: 10 },
+      { header: "Họ tên", key: "fullName", width: 25 },
+      { header: "Tổ / Đội / Bộ phận", key: "team", width: 20 },
+      { header: "Chức vụ", key: "jobRole", width: 16 },
+      { header: "Vị trí làm việc", key: "position", width: 22 },
+      { header: "Cấp bậc thợ", key: "grade", width: 12 },
+      { header: "Mức lương (Tổng thu nhập)", key: "salary", width: 20 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    const sLower = tableSearch.trim().toLowerCase();
+    const exportList = (sLower
+      ? filtered.filter((e) => e.code.toLowerCase().includes(sLower) || e.fullName.toLowerCase().includes(sLower))
+      : filtered);
+    exportList.forEach((emp) => {
+      ws.addRow({
+        code: emp.code,
+        fullName: emp.fullName,
+        team: emp.team?.name || emp.department?.name || "",
+        jobRole: emp.jobRole || "",
+        position: emp.position?.name || "",
+        grade: emp.salaryGrade ?? "",
+        salary: totalIncome(emp),
+      });
+    });
+    ws.getColumn("salary").numFmt = "#,##0";
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `thong-tin-luong-${new Date().toISOString().slice(0, 10)}.xlsx`;
     a.click(); URL.revokeObjectURL(url);
   }
 
@@ -360,6 +420,13 @@ export default function EmployeesPage() {
       key: "status", header: "Trạng thái",
       render: (row) => <StatusBadge status={(row as unknown as Employee).status} />,
     },
+    ...(canViewSalary ? ([{
+      key: "salary", header: "Mức lương",
+      render: (row) => {
+        const ti = totalIncome(row as unknown as Employee);
+        return <span style={{ color: "var(--ibs-text)" }}>{ti ? ti.toLocaleString("vi-VN") : "—"}</span>;
+      },
+    }] as Column<Record<string, unknown>>[]) : []),
     {
       key: "missing", header: "Thiếu TT",
       render: (row) => {
@@ -471,6 +538,13 @@ export default function EmployeesPage() {
               <Download size={13} /> Export Con cái
             </button>
           )}
+          {canViewSalary && (
+            <button onClick={handleExportSalary}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border transition-colors"
+              style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
+              <Download size={13} /> Export lương
+            </button>
+          )}
           {canDo("employees", "create") && (
             <button onClick={() => setShowCreate(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
@@ -557,6 +631,13 @@ export default function EmployeesPage() {
                 <input type="number" min="0" value={ageMax} onChange={(e) => setAgeMax(e.target.value)} placeholder="đến" className={fCls} style={fSt} />
               </div>
             </div>
+            <div>
+              <label className={lCls} style={lSt}>Tháng sinh</label>
+              <select value={birthMonthFilter} onChange={(e) => setBirthMonthFilter(e.target.value)} className={fCls} style={fSt}>
+                <option value="">Tất cả</option>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>Tháng {m}</option>)}
+              </select>
+            </div>
             <div className="col-span-2">
               <label className={lCls} style={lSt}>Ngày vào làm (từ – đến)</label>
               <div className="flex items-center gap-1">
@@ -579,6 +660,16 @@ export default function EmployeesPage() {
                 {CHILD_AGE_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
+            {canViewSalary && (
+              <div className="col-span-2">
+                <label className={lCls} style={lSt}>Khoảng lương (Tổng thu nhập)</label>
+                <div className="flex items-center gap-1">
+                  <input type="text" inputMode="numeric" value={salaryMin ? Number(salaryMin).toLocaleString("vi-VN") : ""} onChange={(e) => setSalaryMin(e.target.value.replace(/\D/g, ""))} placeholder="từ (đ)" className={fCls} style={fSt} />
+                  <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>–</span>
+                  <input type="text" inputMode="numeric" value={salaryMax ? Number(salaryMax).toLocaleString("vi-VN") : ""} onChange={(e) => setSalaryMax(e.target.value.replace(/\D/g, ""))} placeholder="đến (đ)" className={fCls} style={fSt} />
+                </div>
+              </div>
+            )}
             <div className="col-span-2 md:col-span-4 flex justify-end">
               {activeFilterCount > 0 && (
                 <button onClick={clearAllFilters} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[12px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
