@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canViewPayroll } from "@/lib/access";
 import { z } from "zod";
 import { hashSync } from "bcryptjs";
 import { randomBytes } from "crypto";
@@ -97,7 +98,15 @@ export async function GET(request: NextRequest) {
     prisma.employee.count({ where }),
   ]);
 
-  return NextResponse.json({ data, total, page, limit });
+  // Lương nhạy cảm: chỉ NV trong whitelist xem lương mới nhận được số liệu lương.
+  const canPay = canViewPayroll((session.user as any).employeeCode);
+  if (!canPay) {
+    for (const e of data as any[]) {
+      if (Array.isArray(e.contracts)) for (const c of e.contracts) { c.baseSalary = 0; c.insuranceSalary = 0; c.allowance = 0; }
+    }
+  }
+
+  return NextResponse.json({ data, total, page, limit, canViewPayroll: canPay });
 }
 
 export async function POST(request: NextRequest) {
