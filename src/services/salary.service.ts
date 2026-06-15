@@ -26,7 +26,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // M3: Bảng chấm công đã import (vân tay khối gián tiếp + khuôn mặt khối trực tiếp)
   const attendanceData = await prisma.attendanceRecord.findMany({
     where: { date: { gte: startDate, lte: endDate } },
-    select: { employeeId: true, status: true, workHours: true, otHours: true, date: true, paidLeaveDays: true },
+    select: { employeeId: true, status: true, workHours: true, otHours: true, date: true, paidLeaveDays: true, leaveCode: true },
   });
 
   // CHỈ tính lương cho NV CÓ DỮ LIỆU CHẤM CÔNG trong tháng
@@ -124,22 +124,33 @@ export async function calculatePayrollForPeriod(periodId: string) {
     } else if (d.getUTCDay() === 0) {
       if (wh + oh > 0) ensureOt(a.employeeId).sunday += wh + oh;
     } else {
-      // Ngày thường — đếm công theo workHours/8 (chốt 2026-06-05):
-      //   PRESENT, LATE → workHours / 8 (đi muộn/về sớm BỊ trừ theo giờ thực)
+      // Ngày thường — đếm công theo workHours/8 (chốt 2026-06-15):
+      //   PRESENT, LATE, HALF_DAY → workHours / 8 (tính theo GIỜ THỰC, kể cả nửa ngày)
       //   BUSINESS_TRIP → 1 cố định (đi công tác tính tròn 1 công)
-      //   HALF_DAY      → 0.5 cố định
       //   ABSENT_UNAPPROVED → mục tiêu bù công (NK ngày thường)
-      if (a.status === "PRESENT" || a.status === "LATE") {
+      if (a.status === "PRESENT" || a.status === "LATE" || a.status === "HALF_DAY") {
         // Làm tròn 2 chữ số TRƯỚC khi cộng (chốt 2026-06-08 từ HR):
         //   23 ngày × 7.5h → mỗi ngày 0.94 → cộng = 21.62 công
         //   (KHÁC với cộng giờ trước rồi chia: 23×7.5/8 = 21.5625 → 21.56)
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + Math.round((wh / 8) * 100) / 100;
       } else if (a.status === "BUSINESS_TRIP") {
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 1;
-      } else if (a.status === "HALF_DAY") {
-        workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 0.5;
       } else if (a.status === "ABSENT_UNAPPROVED") {
-        unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
+        // KL (vắng không lương → mục tiêu bù công bằng OT) CHỈ gồm: nghỉ không lương (UL)
+        // + vắng không phép thật (không mã).
+        // LOẠI TRỪ (không phải KL, không bù):
+        //   SL = ốm, ML = thai sản → BHXH chi trả.
+        //   L  = lễ → phòng khi lịch lễ trong file lệch với lịch hệ thống.
+        const code = (a.leaveCode || "").toUpperCase().replace(/[0-9.,\s]/g, "");
+        if (code !== "SL" && code !== "ML" && code !== "L") {
+          unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
+        }
+      }
+      // Nửa ngày KHÔNG lương (vd "0.5UL"): NV làm nửa ngày (HALF_DAY ở trên đã cộng công
+      // phần làm) + nửa còn lại nghỉ không lương → tính phần nghỉ đó là KL để bù (như UL).
+      const ulHalf = (a.leaveCode || "").toUpperCase().replace(",", ".").match(/^(\d*\.?\d+)UL$/);
+      if (ulHalf && a.status === "HALF_DAY") {
+        unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + parseFloat(ulHalf[1]);
       }
       // Nghỉ phép có lương: đã cộng từ paidLeaveDays ở trên (không suy từ status nữa).
       if (oh > 0) ensureOt(a.employeeId).weekday += oh;                 // OT ngày thường
