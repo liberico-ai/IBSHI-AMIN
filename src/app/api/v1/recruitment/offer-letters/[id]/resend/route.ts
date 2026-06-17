@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { sendMail } from "@/lib/mail";
+import { presignFileUrl } from "@/lib/minio";
 
 // Gửi lại email (dùng PDF đã render trước đó nếu có; nếu không có pdfUrl → báo lỗi)
 export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -36,10 +37,11 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
     }, { status: 429 });
   }
 
-  // Fetch PDF từ MinIO URL
-  const r = await fetch(offer.pdfUrl);
-  if (!r.ok) {
-    return NextResponse.json({ error: { code: "PDF_FETCH_FAILED" } }, { status: 500 });
+  // Tải PDF từ MinIO. Bucket HR là PRIVATE → phải ký URL (presigned), KHÔNG fetch URL thô (sẽ 403).
+  const signedUrl = await presignFileUrl(offer.pdfUrl);
+  const r = signedUrl ? await fetch(signedUrl) : null;
+  if (!r || !r.ok) {
+    return NextResponse.json({ error: { code: "PDF_FETCH_FAILED", message: "Không tải được file PDF thư mời từ kho lưu trữ" } }, { status: 500 });
   }
   const pdfBuf = Buffer.from(await r.arrayBuffer());
 
