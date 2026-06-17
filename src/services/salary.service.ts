@@ -69,6 +69,29 @@ export async function calculatePayrollForPeriod(periodId: string) {
     where: { date: { gte: startDate, lte: endDate }, status: "APPROVED" },
     select: { employeeId: true, date: true, hours: true, otRate: true },
   });
+
+  // ── OT CỘNG DỒN từ đầu năm → hết tháng TRƯỚC kỳ này (cap 200h miễn thuế OT) ──
+  const yearStart = new Date(period.year, 0, 1);
+  const priorOtMap: Record<string, number> = {};
+  if (startDate > yearStart) {
+    const [priorAtt, priorOt] = await Promise.all([
+      prisma.attendanceRecord.findMany({
+        where: { date: { gte: yearStart, lt: startDate } },
+        select: { employeeId: true, date: true, workHours: true, otHours: true },
+      }),
+      prisma.oTRequest.findMany({
+        where: { date: { gte: yearStart, lt: startDate }, status: "APPROVED" },
+        select: { employeeId: true, hours: true },
+      }),
+    ]);
+    for (const a of priorAtt) {
+      const d = new Date(a.date); const wh = a.workHours || 0, oh = a.otHours || 0;
+      // CN/Lễ: toàn bộ giờ làm tính OT; ngày thường: chỉ giờ OT.
+      const h = (isHoliday(d) || d.getUTCDay() === 0) ? wh + oh : oh;
+      if (h > 0) priorOtMap[a.employeeId] = (priorOtMap[a.employeeId] || 0) + h;
+    }
+    for (const o of priorOt) priorOtMap[o.employeeId] = (priorOtMap[o.employeeId] || 0) + (o.hours || 0);
+  }
   // Build set "employeeId|YYYY-MM-DD" để service biết NV nào có OTRequest cho ngày nào.
   // Dùng để xác định: wh ngày CN/Lễ chỉ cộng vào công thường NẾU NV có OTRequest tương ứng
   // (NV không có OTRequest = NV không được nhập vào sheet "Thêm giờ" của HR → wh ngày CN/Lễ bị bỏ qua).
@@ -258,6 +281,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       pieceRate: manualMap[emp.id]?.pieceRate || 0,
       // adjustment + mealBonus cùng cộng vào Gross (cả 2 đều là số phẳng nhập tay)
       adjustment: (manualMap[emp.id]?.adjustment || 0) + (manualMap[emp.id]?.mealBonus || 0),
+      priorOtHours: priorOtMap[emp.id] || 0, // OT cộng dồn từ đầu năm → cap 200h miễn thuế
     };
 
     const out = calculateSalary(input);
@@ -290,6 +314,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       otSunday: otAfter.sunday, otSundayNight: 0,
       otHoliday: otAfter.holiday, otHolidayNight: 0,
       otHoursTotal: out.otHoursTotal,
+      priorOtHours: priorOtMap[emp.id] || 0,         // OT cộng dồn từ T1 → hết tháng trước (cap 200h)
       otConvertedHours: out.otConvertedHours,        // giờ; /8 = ngày OT quy đổi
       otFillHours: out.otFillHours,                  // giờ OT dùng bù (1×)
       otPaidHours: out.otPaidHours,                  // giờ OT hưởng hệ số

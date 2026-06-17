@@ -36,6 +36,7 @@ export interface SalaryInput {
   bonusAllowance?: number;   // Bổ sung lương (trách nhiệm + nhà xa) — số phẳng, cộng vào Gross/Net
   pieceRate?: number;        // Lương sản phẩm/khoán (nhập theo kỳ) — chịu thuế
   adjustment?: number;       // Điều chỉnh/bổ sung tay theo kỳ (có thể âm) — chịu thuế
+  priorOtHours?: number;     // Tổng giờ OT đã cộng dồn từ tháng 1 → hết tháng TRƯỚC kỳ này (cho cap 200h miễn thuế)
 }
 
 export interface SalaryOutput {
@@ -166,11 +167,14 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const bhxhEmployee = eligibleBHXH ? Math.round(bhxhBase * INSURANCE_RATES.EMPLOYEE_TOTAL) : 0;
   const bhxhEmployer = eligibleBHXH ? Math.round(bhxhBase * INSURANCE_RATES.EMPLOYER_TOTAL) : 0;
 
-  // TNCN — chỉ miễn PHẦN VƯỢT của OT (theo luật): chênh trên mức lương giờ thường.
-  // Mỗi giờ OT hưởng hệ số: phần 1× (= giờ × đơn giá giờ) vẫn chịu thuế, chỉ phần (hệ số − 1) được miễn.
-  // Giờ OT dùng để bù (1×) không có phần vượt → không miễn.
-  const otPaidBase = Math.round(otPaidHours * hourlyRateFull); // phần 1× của giờ OT đã nhân hệ số (chịu thuế)
-  const otTaxExempt = Math.max(0, salaryOT - otPaidBase);      // phần vượt → miễn thuế
+  // TNCN — MIỄN THUẾ tiền OT theo cap 200h CỘNG DỒN cả năm (chốt 2026-06-17, theo HR):
+  //   - Tổng giờ OT (cộng dồn từ T1) ≤ 200h → MIỄN TOÀN BỘ tiền OT của phần giờ trong 200h.
+  //   - Phần giờ OT VƯỢT 200h → tiền OT của phần đó CHỊU thuế.
+  //   - Trong tháng vượt ngưỡng: tách theo tỉ lệ giờ trong/ngoài 200h.
+  const priorOt = Math.max(0, input.priorOtHours || 0);
+  const withinCapHours = Math.max(0, Math.min(otHoursTotal, SALARY_CONFIG.OT_TAX_FREE_HOURS_YEAR - priorOt));
+  const otExemptRatio = otHoursTotal > 0 ? withinCapHours / otHoursTotal : 0;
+  const otTaxExempt = Math.round(salaryOT * otExemptRatio); // tiền OT của số giờ trong 200h → miễn
   const taxableIncome = Math.max(0, grossSalary - otTaxExempt);
   const personalDeduction =
     SALARY_CONFIG.PERSONAL_DEDUCTION + input.dependentsCount * SALARY_CONFIG.DEPENDENT_DEDUCTION;

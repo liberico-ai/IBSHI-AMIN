@@ -78,6 +78,7 @@ export const SALARY_CONFIG = {
   // ── Giảm trừ gia cảnh (Nghị quyết mới 2025) ──
   PERSONAL_DEDUCTION: 15500000,     // Giảm trừ bản thân
   DEPENDENT_DEDUCTION: 6200000,     // Giảm trừ / 1 người phụ thuộc
+  OT_TAX_FREE_HOURS_YEAR: 200,      // Tiền OT miễn thuế cho ≤200h OT cộng dồn/năm; phần vượt chịu thuế
   // ── Hệ số OT (6 loại theo spec IBSHI) ──
   OT_RATE_WEEKDAY: 1.5,             // 5.1 ngày thường
   OT_RATE_WEEKDAY_NIGHT: 2.0,       // 5.2 đêm ngày thường
