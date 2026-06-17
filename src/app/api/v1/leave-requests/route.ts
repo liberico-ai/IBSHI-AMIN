@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
-import { isInPast } from "@/lib/validation";
 import { leaveRequiresProof, proofDeadlineFrom } from "@/lib/leave-proof";
 
 const CreateLeaveSchema = z.object({
@@ -74,9 +73,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (isInPast(startDate)) {
+  // Cho phép tạo đơn cho ngày trong QUÁ KHỨ, nhưng tối đa tới hết MÙNG 10 của tháng SAU
+  // tháng nghỉ (theo ngày bắt đầu). VD nghỉ trong tháng 6 → tạo đơn được đến hết 10/7.
+  // Áp dụng cho MỌI loại nghỉ.
+  const dl = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 10)); // mùng 10 tháng sau
+  const nowVN = new Date(Date.now() + 7 * 3600 * 1000);
+  const todayNum = nowVN.getUTCFullYear() * 10000 + (nowVN.getUTCMonth() + 1) * 100 + nowVN.getUTCDate();
+  const dlNum = dl.getUTCFullYear() * 10000 + (dl.getUTCMonth() + 1) * 100 + dl.getUTCDate();
+  if (todayNum > dlNum) {
     return NextResponse.json(
-      { error: { code: "VALIDATION_ERROR", message: "Ngày bắt đầu không được là ngày trong quá khứ" } },
+      { error: { code: "VALIDATION_ERROR", message: `Quá hạn tạo đơn cho ngày nghỉ này. Chỉ được tạo đơn đến hết mùng 10 tháng sau (hạn: ${dl.getUTCDate()}/${dl.getUTCMonth() + 1}/${dl.getUTCFullYear()}).` } },
       { status: 400 }
     );
   }

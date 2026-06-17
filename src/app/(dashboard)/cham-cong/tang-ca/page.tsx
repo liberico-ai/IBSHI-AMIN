@@ -46,9 +46,9 @@ const OT_RATE_LABELS: Record<string, string> = {
 // ── New OT Dialog ──────────────────────────────────────────────────────────────
 function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (item: OTRequest) => void }) {
   const [form, setForm] = useState({ date: "", startTime: "17:30", endTime: "20:00", reason: "" });
-  const [emps, setEmps] = useState<{ id: string; fullName: string; team?: { id: string; name: string } | null }[]>([]);
+  const [emps, setEmps] = useState<{ id: string; fullName: string; team?: { id: string; name: string } | null; department?: { id: string; name: string } | null }[]>([]);
   const [empsLoaded, setEmpsLoaded] = useState(false);
-  const [teamId, setTeamId] = useState("");
+  const [groupKey, setGroupKey] = useState(""); // "dept:<id>" hoặc "team:<id>"
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,24 +58,41 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
       .then((res) => setEmps(res.data || [])).catch(() => {}).finally(() => setEmpsLoaded(true));
   }, []);
 
+  const departments = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of emps) if (e.department?.id) m.set(e.department.id, e.department.name);
+    return Array.from(m.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [emps]);
   const teams = useMemo(() => {
     const m = new Map<string, string>();
     for (const e of emps) if (e.team?.id) m.set(e.team.id, e.team.name);
     return Array.from(m.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }, [emps]);
-  const teamMembers = useMemo(() => emps.filter((e) => e.team?.id === teamId), [emps, teamId]);
 
-  // Tổ trưởng chỉ có 1 tổ → tự chọn sẵn.
+  function membersOfKey(key: string) {
+    if (!key) return [];
+    const [type, id] = key.split(":");
+    return emps.filter((e) => type === "dept" ? e.department?.id === id : e.team?.id === id);
+  }
+  const groupMembers = useMemo(() => membersOfKey(groupKey), [emps, groupKey]); // eslint-disable-line
+  const groupName = useMemo(() => {
+    if (!groupKey) return "";
+    const [type, id] = groupKey.split(":");
+    return (type === "dept" ? departments.find((d) => d.id === id)?.name : teams.find((t) => t.id === id)?.name) || "";
+  }, [groupKey, departments, teams]);
+
+  // Tổ trưởng chỉ có đúng 1 tổ → tự chọn sẵn.
   useEffect(() => {
-    if (teams.length === 1 && !teamId) {
-      setTeamId(teams[0].id);
-      setMemberIds(emps.filter((e) => e.team?.id === teams[0].id).map((e) => e.id));
+    if (teams.length === 1 && !groupKey) {
+      const k = "team:" + teams[0].id;
+      setGroupKey(k);
+      setMemberIds(membersOfKey(k).map((e) => e.id));
     }
-  }, [teams, teamId, emps]);
+  }, [teams, groupKey, emps]); // eslint-disable-line
 
-  function selectTeam(tid: string) {
-    setTeamId(tid);
-    setMemberIds(emps.filter((e) => e.team?.id === tid).map((e) => e.id)); // mặc định chọn cả tổ
+  function selectGroup(key: string) {
+    setGroupKey(key);
+    setMemberIds(membersOfKey(key).map((e) => e.id)); // mặc định chọn cả nhóm
     setError(null);
   }
   function toggleMember(id: string) {
@@ -97,16 +114,16 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!teamId) { setError("Vui lòng chọn Tổ"); return; }
+    if (!groupKey) { setError("Vui lòng chọn Phòng ban / Tổ"); return; }
     if (memberIds.length === 0) { setError("Vui lòng chọn ít nhất 1 nhân sự"); return; }
     setSaving(true);
     try {
-      const team = teams.find((t) => t.id === teamId);
+      const groupId = groupKey.split(":")[1] || null;
       const memberNames = emps.filter((e2) => memberIds.includes(e2.id)).map((e2) => e2.fullName);
       const res = await fetch("/api/v1/ot-requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, teamId, teamName: team?.name || null, memberIds, memberNames }),
+        body: JSON.stringify({ ...form, teamId: groupId, teamName: groupName || null, memberIds, memberNames }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -146,21 +163,30 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           )}
 
           <div>
-            <label className={labelCls} style={labelStyle}>Tổ <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
-            <select required value={teamId} onChange={(e) => selectTeam(e.target.value)} className={inputCls} style={inputStyle}>
-              <option value="">-- Chọn tổ --</option>
-              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            <label className={labelCls} style={labelStyle}>Phòng ban / Tổ <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+            <select required value={groupKey} onChange={(e) => selectGroup(e.target.value)} className={inputCls} style={inputStyle}>
+              <option value="">-- Chọn phòng ban / tổ --</option>
+              {departments.length > 0 && (
+                <optgroup label="Phòng ban">
+                  {departments.map((d) => <option key={"dept:" + d.id} value={"dept:" + d.id}>{d.name}</option>)}
+                </optgroup>
+              )}
+              {teams.length > 0 && (
+                <optgroup label="Tổ">
+                  {teams.map((t) => <option key={"team:" + t.id} value={"team:" + t.id}>{t.name}</option>)}
+                </optgroup>
+              )}
             </select>
-            {empsLoaded && teams.length === 0 && <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Chưa có tổ sản xuất để chọn.</p>}
+            {empsLoaded && departments.length === 0 && teams.length === 0 && <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Chưa có phòng ban / tổ để chọn.</p>}
           </div>
 
-          {teamId && (
+          {groupKey && (
             <div>
-              <label className={labelCls} style={labelStyle}>Nhân sự tăng ca <span style={{ color: "var(--ibs-danger)" }}>*</span> <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>({memberIds.length}/{teamMembers.length})</span></label>
+              <label className={labelCls} style={labelStyle}>Nhân sự tăng ca <span style={{ color: "var(--ibs-danger)" }}>*</span> <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>({memberIds.length}/{groupMembers.length})</span></label>
               <div className="max-h-[160px] overflow-y-auto rounded-lg border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg)" }}>
-                {teamMembers.length === 0 ? (
-                  <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Tổ này chưa có nhân sự đang làm.</div>
-                ) : teamMembers.map((m) => (
+                {groupMembers.length === 0 ? (
+                  <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Nhóm này chưa có nhân sự đang làm.</div>
+                ) : groupMembers.map((m) => (
                   <label key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer hover:bg-white/[0.04]">
                     <input type="checkbox" checked={memberIds.includes(m.id)} onChange={() => toggleMember(m.id)} />
                     {m.fullName}

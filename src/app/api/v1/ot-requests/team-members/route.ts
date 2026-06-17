@@ -17,9 +17,9 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
-  const where: any = { status: { in: ["ACTIVE", "PROBATION"] }, teamId: { not: null } };
+  const where: any = { status: { in: ["ACTIVE", "PROBATION"] } };
   if (["HR_ADMIN", "BOM"].includes(role)) {
-    // HCNS / BGĐ: tất cả NV có tổ.
+    // HCNS / BGĐ: tất cả NV (mọi phòng ban + tổ).
   } else if (emp?.jobRole === "Tổ trưởng" && emp?.teamId) {
     where.teamId = emp.teamId; // Tổ trưởng → CHỈ tổ mình phụ trách.
   } else if (emp?.departmentId) {
@@ -28,7 +28,11 @@ export async function GET(_req: NextRequest) {
 
   const data = await prisma.employee.findMany({
     where,
-    select: { id: true, fullName: true, team: { select: { id: true, name: true } } },
+    select: {
+      id: true, fullName: true,
+      team: { select: { id: true, name: true } },
+      department: { select: { id: true, name: true } },
+    },
     orderBy: { fullName: "asc" },
   });
   return NextResponse.json({ data });
