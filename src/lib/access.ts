@@ -27,3 +27,13 @@ export const ROOM_VEHICLE_APPROVERS = new Set<string>([
 export function canApproveRoomVehicle(employeeCode?: string | null): boolean {
   return !!employeeCode && ROOM_VEHICLE_APPROVERS.has(employeeCode);
 }
+
+// Danh sách NV được TOÀN QUYỀN tab "Chi phí mua thực phẩm" (Nhà ăn) dù không phải HCNS.
+export const FOOD_PURCHASE_MANAGERS = new Set<string>([
+  "190089", // Nguyễn Thị Thu Nguyệt (P. Thương mại)
+]);
+
+/** Có được toàn quyền tab "Chi phí mua thực phẩm" không? */
+export function canManageFoodPurchase(employeeCode?: string | null): boolean {
+  return !!employeeCode && FOOD_PURCHASE_MANAGERS.has(employeeCode);
+}

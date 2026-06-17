@@ -8,6 +8,7 @@ import Link from "next/link";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { DateInput } from "@/components/shared/date-input";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
+import { canManageFoodPurchase } from "@/lib/access";
 
 type CostItem = { departmentId: string; departmentName: string; lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number; totalMeals: number; totalCost: number };
 type CostMeta = { grandTotal: number; unitPrice: number; month: number; year: number; guestMeals?: number; guestMealCost?: number; feedback?: { avgRating: number | null; count: number } };
@@ -165,6 +166,7 @@ export default function NhaAnPage() {
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState("");
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
+  const [myEmployeeCode, setMyEmployeeCode] = useState("");
   const [showRegister, setShowRegister] = useState(false);
   const [showSupplementary, setShowSupplementary] = useState(false);
   const [suppReqs, setSuppReqs] = useState<SupplementaryReq[]>([]);
@@ -320,6 +322,7 @@ export default function NhaAnPage() {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => {
       setUserRole(res.role || "");
       setMyEmployeeId(res.employeeId || null);
+      setMyEmployeeCode(res.employeeCode || "");
     });
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepartments(res.data || []));
     fetchSubcontractors();
@@ -356,6 +359,8 @@ export default function NhaAnPage() {
   }
 
   const isHRAdmin = userRole === "HR_ADMIN" || userRole === "BOM";
+  // NV được cấp riêng toàn quyền tab "Chi phí mua thực phẩm" (food) dù không phải HCNS.
+  const isFoodManager = isHRAdmin || canManageFoodPurchase(myEmployeeCode);
 
   return (
     <div>
@@ -433,7 +438,7 @@ export default function NhaAnPage() {
       {/* Tabs */}
       <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         {(["registrations", "supplementary", "feedback", "food", "cost", "subcontractors"] as const)
-          .filter((t) => isHRAdmin || !["food", "cost", "subcontractors"].includes(t))
+          .filter((t) => t === "food" ? isFoodManager : (["cost", "subcontractors"].includes(t) ? isHRAdmin : true))
           .map((t) => (
           <button key={t} onClick={() => { setTab(t); if (t === "supplementary") fetchSupplementary(); if (t === "cost") fetchCostReport(); if (t === "food") fetchFood(); if (t === "subcontractors") fetchSubcontractors(); }}
             className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { computeFifo } from "@/lib/food-inventory";
+import { canManageFoodPurchase } from "@/lib/access";
 
 // Sổ chi phí mua thực phẩm theo ngày. HCNS (HR_ADMIN/BOM) quản lý.
 const CreateSchema = z.object({
@@ -15,8 +16,8 @@ const CreateSchema = z.object({
   })).min(1),
 });
 
-function canManage(role: string): boolean {
-  return role === "HR_ADMIN" || role === "BOM";
+function canManage(role: string, employeeCode?: string | null): boolean {
+  return role === "HR_ADMIN" || role === "BOM" || canManageFoodPurchase(employeeCode);
 }
 
 export async function GET(request: NextRequest) {
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     data,
-    meta: { month, year, total, issueCostTotal, inventory, inventoryValue, canManage: canManage((session.user as any).role) },
+    meta: { month, year, total, issueCostTotal, inventory, inventoryValue, canManage: canManage((session.user as any).role, (session.user as any).employeeCode) },
   });
 }
 
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canManage(role)) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được nhập chi phí thực phẩm" } }, { status: 403 });
+  if (!canManage(role, (session.user as any).employeeCode)) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được nhập chi phí thực phẩm" } }, { status: 403 });
 
   const parsed = CreateSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
@@ -74,7 +75,7 @@ export async function DELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
-  if (!canManage(role)) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canManage(role, (session.user as any).employeeCode)) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
