@@ -491,14 +491,12 @@ function OfferDetailModal({ data, canEdit, canApprove, onClose, onChanged }: {
 }) {
   const [showApproveModal, setShowApproveModal] = useState<"approve" | "reject" | null>(null);
   const [showResultModal, setShowResultModal] = useState<"ACCEPTED" | "DECLINED" | null>(null);
-  const [busy, setBusy] = useState(false);
 
   async function handleResend() {
+    onClose(); // đóng modal trước để hộp xác nhận không bị che
     if (!(await confirmDialog("Gửi lại email cho ứng viên?"))) return;
-    setBusy(true);
     const res = await fetch(`/api/v1/recruitment/offer-letters/${data.id}/resend`, { method: "POST" });
-    setBusy(false);
-    if (res.ok) { onChanged(); onClose(); }
+    if (res.ok) { onChanged(); }
     else { const d = await res.json(); await alertDialog(apiError(res.status, d.error)); }
   }
 
@@ -585,7 +583,7 @@ function OfferDetailModal({ data, canEdit, canApprove, onClose, onChanged }: {
 
         {/* Resend if APPROVED but not sent OR SENT */}
         {(data.status === "APPROVED" || data.status === "SENT") && canApprove && (
-          <button type="button" onClick={handleResend} disabled={busy} className="px-3 py-2 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 border" style={{ borderColor: "rgba(59,130,246,0.4)", color: "#3b82f6" }}>
+          <button type="button" onClick={handleResend} className="px-3 py-2 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 border" style={{ borderColor: "rgba(59,130,246,0.4)", color: "#3b82f6" }}>
             <Send size={13} /> {data.status === "APPROVED" ? "Gửi email lần đầu" : "Gửi lại email"}
           </button>
         )}
