@@ -838,8 +838,8 @@ function ImportBhxhModal({
         {!preview && !confirmed && (
           <div className="flex flex-col gap-3">
             <p className="text-[12.5px]" style={{ color: "var(--ibs-text-dim)" }}>
-              Upload file Excel BHXH do HCNS tính ngoài. Cần các cột: <b>Mã NV</b>, <b>BHXH (8%)</b>, <b>BHYT (1.5%)</b>, <b>BHTN (1%)</b>, <b>BHXH Công ty (21.5%)</b>.
-              Hệ thống đối chiếu Mã NV với DB rồi hiển thị preview trước khi ghi.
+              Upload file Excel BHXH do HCNS tính ngoài — hỗ trợ <b>thẳng file BHXH chuẩn</b> (có nhóm "10.5% Người lao động" / "21.5% Công ty đóng", cột Cộng NLĐ + Cộng Cty) hoặc file theo mẫu.
+              Hệ thống lấy: Mã NV, BHXH 8% / BHYT 1.5% / BHTN 1% (NLĐ — <b>trừ</b> vào lương) và Cộng Cty 21.5% (<b>chỉ báo cáo, KHÔNG trừ</b>).
             </p>
             <div>
               <button onClick={downloadTemplate} className="text-[12px] underline" style={{ color: "var(--ibs-accent)" }}>⬇ Tải file mẫu</button>

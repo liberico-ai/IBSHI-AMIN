@@ -52,10 +52,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const empByCode = new Map(employees.map((e) => [e.code, e]));
 
   const matched: any[] = [];
-  const notFound: { code: string; name: string }[] = [];
+  const notFound: { code: string }[] = [];
   for (const r of rows) {
     const emp = empByCode.get(r.code);
-    if (!emp) { notFound.push({ code: r.code, name: r.name }); continue; }
+    if (!emp) { notFound.push({ code: r.code }); continue; }
     const employeeTotal = r.bhxh8 + r.bhyt15 + r.bhtn1;
     matched.push({ employeeId: emp.id, fullName: emp.fullName, ...r, employeeTotal });
   }
