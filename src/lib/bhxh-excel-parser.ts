@@ -1,28 +1,31 @@
 // Parser file Excel BHXH (HCNS tính ngoài rồi import).
-// Cột nhận diện theo TÊN HEADER (không phụ thuộc vị trí cố định):
-//   Mã NV | BHXH (8%) | BHYT (1.5%) | BHTN (1%) | BHXH Công ty (21.5%)
-// Trả về list { code, name, bhxh8, bhyt15, bhtn1, bhxhEmployer }.
+// Hỗ trợ 2 dạng file:
+//   (A) File thật của HCNS: header 2 tầng + nhóm "10.5% Người lao động" / "21.5% Công ty đóng",
+//       có cột tổng "Cộng NLĐ" và "Cộng Cty". Nhận diện theo 2 neo này.
+//   (B) File mẫu đơn giản (nút "Tải file mẫu"): 1 dòng header
+//       Mã NV | Họ tên | BHXH (8%) | BHYT (1.5%) | BHTN (1%) | BHXH Công ty (21.5%).
+// Lấy: Mã NV, BHXH 8%, BHYT 1.5%, BHTN 1% (NLĐ — khoản TRỪ), BHXH Công ty 21.5% (chỉ báo cáo, KHÔNG trừ).
 import * as XLSX from "xlsx";
 
+// Nhận diện cột theo neo "Cộng NLĐ"/"Cộng Cty" (file thật) hoặc header mẫu (rev 2).
 const norm = (v: any) =>
-  (v ?? "").toString().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  (v ?? "").toString().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim();
 
-// Số tiền: nhận number hoặc chuỗi "1.234.567" / "1,234,567" → int (đồng).
+// Số tiền: number → Math.round; chuỗi "1.234.567"/"1,234,567" → int (đồng).
 function toInt(v: any): number {
   if (v == null || v === "") return 0;
   if (typeof v === "number") return Math.round(v);
-  const s = v.toString().replace(/[^\d.,-]/g, "").replace(/[.,](?=\d{3}\b)/g, ""); // bỏ dấu phân cách hàng nghìn
+  const s = v.toString().replace(/[^\d.,-]/g, "").replace(/[.,](?=\d{3}\b)/g, "");
   const n = parseFloat(s.replace(",", "."));
   return Number.isFinite(n) ? Math.round(n) : 0;
 }
 
 export interface BhxhRow {
   code: string;
-  name: string;
   bhxh8: number;
   bhyt15: number;
   bhtn1: number;
-  bhxhEmployer: number;
+  bhxhEmployer: number; // Cộng Cty (21.5%) — chỉ báo cáo, KHÔNG trừ vào lương
 }
 
 export function parseBhxhExcel(buf: ArrayBuffer): BhxhRow[] {
@@ -31,42 +34,54 @@ export function parseBhxhExcel(buf: ArrayBuffer): BhxhRow[] {
   if (!ws) throw new Error("File Excel rỗng / không đọc được sheet");
   const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
 
-  // Tìm dòng header: dòng có ô chứa "ma" (Mã NV) + ít nhất 1 ô BHXH/BHYT/BHTN.
-  let headerIdx = -1;
-  for (let i = 0; i < Math.min(rows.length, 15); i++) {
-    const cells = (rows[i] || []).map(norm);
-    const hasCode = cells.some((c) => (c.includes("ma") && (c.includes("nv") || c.includes("nhan vien"))) || c === "ma");
-    const hasBhxh = cells.some((c) => c.includes("bhxh") || c.includes("bhyt") || c.includes("bhtn"));
-    if (hasCode && hasBhxh) { headerIdx = i; break; }
+  // 1) Tìm cột Mã NV (quét tối đa 20 dòng đầu).
+  let codeCol = -1, codeRow = -1;
+  for (let i = 0; i < Math.min(rows.length, 20) && codeCol === -1; i++) {
+    (rows[i] || []).forEach((c, j) => {
+      const h = norm(c);
+      if (codeCol === -1 && (h.includes("ma nv") || (h.startsWith("ma") && h.includes("nv")))) { codeCol = j; codeRow = i; }
+    });
   }
-  if (headerIdx === -1) throw new Error('Không tìm thấy dòng tiêu đề (cần cột "Mã NV" + các cột BHXH/BHYT/BHTN)');
-
-  const header = (rows[headerIdx] || []).map(norm);
-  let codeCol = -1, nameCol = -1, c8 = -1, c15 = -1, c1 = -1, cEmp = -1;
-  header.forEach((h, idx) => {
-    if (!h) return;
-    // Công ty / 21.5% phải xét TRƯỚC "bhxh" để không nhầm với BHXH 8%.
-    if (cEmp === -1 && (h.includes("cong ty") || h.includes("21.5") || h.includes("21,5") || h.includes("doanh nghiep"))) { cEmp = idx; return; }
-    if (codeCol === -1 && ((h.includes("ma") && (h.includes("nv") || h.includes("nhan vien"))) || h === "ma")) { codeCol = idx; return; }
-    if (nameCol === -1 && (h.includes("ho ten") || h.includes("ten") )) { nameCol = idx; return; }
-    if (c8 === -1 && h.includes("bhxh") && (h.includes("8") || !h.includes("cong ty"))) { c8 = idx; return; }
-    if (c15 === -1 && (h.includes("bhyt") || h.includes("1.5") || h.includes("1,5"))) { c15 = idx; return; }
-    if (c1 === -1 && (h.includes("bhtn") || h.includes("that nghiep"))) { c1 = idx; return; }
-  });
   if (codeCol === -1) throw new Error('Không tìm thấy cột "Mã NV"');
 
+  // 2) Tìm dòng có "Cộng NLĐ" + "Cộng Cty" (file thật) → neo cột theo vị trí.
+  let bhxh8 = -1, bhyt15 = -1, bhtn1 = -1, employer = -1, dataStart = codeRow + 1;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const cells = (rows[i] || []).map(norm);
+    const cNLD = cells.findIndex((c) => c.includes("cong nld"));
+    const cCty = cells.findIndex((c) => c.includes("cong cty") || c.includes("cong ct "));
+    if (cNLD >= 3 && cCty >= 0) {
+      bhxh8 = cNLD - 3; bhyt15 = cNLD - 2; bhtn1 = cNLD - 1; employer = cCty;
+      dataStart = i + 1;
+      break;
+    }
+  }
+
+  // 3) Nếu không có neo "Cộng NLĐ/Cty" → file mẫu đơn giản: dò cột theo tên header ở dòng Mã NV.
+  if (bhxh8 === -1) {
+    const header = (rows[codeRow] || []).map(norm);
+    header.forEach((h, idx) => {
+      if (!h) return;
+      if (employer === -1 && (h.includes("cong ty") || h.includes("21.5") || h.includes("21,5") || h.includes("doanh nghiep"))) { employer = idx; return; }
+      if (bhxh8 === -1 && h.includes("bhxh") && (h.includes("8") || !h.includes("cong ty"))) { bhxh8 = idx; return; }
+      if (bhyt15 === -1 && (h.includes("bhyt") || h.includes("1.5") || h.includes("1,5"))) { bhyt15 = idx; return; }
+      if (bhtn1 === -1 && (h.includes("bhtn") || h.includes("that nghiep"))) { bhtn1 = idx; return; }
+    });
+    dataStart = codeRow + 1;
+  }
+
+  // 4) Đọc dữ liệu. Bỏ qua dòng trống + dòng "số thứ tự cột" (mã 1-3 chữ số).
   const out: BhxhRow[] = [];
-  for (let i = headerIdx + 1; i < rows.length; i++) {
+  for (let i = dataStart; i < rows.length; i++) {
     const r = rows[i] || [];
     const code = (r[codeCol] ?? "").toString().trim();
-    if (!code) continue;
+    if (!code || /^\d{1,3}$/.test(code)) continue;
     out.push({
       code,
-      name: nameCol >= 0 ? (r[nameCol] ?? "").toString().trim() : "",
-      bhxh8: c8 >= 0 ? toInt(r[c8]) : 0,
-      bhyt15: c15 >= 0 ? toInt(r[c15]) : 0,
-      bhtn1: c1 >= 0 ? toInt(r[c1]) : 0,
-      bhxhEmployer: cEmp >= 0 ? toInt(r[cEmp]) : 0,
+      bhxh8: bhxh8 >= 0 ? toInt(r[bhxh8]) : 0,
+      bhyt15: bhyt15 >= 0 ? toInt(r[bhyt15]) : 0,
+      bhtn1: bhtn1 >= 0 ? toInt(r[bhtn1]) : 0,
+      bhxhEmployer: employer >= 0 ? toInt(r[employer]) : 0,
     });
   }
   if (out.length === 0) throw new Error("Không có dòng dữ liệu NV nào trong file");
