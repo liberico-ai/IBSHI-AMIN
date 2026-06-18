@@ -2168,6 +2168,7 @@ model StationeryRequestItem {
   itemId    String
   quantity  Float
   issuedQuantity Float @default(0)  // số đã cấp phát (cho phép cấp một phần khi hàng về thiếu)
+  confirmedQuantity Float @default(0)  // số NV đã xác nhận đã nhận (xác nhận từng phần theo số đã cấp)
   note      String?
 
   request StationeryRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)

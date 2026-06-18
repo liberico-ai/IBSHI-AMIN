@@ -5,6 +5,7 @@ import { PageHeader, Button, Badge } from "@/components/ui";
 import { apiError } from "@/lib/utils";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { viewUrl } from "@/lib/use-presigned-url";
+import { canManageVpp } from "@/lib/access";
 import { Plus, Upload, Check, X, ChevronDown, ChevronRight, FileText, Package, Download } from "lucide-react";
 
 type Supplier = { id: string; name: string };
@@ -14,7 +15,7 @@ type StockIn = {
   supplier: { id: string; name: string };
   items: { quantity: number; item: { id: string; name: string; unit: string } }[];
 };
-type RequestItem = { quantity: number; note?: string; item: { id: string; name: string; unit: string; currentStock: number } };
+type RequestItem = { quantity: number; issuedQuantity: number; confirmedQuantity: number; note?: string; item: { id: string; name: string; unit: string; currentStock: number } };
 type Request = {
   id: string; status: string; reason: string; fileUrl: string;
   createdAt: string; approvedAt?: string; completedAt?: string; rejectedReason?: string;
@@ -69,13 +70,15 @@ const vnDateTime = (d: string) => new Date(d).toLocaleString("vi-VN");
 
 export default function VppPage() {
   const [tab, setTab] = useState<"stock" | "stockIn" | "requests">("stock");
-  const [me, setMe] = useState<{ id: string; role: string; employeeId: string | null } | null>(null);
+  const [me, setMe] = useState<{ id: string; role: string; employeeId: string | null; employeeCode: string | null } | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => {
-      if (res?.id) setMe({ id: res.id, role: res.role, employeeId: res.employeeId ?? null });
+      if (res?.id) setMe({ id: res.id, role: res.role, employeeId: res.employeeId ?? null, employeeCode: res.employeeCode ?? null });
     });
   }, []);
+
+  const canSeeStockIn = canManageVpp(me?.role, me?.employeeCode);
 
   return (
     <div>
@@ -84,7 +87,7 @@ export default function VppPage() {
       <div className="flex gap-2 mb-4">
         {[
           { k: "stock", label: "Danh sách VPP", icon: Package },
-          { k: "stockIn", label: "Danh sách yêu cầu VPP", icon: FileText },
+          ...(canSeeStockIn ? [{ k: "stockIn", label: "Danh sách yêu cầu VPP", icon: FileText }] : []),
           { k: "requests", label: "Phiếu xuất VPP", icon: FileText },
         ].map((t) => {
           const Icon = t.icon;
@@ -102,7 +105,7 @@ export default function VppPage() {
       </div>
 
       {tab === "stock" && <StockTab />}
-      {tab === "stockIn" && <StockInTab />}
+      {tab === "stockIn" && canSeeStockIn && <StockInTab />}
       {tab === "requests" && <RequestsTab me={me} />}
     </div>
   );
@@ -292,8 +295,9 @@ function StockInTab() {
   }
   useEffect(() => { load(); }, [fromDate, toDate]);
 
-  // Cộng dồn VPP còn thiếu (quantity − đã cấp) từ các yêu cầu chưa hoàn thành
-  const pending = requests.filter((r) => ["PENDING_APPROVAL", "APPROVED"].includes(r.status));
+  // Cộng dồn VPP còn thiếu (quantity − đã cấp) — CHỈ từ yêu cầu ĐÃ DUYỆT.
+  // (Yêu cầu mới tạo / chờ duyệt chỉ hiện ở tab "Phiếu xuất VPP"; duyệt xong mới vào đây.)
+  const pending = requests.filter((r) => r.status === "APPROVED");
   const aggMap = new Map<string, { id: string; name: string; unit: string; note?: string | null; remaining: number; requesters: Set<string> }>();
   for (const r of pending) {
     for (const it of r.items) {
@@ -301,7 +305,7 @@ function StockInTab() {
       if (rem <= 0) continue;
       const cur = aggMap.get(it.item.id) || { id: it.item.id, name: it.item.name, unit: it.item.unit, note: it.item.note, remaining: 0, requesters: new Set<string>() };
       cur.remaining += rem;
-      cur.requesters.add(r.requester?.fullName || "—");
+      cur.requesters.add(`${r.requester?.department?.name ? r.requester.department.name + " - " : ""}${r.requester?.fullName || "—"}`);
       aggMap.set(it.item.id, cur);
     }
   }
@@ -323,7 +327,7 @@ function StockInTab() {
         { header: "VPP", key: "item", width: 28 },
         { header: "ĐVT", key: "unit", width: 8 },
         { header: "SL chờ cấp", key: "remaining", width: 12 },
-        { header: "Người yêu cầu", key: "requesters", width: 40 },
+        { header: "Phòng/Người yêu cầu", key: "requesters", width: 40 },
       ],
       rows, "Yêu cầu VPP", "danh-sach-yeu-cau-vpp.xlsx",
     ).catch((e) => alertDialog(e?.message || "Export lỗi"));
@@ -370,7 +374,8 @@ function StockInTab() {
           <button onClick={exportExcel} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)", background: "var(--ibs-bg)" }}>
             <Download size={14} /> Export
           </button>
-          {canApprove && agg.length > 0 && (
+          {/* Tab này chỉ hiện với người trong whitelist VPP → ai vào được đều có quyền cấp phát. */}
+          {agg.length > 0 && (
             <>
               <button onClick={issueSelected} disabled={issuing || checkedCount === 0}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold border disabled:opacity-40 disabled:cursor-not-allowed"
@@ -638,12 +643,16 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
     load();
   }
   async function complete(id: string) {
-    if (!(await confirmDialog("Xác nhận bạn đã nhận ĐỦ số VPP đã yêu cầu?"))) return;
+    if (!(await confirmDialog("Xác nhận bạn đã nhận số VPP đã được cấp phát? (chỉ xác nhận phần đã cấp; phần chưa cấp đủ vẫn giữ phiếu lại)"))) return;
     const res = await fetch(`/api/v1/stationery/requests/${id}/complete`, { method: "POST" });
     if (!res.ok) {
       const d = await res.json();
       await alertDialog("Lỗi: " + apiError(res.status, d.error));
       return;
+    }
+    const d = await res.json().catch(() => null);
+    if (d?.meta && d.meta.completed === false) {
+      await alertDialog("Đã xác nhận phần được cấp. Phiếu vẫn còn vì chưa được cấp đủ — sẽ xác nhận tiếp khi cấp thêm.");
     }
     load();
   }
@@ -672,7 +681,7 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
     <div>
       <div className="flex justify-between items-center mb-4 gap-2 flex-wrap">
         <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
-          {requests.length} phiếu — {canApprove ? "Xem tất cả (quyền duyệt)" : "Chỉ phiếu bạn tạo"}
+          {requests.length} phiếu — {canApprove ? "Xem tất cả (toàn quyền)" : "Phiếu của phòng bạn"}
         </span>
         <div className="flex items-center gap-2 flex-wrap">
           <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="rounded-lg px-2 py-1.5 text-[12px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
@@ -742,9 +751,13 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
                           </>
                         )}
                         {r.status === "APPROVED" && me?.employeeId === r.requester.id && (
-                          <button onClick={() => complete(r.id)} className="text-[11px] px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1" style={{ background: "rgba(16,185,129,0.15)", color: "var(--ibs-success)" }}>
-                            <Check size={12} /> Xác nhận
-                          </button>
+                          r.items.some((it) => (it.issuedQuantity || 0) > (it.confirmedQuantity || 0)) ? (
+                            <button onClick={() => complete(r.id)} className="text-[11px] px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1" style={{ background: "rgba(16,185,129,0.15)", color: "var(--ibs-success)" }}>
+                              <Check size={12} /> Xác nhận đã nhận
+                            </button>
+                          ) : (
+                            <span className="text-[11px] px-2 py-1" style={{ color: "var(--ibs-text-dim)" }}>Chờ cấp phát</span>
+                          )
                         )}
                       </div>
                     </div>
@@ -755,20 +768,29 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
                           <thead>
                             <tr style={{ color: "var(--ibs-text-dim)" }}>
                               <th className="px-2 py-1 text-left">VPP</th>
-                              <th className="px-2 py-1 text-right">SL</th>
+                              <th className="px-2 py-1 text-right">Yêu cầu</th>
+                              <th className="px-2 py-1 text-right">Đã cấp</th>
+                              <th className="px-2 py-1 text-right">Đã nhận</th>
                               <th className="px-2 py-1 text-left">ĐVT</th>
                               <th className="px-2 py-1 text-left">Ghi chú</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {r.items.map((it, i) => (
+                            {r.items.map((it, i) => {
+                              const issued = it.issuedQuantity || 0;
+                              const confirmed = it.confirmedQuantity || 0;
+                              const pending = issued > confirmed;
+                              return (
                               <tr key={i} className="border-t" style={{ borderColor: "var(--ibs-border)" }}>
                                 <td className="px-2 py-1">{it.item.name}</td>
                                 <td className="px-2 py-1 text-right font-semibold">{fmt(it.quantity)}</td>
+                                <td className="px-2 py-1 text-right" style={{ color: issued >= it.quantity ? "var(--ibs-success)" : "var(--ibs-warning)" }}>{fmt(issued)}</td>
+                                <td className="px-2 py-1 text-right" style={{ color: pending ? "var(--ibs-accent)" : "var(--ibs-text-dim)" }}>{fmt(confirmed)}{pending ? ` (+${fmt(issued - confirmed)})` : ""}</td>
                                 <td className="px-2 py-1">{it.item.unit}</td>
                                 <td className="px-2 py-1" style={{ color: "var(--ibs-text-dim)" }}>{it.note || "—"}</td>
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                         {r.rejectedReason && <div className="mt-2 text-[12px]" style={{ color: "var(--ibs-danger)" }}>❌ Lý do từ chối: {r.rejectedReason}</div>}

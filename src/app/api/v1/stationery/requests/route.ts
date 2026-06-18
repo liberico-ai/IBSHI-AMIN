@@ -23,8 +23,15 @@ export async function GET(request: NextRequest) {
   const userId = (session.user as any).id;
   const canApprove = await isStationeryApprover(userId);
 
-  // Mặc định: HCNS staff chỉ thấy phiếu mình tạo. TP HCNS / BOM thấy tất cả.
-  const where: any = canApprove ? {} : { createdById: userId };
+  // Toàn quyền (3 người chỉ định + BGĐ) → thấy TẤT CẢ.
+  // Nhân sự thường → chỉ thấy yêu cầu + lịch sử của PHÒNG mình (theo phòng của người yêu cầu).
+  let where: any = {};
+  if (!canApprove) {
+    const meEmp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
+    where = meEmp?.departmentId
+      ? { requester: { departmentId: meEmp.departmentId } }
+      : { createdById: userId }; // không có phòng → chỉ thấy phiếu của mình
+  }
 
   // Filter theo trạng thái + khoảng ngày (createdAt).
   const { searchParams } = new URL(request.url);
