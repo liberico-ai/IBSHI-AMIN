@@ -12,7 +12,7 @@
 //  - BHXH 10,5% × Lương đóng BHXH — CHỈ khi (đi làm + phép + lễ) ≥ 14 công.
 //  - TNCN: 5 bậc + giảm trừ; phần OT (đã nhân hệ số) được miễn thuế.
 
-import { SALARY_CONFIG, TAX_BRACKETS, INSURANCE_RATES } from "./constants";
+import { SALARY_CONFIG, TAX_BRACKETS } from "./constants";
 
 // 6 loại OT + hệ số (xếp giảm dần để áp quy tắc "bù lấy hệ số cao nhất trước")
 export interface OTHours {
@@ -37,6 +37,8 @@ export interface SalaryInput {
   pieceRate?: number;        // Lương sản phẩm/khoán (nhập theo kỳ) — chịu thuế
   adjustment?: number;       // Điều chỉnh/bổ sung tay theo kỳ (có thể âm) — chịu thuế
   priorOtHours?: number;     // Tổng giờ OT đã cộng dồn từ tháng 1 → hết tháng TRƯỚC kỳ này (cho cap 200h miễn thuế)
+  importedBhxhEmployee?: number; // BHXH NLĐ (8%+1.5%+1%) HCNS tính NGOÀI rồi import — khoản TRỪ (hệ thống không tự tính)
+  importedBhxhEmployer?: number; // BHXH công ty 21.5% (import — chỉ để báo cáo chi phí)
 }
 
 export interface SalaryOutput {
@@ -161,11 +163,10 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const salaryOT = Math.round(otPayMultiplied);
   const grossSalary = salaryWorkActual + leavePay + salaryOT + bonusAllowance + pieceRate + adjustment;
 
-  // BHXH — chỉ trừ khi đủ ≥14 công (gồm phép + lễ)
-  const bhxhBase = Math.min(input.insuranceSalary, SALARY_CONFIG.INSURANCE_SALARY_CAP);
-  const eligibleBHXH = effectiveDays >= SALARY_CONFIG.BHXH_MIN_DAYS; // ≥14 công
-  const bhxhEmployee = eligibleBHXH ? Math.round(bhxhBase * INSURANCE_RATES.EMPLOYEE_TOTAL) : 0;
-  const bhxhEmployer = eligibleBHXH ? Math.round(bhxhBase * INSURANCE_RATES.EMPLOYER_TOTAL) : 0;
+  // BHXH — KHÔNG tự tính nữa (bỏ rule ≥14 công + tự nhân hệ số).
+  // Lấy thẳng từ file HCNS đã tính ngoài rồi import vào. NLĐ là khoản TRỪ; phần công ty chỉ để báo cáo.
+  const bhxhEmployee = Math.max(0, Math.round(input.importedBhxhEmployee || 0));
+  const bhxhEmployer = Math.max(0, Math.round(input.importedBhxhEmployer || 0));
 
   // TNCN — MIỄN THUẾ tiền OT theo cap 200h CỘNG DỒN cả năm (chốt 2026-06-17, theo HR):
   //   - Tổng giờ OT (cộng dồn từ T1) ≤ 200h → MIỄN TOÀN BỘ tiền OT của phần giờ trong 200h.

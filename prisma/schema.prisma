@@ -318,6 +318,7 @@ model Employee {
   payrollRecords      PayrollRecord[]
   kpiOverrides        PayrollKpiOverride[]
   payrollManualInputs PayrollManualInput[]
+  payrollBhxhInputs   PayrollBhxhInput[]
   stationeryRequests  StationeryRequest[]  @relation("stationeryRequester")
   roomBookings        RoomBooking[]        @relation("bookingRequester")
   bookingAttendees    BookingAttendee[]    @relation("bookingAttendee")
@@ -934,6 +935,27 @@ model PayrollManualInput {
   note       String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, month, year])
+  @@index([month, year])
+}
+
+// BHXH do HCNS tính BÊN NGOÀI rồi import vào (mỗi NV/kỳ). Hệ thống KHÔNG tự tính BHXH nữa.
+// Tất cả là số tiền (đồng). NLĐ = bhxh8 + bhyt15 + bhtn1 (khoản TRỪ). bhxhEmployer = phần công ty 21.5% (báo cáo).
+model PayrollBhxhInput {
+  id           String   @id @default(uuid())
+  employeeId   String
+  month        Int
+  year         Int
+  bhxh8        Int      @default(0) // BHXH 8% (NLĐ)
+  bhyt15       Int      @default(0) // BHYT 1.5% (NLĐ)
+  bhtn1        Int      @default(0) // BHTN 1% (NLĐ)
+  bhxhEmployer Int      @default(0) // BHXH công ty 21.5% (báo cáo chi phí)
+  note         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 

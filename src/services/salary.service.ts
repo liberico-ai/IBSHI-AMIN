@@ -1,6 +1,5 @@
 import prisma from "@/lib/prisma";
 import { calculateSalary, type SalaryInput } from "@/lib/salary-calc";
-import { SALARY_CONFIG, INSURANCE_RATES } from "@/lib/constants";
 import { standardWorkDays, isHoliday, isCompensatoryHoliday, paidHolidaysInMonth } from "@/lib/holidays";
 
 // ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
@@ -63,6 +62,13 @@ export async function calculatePayrollForPeriod(periodId: string) {
   });
   const manualMap: Record<string, { pieceRate: number; adjustment: number; mealBonus: number }> = {};
   for (const m of manualInputs) manualMap[m.employeeId] = { pieceRate: m.pieceRate, adjustment: m.adjustment, mealBonus: m.mealBonus };
+
+  // BHXH HCNS tính NGOÀI rồi import (hệ thống KHÔNG tự tính). NLĐ = 8%+1.5%+1% (khoản trừ); employer = 21.5% (báo cáo).
+  const bhxhInputs = await prisma.payrollBhxhInput.findMany({ where: { month: period.month, year: period.year } });
+  const bhxhMap: Record<string, { bhxh8: number; bhyt15: number; bhtn1: number; employer: number; employee: number }> = {};
+  for (const b of bhxhInputs) {
+    bhxhMap[b.employeeId] = { bhxh8: b.bhxh8, bhyt15: b.bhyt15, bhtn1: b.bhtn1, employer: b.bhxhEmployer, employee: b.bhxh8 + b.bhyt15 + b.bhtn1 };
+  }
 
   // M3: OT đã được duyệt
   const otData = await prisma.oTRequest.findMany({
@@ -282,16 +288,16 @@ export async function calculatePayrollForPeriod(periodId: string) {
       // adjustment + mealBonus cùng cộng vào Gross (cả 2 đều là số phẳng nhập tay)
       adjustment: (manualMap[emp.id]?.adjustment || 0) + (manualMap[emp.id]?.mealBonus || 0),
       priorOtHours: priorOtMap[emp.id] || 0, // OT cộng dồn từ đầu năm → cap 200h miễn thuế
+      importedBhxhEmployee: bhxhMap[emp.id]?.employee || 0, // BHXH NLĐ import (khoản trừ)
+      importedBhxhEmployer: bhxhMap[emp.id]?.employer || 0, // BHXH công ty 21.5% import (báo cáo)
     };
 
     const out = calculateSalary(input);
 
-    // Map → PayrollRecord. Split BHXH NLĐ (10.5%) thành 8% / 1.5% / 1% (0 nếu chưa đủ 14 công).
-    const bhxhBase = Math.min(insuranceSalary, SALARY_CONFIG.INSURANCE_SALARY_CAP);
-    const hasBHXH = out.bhxhEmployee > 0;
-    const bhxh8 = hasBHXH ? Math.round(bhxhBase * INSURANCE_RATES.SOCIAL) : 0;
-    const bhyt15 = hasBHXH ? Math.round(bhxhBase * INSURANCE_RATES.HEALTH) : 0;
-    const bhtn1 = hasBHXH ? Math.round(bhxhBase * INSURANCE_RATES.UNEMPLOYMENT) : 0;
+    // Map → PayrollRecord. BHXH NLĐ tách 8% / 1.5% / 1% — LẤY TỪ FILE IMPORT (không tự tính).
+    const bhxh8 = bhxhMap[emp.id]?.bhxh8 || 0;
+    const bhyt15 = bhxhMap[emp.id]?.bhyt15 || 0;
+    const bhtn1 = bhxhMap[emp.id]?.bhtn1 || 0;
 
     // Snapshot chi tiết cho phiếu lương — khớp tuyệt đối với số đã tính kỳ này
     const detail = {

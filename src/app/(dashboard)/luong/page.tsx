@@ -314,6 +314,7 @@ function PayslipModal({
               <Row label="Thuế TNCN" value={formatVND(d.tncn)} color="var(--ibs-warning)" indent />
               <div className="text-[11px] py-1 pl-4" style={{ color: "var(--ibs-text-dim)" }}>
                 TN chịu thuế {formatVND(d.taxableIncome)} − Giảm trừ gia cảnh {formatVND(d.personalDeduction)}
+                {(d.bhxhEmployee || 0) > 0 ? ` − BHXH ${formatVND(d.bhxhEmployee)}` : ""}
                 {d.otTaxExempt > 0 ? ` · OT miễn thuế ${formatVND(d.otTaxExempt)}` : ""}
               </div>
               <Row label="LƯƠNG THỰC NHẬN (NET)" value={formatVND(d.netSalary)} bold color="var(--ibs-success)" />
@@ -780,8 +781,8 @@ function ImportPieceRateModal({
   );
 }
 
-// ── Import Bảng lương HR Modal (2-step: preview → confirm) ────────────────
-function ImportBangLuongModal({
+// ── Import file BHXH Modal (preview → confirm) ──────────────────────────────
+function ImportBhxhModal({
   period,
   onClose,
   onSuccess,
@@ -801,7 +802,7 @@ function ImportBangLuongModal({
     setLoading(true); setError("");
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch(`/api/v1/payroll/${period.id}/upload-bang-luong?mode=${mode}`, { method: "POST", body: fd });
+    const res = await fetch(`/api/v1/payroll/${period.id}/upload-bhxh?mode=${mode}`, { method: "POST", body: fd });
     setLoading(false);
     const data = await res.json();
     if (!res.ok) { setError(apiError(res.status, data.error)); return; }
@@ -809,24 +810,40 @@ function ImportBangLuongModal({
     else setConfirmed(data.data);
   }
 
+  async function downloadTemplate() {
+    const { default: ExcelJS } = await import("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("BHXH");
+    const hr = ws.addRow(["Mã NV", "Họ tên", "BHXH (8%)", "BHYT (1.5%)", "BHTN (1%)", "BHXH Công ty (21.5%)"]);
+    hr.font = { bold: true };
+    ws.addRow(["190839", "Vũ Phương Anh (ví dụ — xoá dòng này)", 454560, 85230, 56820, 1221630]);
+    [12, 28, 14, 14, 14, 20].forEach((w, i) => (ws.getColumn(i + 1).width = w));
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `mau-bhxh-T${period.month}-${period.year}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
       <div className="rounded-2xl w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-4">
-          <div className="text-[16px] font-bold">Import Bảng lương HR — T{period.month}/{period.year}</div>
+          <div className="text-[16px] font-bold">Import file BHXH — T{period.month}/{period.year}</div>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
 
         {!preview && !confirmed && (
           <div className="flex flex-col gap-3">
             <p className="text-[12.5px]" style={{ color: "var(--ibs-text-dim)" }}>
-              Upload file Excel "Bảng lương" của HCNS (cần có 2 sheet: <b>Chi tiết lương</b> + <b>Thêm giờ</b>).
-              Hệ thống sẽ đọc + đối chiếu Mã NV với DB và hiển thị preview trước khi ghi.
+              Upload file Excel BHXH do HCNS tính ngoài. Cần các cột: <b>Mã NV</b>, <b>BHXH (8%)</b>, <b>BHYT (1.5%)</b>, <b>BHTN (1%)</b>, <b>BHXH Công ty (21.5%)</b>.
+              Hệ thống đối chiếu Mã NV với DB rồi hiển thị preview trước khi ghi.
             </p>
-            <ul className="text-[11.5px] pl-4 list-disc space-y-1" style={{ color: "var(--ibs-text-dim)" }}>
-              <li>Sheet <b>Chi tiết lương</b>: AT (Lương khoán), AZ (Tiền ăn TG), BE (BS/Điều chỉnh kỳ này)</li>
-              <li>Sheet <b>Thêm giờ</b>: giờ OT mỗi ngày (CN + Lễ sẽ tạo OTRequest; T2-T7 đã có trong chấm công)</li>
-            </ul>
+            <div>
+              <button onClick={downloadTemplate} className="text-[12px] underline" style={{ color: "var(--ibs-accent)" }}>⬇ Tải file mẫu</button>
+            </div>
             <div>
               <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Chọn file Excel *</label>
               <input
@@ -850,34 +867,32 @@ function ImportBangLuongModal({
           <div className="flex flex-col gap-3">
             <div className="text-[13px] font-semibold">Preview — sẽ KHÔNG ghi cho đến khi anh bấm Xác nhận:</div>
             <div className="grid grid-cols-2 gap-2 text-[12.5px]">
-              <div>Tổng NV trong file: <b>{preview.summary.totalNVs}</b></div>
-              <div>NV khớp với DB: <b style={{ color: "var(--ibs-accent)" }}>{preview.summary.matchedNVs}</b></div>
-              <div>NV không tìm thấy: <b style={{ color: preview.summary.notFoundNVs > 0 ? "var(--ibs-warning)" : "inherit" }}>{preview.summary.notFoundNVs}</b></div>
-              <div>OTRequest sẽ tạo (CN+Lễ): <b>{preview.summary.totalOTRequestsWillCreate}</b></div>
-              <div>Σ Lương khoán: <b>{formatVND(preview.summary.totalPieceRate)}</b></div>
-              <div>Σ Tiền ăn TG: <b>{formatVND(preview.summary.totalMealBonus)}</b></div>
-              <div>Σ BS/Điều chỉnh: <b>{formatVND(preview.summary.totalAdjustment)}</b></div>
-              <div>Σ Giờ OT trong Excel: <b>{preview.summary.totalOtHoursInExcel}h</b></div>
+              <div>Tổng dòng trong file: <b>{preview.summary.totalRows}</b></div>
+              <div>NV khớp với DB: <b style={{ color: "var(--ibs-accent)" }}>{preview.summary.matched}</b></div>
+              <div>NV không tìm thấy: <b style={{ color: preview.summary.notFound > 0 ? "var(--ibs-warning)" : "inherit" }}>{preview.summary.notFound}</b></div>
+              <div>Σ BHXH NLĐ (8+1.5+1%): <b>{formatVND(preview.summary.totalEmployee)}</b></div>
+              <div>Σ BHXH Công ty (21.5%): <b>{formatVND(preview.summary.totalEmployer)}</b></div>
             </div>
 
             {preview.notFound.length > 0 && (
               <div className="rounded-lg p-2 text-[11.5px]" style={{ background: "rgba(245,158,11,0.08)", color: "var(--ibs-warning)" }}>
-                ⚠️ {preview.notFound.length} NV trong Excel không có trong DB (bỏ qua):<br />
-                {preview.notFound.slice(0, 8).map((n: any) => `${n.code} ${n.name}`).join(", ")}{preview.notFound.length > 8 ? "..." : ""}
+                ⚠️ {preview.notFound.length} mã NV trong Excel không có trong DB (bỏ qua):<br />
+                {preview.notFound.slice(0, 10).map((n: any) => `${n.code}`).join(", ")}{preview.notFound.length > 10 ? "..." : ""}
               </div>
             )}
 
-            <div className="text-[12px] mt-2 font-semibold">Mẫu 50 NV đầu khớp DB:</div>
+            <div className="text-[12px] mt-1 font-semibold">Mẫu 50 NV đầu khớp DB:</div>
             <div className="overflow-y-auto max-h-[280px] border rounded" style={{ borderColor: "var(--ibs-border)" }}>
               <table className="w-full text-[11px]">
                 <thead style={{ background: "var(--ibs-bg)" }}>
                   <tr>
                     <th className="px-2 py-1 text-left">Mã</th>
                     <th className="px-2 py-1 text-left">Họ tên</th>
-                    <th className="px-2 py-1 text-right">L.khoán</th>
-                    <th className="px-2 py-1 text-right">Tiền ăn TG</th>
-                    <th className="px-2 py-1 text-right">BS đ/c</th>
-                    <th className="px-2 py-1 text-center">OT-CN/Lễ</th>
+                    <th className="px-2 py-1 text-right">BHXH 8%</th>
+                    <th className="px-2 py-1 text-right">BHYT 1.5%</th>
+                    <th className="px-2 py-1 text-right">BHTN 1%</th>
+                    <th className="px-2 py-1 text-right">Σ NLĐ</th>
+                    <th className="px-2 py-1 text-right">Công ty 21.5%</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -885,10 +900,11 @@ function ImportBangLuongModal({
                     <tr key={m.code} className="border-t" style={{ borderColor: "var(--ibs-border)" }}>
                       <td className="px-2 py-1 font-mono">{m.code}</td>
                       <td className="px-2 py-1">{m.fullName}</td>
-                      <td className="px-2 py-1 text-right">{m.pieceRate ? formatVND(m.pieceRate) : "—"}</td>
-                      <td className="px-2 py-1 text-right">{m.mealBonus ? formatVND(m.mealBonus) : "—"}</td>
-                      <td className="px-2 py-1 text-right">{m.adjustment ? formatVND(m.adjustment) : "—"}</td>
-                      <td className="px-2 py-1 text-center">{m.otRequestCount}×{m.otRequestHours}h</td>
+                      <td className="px-2 py-1 text-right">{m.bhxh8 ? formatVND(m.bhxh8) : "—"}</td>
+                      <td className="px-2 py-1 text-right">{m.bhyt15 ? formatVND(m.bhyt15) : "—"}</td>
+                      <td className="px-2 py-1 text-right">{m.bhtn1 ? formatVND(m.bhtn1) : "—"}</td>
+                      <td className="px-2 py-1 text-right font-semibold">{formatVND(m.employeeTotal)}</td>
+                      <td className="px-2 py-1 text-right">{m.bhxhEmployer ? formatVND(m.bhxhEmployer) : "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -896,14 +912,14 @@ function ImportBangLuongModal({
             </div>
 
             <div className="text-[11.5px] italic" style={{ color: "var(--ibs-text-dim)" }}>
-              ⚠️ Bấm "Xác nhận import" sẽ XOÁ tất cả PayrollManualInput + OTRequest đã import của kỳ này, rồi ghi mới (idempotent).
-              Sau khi import xong, hãy bấm "Tính lương" lại để có số chính xác.
+              ⚠️ Bấm "Xác nhận import" sẽ XOÁ hết BHXH đã import của kỳ này rồi ghi mới (idempotent).
+              Sau khi import xong, hãy bấm "Tính lại" lương để áp BHXH vào kết quả.
             </div>
             {error && <div className="text-[12px] text-red-500">{error}</div>}
             <div className="flex gap-2 justify-end">
               <button onClick={() => { setPreview(null); setFile(null); }} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Quay lại chọn file</button>
               <button onClick={() => doRequest("confirm")} disabled={loading} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "#22c55e", opacity: loading ? 0.7 : 1 }}>
-                {loading ? "Đang ghi..." : `Xác nhận import (${preview.matchedTotalCount} NV)`}
+                {loading ? "Đang ghi..." : `Xác nhận import (${preview.summary.matched} NV)`}
               </button>
             </div>
           </div>
@@ -911,13 +927,13 @@ function ImportBangLuongModal({
 
         {confirmed && (
           <div className="flex flex-col gap-3">
-            <div className="text-[14px] font-semibold" style={{ color: "var(--ibs-success)" }}>✅ Import thành công!</div>
+            <div className="text-[14px] font-semibold" style={{ color: "var(--ibs-success)" }}>✅ Import BHXH thành công!</div>
             <div className="grid grid-cols-2 gap-2 text-[12.5px]">
-              <div>PayrollManualInput đã tạo: <b>{confirmed.imported.manualInputs}</b></div>
-              <div>OTRequest đã tạo: <b>{confirmed.imported.otRequests}</b></div>
+              <div>Số NV đã ghi: <b>{confirmed.imported}</b></div>
+              <div>Không khớp (bỏ qua): <b>{confirmed.notFound}</b></div>
             </div>
             <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
-              Bấm <b>Xong</b> để đóng. Sau đó nhớ bấm "Tính lương" để recompute kỳ này.
+              Bấm <b>Xong</b> để đóng. Sau đó nhớ bấm <b>"Tính lại"</b> lương để áp BHXH vào kết quả kỳ này.
             </div>
             <div className="flex justify-end">
               <button onClick={onSuccess} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>Xong</button>
@@ -941,7 +957,7 @@ export default function LuongPage() {
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [importPeriod, setImportPeriod] = useState<PayrollPeriod | null>(null);
-  const [importBangLuongPeriod, setImportBangLuongPeriod] = useState<PayrollPeriod | null>(null);
+  const [importBhxhPeriod, setImportBhxhPeriod] = useState<PayrollPeriod | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => setAllowed(!!res.canViewPayroll)).catch(() => setAllowed(false));
@@ -1099,15 +1115,15 @@ export default function LuongPage() {
               </button>
             )}
 
-            {/* Import Bảng lương HR (Excel "Bảng lương" của HCNS): đồng bộ lương khoán + OT + phụ cấp */}
+            {/* Import file BHXH (HCNS tính ngoài): NLĐ 8/1.5/1% + công ty 21.5% */}
             {canManage && (row.status === "DRAFT" || row.status === "PROCESSING") && (
               <button
-                onClick={() => setImportBangLuongPeriod(row)}
+                onClick={() => setImportBhxhPeriod(row)}
                 className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
                 style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}
-                title="Import file Bảng lương HR (sheet Chi tiết lương + Thêm giờ)"
+                title="Import file BHXH HCNS tính ngoài (BHXH 8% / BHYT 1.5% / BHTN 1% / Công ty 21.5%)"
               >
-                <Download size={11} className="rotate-180" /> Import Bảng lương HR
+                <Download size={11} className="rotate-180" /> Import file BHXH
               </button>
             )}
 
@@ -1320,17 +1336,18 @@ export default function LuongPage() {
         />
       )}
 
-      {/* Import Bảng lương HR modal */}
-      {importBangLuongPeriod && (
-        <ImportBangLuongModal
-          period={importBangLuongPeriod}
-          onClose={() => setImportBangLuongPeriod(null)}
+      {/* Import file BHXH modal */}
+      {importBhxhPeriod && (
+        <ImportBhxhModal
+          period={importBhxhPeriod}
+          onClose={() => setImportBhxhPeriod(null)}
           onSuccess={() => {
-            setImportBangLuongPeriod(null);
+            setImportBhxhPeriod(null);
             fetchPeriods();
           }}
         />
       )}
+
     </div>
   );
 }
