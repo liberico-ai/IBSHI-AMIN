@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canManageVpp } from "@/lib/access";
 import { z } from "zod";
 
 // POST — "Cấp phát" chọn lọc: cấp 1 phần/đủ cho từng VPP. Phân bổ số lượng cấp vào các
@@ -12,9 +13,8 @@ const Schema = z.object({
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  const role = (session.user as any).role;
-  if (!["HR_ADMIN", "BOM"].includes(role)) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được cấp VPP" } }, { status: 403 });
+  if (!canManageVpp((session.user as any).role, (session.user as any).employeeCode)) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền cấp VPP" } }, { status: 403 });
   }
   const userId = (session.user as any).id;
   const body = Schema.parse(await request.json());
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     for (const { itemId, quantity } of body.items) {
       // Các dòng yêu cầu của VPP này còn thiếu (chưa cấp đủ), thuộc phiếu chưa hoàn thành — cũ trước
       const lines = await tx.stationeryRequestItem.findMany({
-        where: { itemId, request: { status: { in: ["PENDING_APPROVAL", "APPROVED"] } } },
+        where: { itemId, request: { status: "APPROVED" } },
         include: { request: { select: { id: true, createdAt: true } } },
         orderBy: { request: { createdAt: "asc" } },
       });

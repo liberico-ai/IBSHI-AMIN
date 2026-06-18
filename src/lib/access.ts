@@ -37,3 +37,20 @@ export const FOOD_PURCHASE_MANAGERS = new Set<string>([
 export function canManageFoodPurchase(employeeCode?: string | null): boolean {
   return !!employeeCode && FOOD_PURCHASE_MANAGERS.has(employeeCode);
 }
+
+// Danh sách NV được xem + cấp phát tab "Danh sách yêu cầu VPP" (Văn phòng phẩm).
+export const VPP_REQUEST_MANAGERS = new Set<string>([
+  "190021", // Nguyễn Thị Hương Thúy
+  "190865", // Hoàng Văn Toại
+  "190067", // Nguyễn Thanh Tùng
+]);
+
+/** Có được xem + cấp phát "Danh sách yêu cầu VPP" không? */
+export function canManageVppRequests(employeeCode?: string | null): boolean {
+  return !!employeeCode && VPP_REQUEST_MANAGERS.has(employeeCode);
+}
+
+/** Toàn quyền VPP (xem tất cả + duyệt + cấp phát): 3 người chỉ định HOẶC BGĐ (BOM). */
+export function canManageVpp(role?: string | null, employeeCode?: string | null): boolean {
+  return role === "BOM" || canManageVppRequests(employeeCode);
+}
