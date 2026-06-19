@@ -50,7 +50,7 @@ type PayslipDetail = {
   otWeekday: number; otWeekdayNight: number; otSunday: number; otSundayNight: number;
   otHoliday: number; otHolidayNight: number; otHoursTotal: number; otConvertedHours: number;
   otFillHours: number; otPaidHours: number;
-  salaryWorkActual: number; leavePay: number; fillPay: number; salaryOT: number; grossSalary: number;
+  salaryWorkActual: number; leavePay: number; fillPay: number; salaryOT: number; mealOT: number; grossSalary: number;
   bhxhEmployee: number; bhxh8: number; bhyt15: number; bhtn1: number; bhxhEmployer: number;
   otTaxExempt: number; taxableIncome: number; personalDeduction: number; taxableIncomeAfter: number;
   tncn: number; netSalary: number; companyTotalCost: number;
@@ -305,6 +305,7 @@ function PayslipModal({
               {(d.responsibilityAllow || 0) > 0 && <Row label="Phụ cấp trách nhiệm" value={formatVND(d.responsibilityAllow)} />}
               {(d.farAllowance || 0) > 0 && <Row label="Phụ cấp nhà xa (≥20km)" value={formatVND(d.farAllowance)} />}
               {(d.adjustment || 0) !== 0 && <Row label="Điều chỉnh/bổ sung" value={formatVND(d.adjustment)} />}
+              {(d.mealOT || 0) > 0 && <Row label="Tiền ăn tăng giờ (OT)" value={formatVND(d.mealOT)} />}
               <Row label="TỔNG THU NHẬP (GROSS)" value={formatVND(d.grossSalary)} bold color="var(--ibs-accent)" />
 
               <SectionTitle>C. Khấu trừ &amp; thuế</SectionTitle>
@@ -387,9 +388,9 @@ function PeriodDetailModal({
         code:     r.employee.code,
         name:     r.employee.fullName,
         dept:     r.employee.department?.name,
-        workDays:  r.workDays,
+        workDays:  Number((r.workDays || 0).toFixed(2)),
         otConv:    Number(((r.otConvertedHours || 0) / 8).toFixed(2)),
-        totalDays: Number((r.workDays + (r.otConvertedHours || 0) / 8).toFixed(4)),
+        totalDays: Number((r.workDays + (r.otConvertedHours || 0) / 8).toFixed(2)),
         base:      r.baseSalary,
         bonus:    r.detail?.bonusTotal || 0,
         gross:    r.grossSalary,

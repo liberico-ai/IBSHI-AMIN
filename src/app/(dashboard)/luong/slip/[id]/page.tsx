@@ -25,6 +25,7 @@ type SlipData = {
   deductions: number;
   netSalary: number;
   notes?: string;
+  detail?: { mealOT?: number; [k: string]: any };
   period: { month: number; year: number; status: string };
   employee: {
     code: string;
@@ -151,12 +152,13 @@ export default function SalarySlipPage() {
           <table className="w-full text-[13px]">
             <tbody>
               {[
-                ["Lương cơ bản theo công", Math.round(slip.baseSalary * (slip.workDays / slip.standardDays))],
+                ["Lương cơ bản theo công", slip.detail?.salaryWorkActual ?? Math.round(slip.baseSalary * (slip.workDays / slip.standardDays))],
                 slip.pieceRateSalary > 0 && ["Lương khoán sản xuất", slip.pieceRateSalary],
                 slip.hazardAllowance > 0 && ["Phụ cấp độc hại", slip.hazardAllowance],
                 slip.responsibilityAllow > 0 && ["Phụ cấp trách nhiệm", slip.responsibilityAllow],
                 ["Phụ cấp ăn trưa", slip.mealAllowance],
                 slip.otPay > 0 && [`Tiền OT (${slip.otHours.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h)`, slip.otPay],
+                (slip.detail?.mealOT || 0) > 0 && ["Tiền ăn tăng giờ (OT)", slip.detail!.mealOT],
                 slip.otherIncome > 0 && ["Thu nhập khác", slip.otherIncome],
               ].filter(Boolean).map(([label, value]: any) => (
                 <tr key={label} className="border-b" style={{ borderColor: "rgba(51,65,85,0.3)" }}>
