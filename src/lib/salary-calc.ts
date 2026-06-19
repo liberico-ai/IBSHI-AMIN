@@ -36,6 +36,7 @@ export interface SalaryInput {
   bonusAllowance?: number;   // Bổ sung lương (trách nhiệm + nhà xa) — số phẳng, cộng vào Gross/Net
   pieceRate?: number;        // Lương sản phẩm/khoán (nhập theo kỳ) — chịu thuế
   adjustment?: number;       // Điều chỉnh/bổ sung tay theo kỳ (có thể âm) — chịu thuế
+  mealOT?: number;           // Tiền ăn tăng giờ (tự tính từ chấm công) — số phẳng, cộng vào Gross, CHỊU thuế
   priorOtHours?: number;     // Tổng giờ OT đã cộng dồn từ tháng 1 → hết tháng TRƯỚC kỳ này (cho cap 200h miễn thuế)
   importedBhxhEmployee?: number; // BHXH NLĐ (8%+1.5%+1%) HCNS tính NGOÀI rồi import — khoản TRỪ (hệ thống không tự tính)
   importedBhxhEmployer?: number; // BHXH công ty 21.5% (import — chỉ để báo cáo chi phí)
@@ -55,6 +56,7 @@ export interface SalaryOutput {
   leavePay: number;          // lương phép + lễ
   fillPay: number;           // lương giờ OT bù (1×)
   salaryOT: number;          // lương OT đã nhân hệ số
+  mealOT: number;            // tiền ăn tăng giờ (tự tính từ chấm công)
   grossSalary: number;       // tổng thu nhập thực tế tháng
   // Khấu trừ
   bhxhEmployee: number;      // 10,5% × Lương BHXH (nếu ≥14 công)
@@ -86,9 +88,6 @@ export function calcTNCN(taxableMonthly: number): number {
   return Math.round(tax);
 }
 
-// Round 2 chữ số thập phân (rule chốt 2026-06-05).
-const r2 = (n: number) => Math.round(n * 100) / 100;
-
 export function calculateSalary(input: SalaryInput): SalaryOutput {
   const CC = input.standardDays > 0 ? input.standardDays : SALARY_CONFIG.STANDARD_WORK_DAYS;
 
@@ -97,21 +96,21 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const bonusAllowanceForBase = input.bonusAllowance || 0;
   const workIncomeBase = input.totalIncome - bonusAllowanceForBase;
 
-  // Đơn giá round 2 chữ số TRƯỚC khi nhân (Cách B — khớp HR Excel).
-  const dailyRateFull = r2(workIncomeBase / CC);
-  const dailyRateInsurance = r2(input.insuranceSalary / CC);
-  const hourlyRateFull = r2(workIncomeBase / CC / 8);
+  // Đơn giá SỐ THẬT (KHÔNG làm tròn — chốt 2026-06-19, khớp Excel kế toán không làm tròn).
+  const dailyRateFull = workIncomeBase / CC;
+  const dailyRateInsurance = input.insuranceSalary / CC;
+  const hourlyRateFull = workIncomeBase / CC / 8;
 
-  // Round input số công + giờ OT về 2 chữ số (tránh float precision lung tung).
-  const workDaysActual = r2(input.workDaysActual);
-  const leaveDays = r2(input.leaveDays);
+  // Công + giờ OT giữ số thật (không làm tròn).
+  const workDaysActual = input.workDaysActual;
+  const leaveDays = input.leaveDays;
   const otInput = {
-    weekday: r2(input.ot.weekday),
-    weekdayNight: r2(input.ot.weekdayNight),
-    sunday: r2(input.ot.sunday),
-    sundayNight: r2(input.ot.sundayNight),
-    holiday: r2(input.ot.holiday),
-    holidayNight: r2(input.ot.holidayNight),
+    weekday: input.ot.weekday,
+    weekdayNight: input.ot.weekdayNight,
+    sunday: input.ot.sunday,
+    sundayNight: input.ot.sundayNight,
+    holiday: input.ot.holiday,
+    holidayNight: input.ot.holidayNight,
   };
 
   // Danh sách OT xếp hệ số GIẢM DẦN (để bù lấy hệ số cao nhất trước)
@@ -123,9 +122,9 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
     { rate: SALARY_CONFIG.OT_RATE_SUNDAY, hours: otInput.sunday },
     { rate: SALARY_CONFIG.OT_RATE_WEEKDAY, hours: otInput.weekday },
   ];
-  const otHoursTotal = r2(otTypes.reduce((s, o) => s + o.hours, 0));
+  const otHoursTotal = otTypes.reduce((s, o) => s + o.hours, 0);
   // Quy đổi thuần (báo cáo): mọi giờ OT × hệ số, không liên quan logic bù công
-  const otConvertedHours = r2(otTypes.reduce((s, o) => s + o.hours * o.rate, 0));
+  const otConvertedHours = otTypes.reduce((s, o) => s + o.hours * o.rate, 0);
 
   const effectiveDays = workDaysActual + leaveDays;
 
@@ -155,13 +154,14 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const bonusAllowance = input.bonusAllowance || 0;   // trách nhiệm + nhà xa
   const pieceRate = input.pieceRate || 0;             // lương sản phẩm/khoán
   const adjustment = input.adjustment || 0;           // điều chỉnh tay (có thể âm)
+  const mealOT = Math.max(0, input.mealOT || 0); // tiền ăn tăng giờ (tự tính)
 
-  // Các khoản tiền (làm tròn từng khoản về đồng) — dùng workDaysActual, leaveDays ĐÃ ROUND
-  const salaryWorkActual = Math.round(workDaysActual * dailyRateFull);
-  const leavePay = Math.round(leaveDays * dailyRateInsurance);
+  // Các khoản tiền GIỮ SỐ THẬT (KHÔNG làm tròn — chỉ làm tròn ở TNCN + Net).
+  const salaryWorkActual = workDaysActual * dailyRateFull;
+  const leavePay = leaveDays * dailyRateInsurance;
   const fillPay = 0; // không còn bù-công
-  const salaryOT = Math.round(otPayMultiplied);
-  const grossSalary = salaryWorkActual + leavePay + salaryOT + bonusAllowance + pieceRate + adjustment;
+  const salaryOT = otPayMultiplied;
+  const grossSalary = salaryWorkActual + leavePay + salaryOT + bonusAllowance + pieceRate + adjustment + mealOT;
 
   // BHXH — KHÔNG tự tính nữa (bỏ rule ≥14 công + tự nhân hệ số).
   // Lấy thẳng từ file HCNS đã tính ngoài rồi import vào. NLĐ là khoản TRỪ; phần công ty chỉ để báo cáo.
@@ -175,14 +175,15 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const priorOt = Math.max(0, input.priorOtHours || 0);
   const withinCapHours = Math.max(0, Math.min(otHoursTotal, SALARY_CONFIG.OT_TAX_FREE_HOURS_YEAR - priorOt));
   const otExemptRatio = otHoursTotal > 0 ? withinCapHours / otHoursTotal : 0;
-  const otTaxExempt = Math.round(salaryOT * otExemptRatio); // tiền OT của số giờ trong 200h → miễn
+  const otTaxExempt = salaryOT * otExemptRatio; // tiền OT của số giờ trong 200h → miễn (số thật)
   const taxableIncome = Math.max(0, grossSalary - otTaxExempt);
   const personalDeduction =
     SALARY_CONFIG.PERSONAL_DEDUCTION + input.dependentsCount * SALARY_CONFIG.DEPENDENT_DEDUCTION;
   const taxableIncomeAfter = Math.max(0, taxableIncome - personalDeduction - bhxhEmployee);
   const tncn = calcTNCN(taxableIncomeAfter);
 
-  const netSalary = grossSalary - bhxhEmployee - tncn;
+  // Net = làm tròn CHUẨN về số nguyên đồng (≥0.5 lên, <0.5 xuống).
+  const netSalary = Math.round(grossSalary - bhxhEmployee - tncn);
   const companyTotalCost = grossSalary + bhxhEmployer;
 
   return {
@@ -198,6 +199,7 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
     leavePay,
     fillPay,
     salaryOT,
+    mealOT,
     grossSalary,
     bhxhEmployee,
     bhxhEmployer,

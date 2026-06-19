@@ -158,10 +158,9 @@ export async function calculatePayrollForPeriod(periodId: string) {
       //   BUSINESS_TRIP → 1 cố định (đi công tác tính tròn 1 công)
       //   ABSENT_UNAPPROVED → mục tiêu bù công (NK ngày thường)
       if (a.status === "PRESENT" || a.status === "LATE" || a.status === "HALF_DAY") {
-        // Làm tròn 2 chữ số TRƯỚC khi cộng (chốt 2026-06-08 từ HR):
-        //   23 ngày × 7.5h → mỗi ngày 0.94 → cộng = 21.62 công
-        //   (KHÁC với cộng giờ trước rồi chia: 23×7.5/8 = 21.5625 → 21.56)
-        workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + Math.round((wh / 8) * 100) / 100;
+        // Công = workHours / 8, GIỮ SỐ THẬT (không làm tròn — chốt 2026-06-19).
+        //   23 ngày × 7.5h → 23×7.5/8 = 21.5625 (hiển thị 21.56).
+        workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + wh / 8;
       } else if (a.status === "BUSINESS_TRIP") {
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 1;
       } else if (a.status === "ABSENT_UNAPPROVED") {
@@ -181,9 +180,38 @@ export async function calculatePayrollForPeriod(periodId: string) {
       if (ulHalf && a.status === "HALF_DAY") {
         unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + parseFloat(ulHalf[1]);
       }
+      // Nửa ngày phép (vd "0.5AL") mà KHÔNG đi làm phần còn lại → phần còn lại = KL (bù OT như ngày KL).
+      //   HC=4 + 0.5AL  → status HALF_DAY (đã có đi làm) → phần kia là công làm, KHÔNG tính KL.
+      //   HC trống + 0.5AL → status ABSENT_APPROVED_HALF (không đi làm) → (1 − số ngày phép) = KL.
+      if (a.status === "ABSENT_APPROVED_HALF") {
+        const gap = Math.max(0, 1 - (a.paidLeaveDays || 0));
+        if (gap > 0) unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + gap;
+      }
       // Nghỉ phép có lương: đã cộng từ paidLeaveDays ở trên (không suy từ status nữa).
       if (oh > 0) ensureOt(a.employeeId).weekday += oh;                 // OT ngày thường
     }
+  }
+
+  // ── TIỀN ĂN TĂNG GIỜ (chốt 2026-06-19) ──
+  // Tự tính từ chấm công, theo GIỜ OT THỰC TẾ (CHƯA bù trừ — dùng giờ gốc, KHÁC lương OT).
+  //   Ngày thường (T2–T7, không lễ): 2h≤OT<4h → 15.000đ; OT≥4h → 20.000đ (theo otHours).
+  //   Lễ: tổng giờ làm (wh+oh) ≥ 4h → 20.000đ.
+  //   Chủ nhật & nghỉ bù: 0 (đi làm CN luôn có nấu cơm → phần cộng & trừ triệt tiêu).
+  const mealOTMap: Record<string, number> = {};
+  for (const a of attendanceData) {
+    const d = new Date(a.date);
+    const wh = a.workHours || 0;
+    const oh = a.otHours || 0;
+    let meal = 0;
+    if (d.getUTCDay() === 0 || isCompensatoryHoliday(d)) {
+      meal = 0; // Chủ nhật / nghỉ bù → coi như có nấu cơm
+    } else if (isHoliday(d)) {
+      if (wh + oh >= 4) meal = 20000; // ngày lễ
+    } else {
+      if (oh >= 4) meal = 20000;       // ngày thường, OT ≥ 4h
+      else if (oh >= 2) meal = 15000;  // ngày thường, 2h ≤ OT < 4h
+    }
+    if (meal > 0) mealOTMap[a.employeeId] = (mealOTMap[a.employeeId] || 0) + meal;
   }
 
   // OTRequest đã APPROVED — phân loại theo otRate (bổ sung nếu có đơn OT riêng)
@@ -285,8 +313,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
       dependentsCount: emp.dependents || 0,
       bonusAllowance: ((emp as any).responsibilityAllowance || 0) + ((emp as any).farAllowance || 0),
       pieceRate: manualMap[emp.id]?.pieceRate || 0,
-      // adjustment + mealBonus cùng cộng vào Gross (cả 2 đều là số phẳng nhập tay)
-      adjustment: (manualMap[emp.id]?.adjustment || 0) + (manualMap[emp.id]?.mealBonus || 0),
+      adjustment: manualMap[emp.id]?.adjustment || 0,
+      mealOT: mealOTMap[emp.id] || 0, // tiền ăn tăng giờ — tự tính từ chấm công (chịu thuế)
       priorOtHours: priorOtMap[emp.id] || 0, // OT cộng dồn từ đầu năm → cap 200h miễn thuế
       importedBhxhEmployee: bhxhMap[emp.id]?.employee || 0, // BHXH NLĐ import (khoản trừ)
       importedBhxhEmployer: bhxhMap[emp.id]?.employer || 0, // BHXH công ty 21.5% import (báo cáo)
@@ -333,6 +361,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       leavePay: out.leavePay,                        // lương phép/lễ
       fillPay: out.fillPay,                          // lương OT bù (1×)
       salaryOT: out.salaryOT,                        // lương OT hệ số
+      mealOT: out.mealOT,                            // tiền ăn tăng giờ (tự tính)
       grossSalary: out.grossSalary,
       // Khấu trừ + thuế
       bhxhEmployee: out.bhxhEmployee, bhxh8, bhyt15, bhtn1,
