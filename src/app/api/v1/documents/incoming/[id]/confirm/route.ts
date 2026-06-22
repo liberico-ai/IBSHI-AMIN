@@ -19,7 +19,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   // Chỉ đúng cá nhân / phòng ban được gửi (hoặc HCNS) mới xác nhận được.
   const role = (session.user as any).role;
-  const isHCNS = role === "HR_ADMIN" || role === "BOM";
+  const isHCNS = role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
   const emp = await prisma.employee.findFirst({ where: { userId }, select: { id: true, departmentId: true, fullName: true, code: true } });
   const isRecipient = !!emp && (
     (doc.routedEmployeeId && emp.id === doc.routedEmployeeId) ||

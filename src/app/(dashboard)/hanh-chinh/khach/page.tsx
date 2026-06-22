@@ -58,7 +58,7 @@ export default function KhachPage() {
   }, []);
   useEffect(() => { fetchVisitors(); }, [filterDate, filterStatus]);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "MANAGER";
+  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || userRole === "MANAGER";
 
   async function handleAction(id: string, action: string) {
     let badge: string | undefined;

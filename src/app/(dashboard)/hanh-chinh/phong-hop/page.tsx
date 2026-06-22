@@ -71,13 +71,13 @@ async function exportRoomBookings(roomId: string, from: string, to: string) {
 
 export default function PhongHopPage() {
   const [tab, setTab] = useState<"book" | "list">("book");
-  const [me, setMe] = useState<{ id: string; employeeId: string | null; employeeCode: string } | null>(null);
+  const [me, setMe] = useState<{ id: string; employeeId: string | null; employeeCode: string; role: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then(async (res) => {
       if (!res?.id) return;
       const list = await fetch(`/api/v1/room-bookings`).then((r) => r.json());
-      setMe({ id: res.id, employeeId: list.myEmployeeId, employeeCode: res.employeeCode || "" });
+      setMe({ id: res.id, employeeId: list.myEmployeeId, employeeCode: res.employeeCode || "", role: res.role || "" });
     });
   }, []);
 
@@ -378,7 +378,7 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-function ListTab({ me }: { me: { id: string; employeeId: string | null; employeeCode: string } | null }) {
+function ListTab({ me }: { me: { id: string; employeeId: string | null; employeeCode: string; role: string } | null }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -391,7 +391,7 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
 
-  const canApprove = canApproveRoomVehicle(me?.employeeCode);
+  const canApprove = canApproveRoomVehicle(me?.employeeCode, me?.role);
 
   function load() {
     setLoading(true);

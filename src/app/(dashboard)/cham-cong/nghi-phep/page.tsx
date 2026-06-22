@@ -322,8 +322,8 @@ export default function NghiPhepPage() {
       .finally(() => setLoading(false));
   }, [statusFilter]);
 
-  const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM";
-  const isHR = userRole === "HR_ADMIN" || userRole === "BOM";
+  const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
+  const isHR = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
 
   async function exportExcel() {
     const { default: ExcelJS } = await import("exceljs");

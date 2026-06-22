@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 import { z } from "zod";
 
 function canManage(role: string): boolean {
-  return role === "HR_ADMIN" || role === "BOM";
+  return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
 }
 
 const UpdateSchema = z.object({

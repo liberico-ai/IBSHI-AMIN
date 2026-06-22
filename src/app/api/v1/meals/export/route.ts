@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
   // Chi phí thực phẩm / chi phí / thầu phụ: chỉ HCNS (HR_ADMIN/BOM) được export.
   const role = (session.user as any).role;
   const HCNS_ONLY = ["food-purchases", "food-issues", "cost", "subcontractor"];
-  if (HCNS_ONLY.includes(type) && !(role === "HR_ADMIN" || role === "BOM")) {
+  if (HCNS_ONLY.includes(type) && !(role === "HR_ADMIN" || role === "BOM" || role === "ADMIN")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ P. HCNS được export dữ liệu này" } }, { status: 403 });
   }
 

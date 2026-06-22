@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { canDo } from "@/lib/permissions";
+import { isSystemAdmin } from "@/lib/permissions";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "settings", "update")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!isSystemAdmin(userRole)) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ Quản trị hệ thống" } }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);

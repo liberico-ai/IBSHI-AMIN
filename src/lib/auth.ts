@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import prisma from "@/lib/prisma";
+import { logAudit } from "@/lib/audit";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
@@ -12,7 +13,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         username: { label: "Tên đăng nhập", type: "text" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.username || !credentials?.password) {
           return null;
         }
@@ -38,6 +39,21 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         );
 
         if (!isPasswordValid) return null;
+
+        // Log đăng nhập thành công (fire-and-forget)
+        try {
+          const hdrs = (request as any)?.headers;
+          const xff = hdrs?.get?.("x-forwarded-for") || "";
+          const ip = (xff.split(",")[0] || hdrs?.get?.("x-real-ip") || "").trim() || undefined;
+          logAudit({
+            userId: user.id,
+            action: "LOGIN",
+            entityType: "Auth",
+            entityId: user.id,
+            newValue: { employeeCode: user.employeeCode, name: user.employee?.fullName || user.employeeCode },
+            ipAddress: ip,
+          });
+        } catch {}
 
         return {
           id: user.id,

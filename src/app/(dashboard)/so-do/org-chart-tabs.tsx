@@ -80,7 +80,7 @@ export function OrgChartTabs({
 
   useEffect(() => {
     fetch("/api/v1/org-snapshots").then((r) => r.json()).then((res) => setPeriods(res.data || [])).catch(() => {});
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => setCanManage(["HR_ADMIN", "BOM"].includes(res?.role))).catch(() => {});
+    fetch("/api/v1/me").then((r) => r.json()).then((res) => setCanManage(["HR_ADMIN", "BOM", "ADMIN"].includes(res?.role))).catch(() => {});
   }, []);
 
   useEffect(() => {

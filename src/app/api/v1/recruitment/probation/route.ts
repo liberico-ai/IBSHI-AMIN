@@ -7,7 +7,7 @@ import prisma from "@/lib/prisma";
 export async function GET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  const canApprove = ["HR_ADMIN", "BOM"].includes((session.user as any).role);
+  const canApprove = ["HR_ADMIN", "BOM", "ADMIN"].includes((session.user as any).role);
 
   const emps = await prisma.employee.findMany({
     where: { status: "PROBATION" },

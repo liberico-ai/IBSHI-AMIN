@@ -21,6 +21,7 @@ export function usePermission() {
   }
 
   function hasRole(...roles: string[]): boolean {
+    if (role === "ADMIN") return true; // Quản trị hệ thống = superset, qua mọi gate
     return roles.includes(role);
   }
 

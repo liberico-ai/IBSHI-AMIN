@@ -740,7 +740,7 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
 
                       <div className="flex gap-2 shrink-0 items-center">
                         {r.fileUrl && <a href={viewUrl(r.fileUrl)} target="_blank" rel="noreferrer" className="text-[11px] underline" style={{ color: "var(--ibs-accent)" }}>📎 File</a>}
-                        {r.status === "PENDING_APPROVAL" && canApprove && (r.createdById !== me?.id || me?.role === "BOM") && (
+                        {r.status === "PENDING_APPROVAL" && canApprove && (r.createdById !== me?.id || (me?.role === "BOM" || me?.role === "ADMIN")) && (
                           <>
                             <button onClick={() => approve(r.id)} className="text-[11px] px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}>
                               <Check size={12} /> Duyệt

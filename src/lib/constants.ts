@@ -168,6 +168,7 @@ export const ROLE_HIERARCHY: Record<string, number> = {
   MANAGER: 3,
   HR_ADMIN: 4,
   BOM: 5,
+  ADMIN: 6, // Quản trị hệ thống — cao nhất, vượt mọi quyền nghiệp vụ
 };
 
 export const ROLE_LABELS: Record<string, string> = {
@@ -176,4 +177,5 @@ export const ROLE_LABELS: Record<string, string> = {
   MANAGER: "Trưởng phòng",
   HR_ADMIN: "HC Nhân sự",
   BOM: "Ban Giám đốc",
+  ADMIN: "Quản trị hệ thống",
 };

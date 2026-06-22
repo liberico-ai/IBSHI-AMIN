@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   //   - Công văn ĐÍCH DANH (Cá nhân) gửi cho phòng ban của mình hoặc chính mình.
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
-  const isHCNS = role === "HR_ADMIN" || role === "BOM";
+  const isHCNS = role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
   if (!isHCNS) {
     const emp = await prisma.employee.findFirst({ where: { userId }, select: { id: true, departmentId: true } });
     const visible: any[] = [{ recipientType: "CONG_TY" }];
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   // Chỉ Phòng HCNS (HR_ADMIN / BOM) được thêm công văn đến.
   const role = (session.user as any).role;
-  if (!["HR_ADMIN", "BOM"].includes(role)) {
+  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role)) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ Phòng HCNS được thêm công văn đến" } }, { status: 403 });
   }
 

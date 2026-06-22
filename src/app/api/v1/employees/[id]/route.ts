@@ -51,7 +51,7 @@ export async function GET(
   }
 
   // Tab Hợp đồng (lương trên HĐ) chỉ cho NV trong allowlist M7 — ẩn với người khác
-  if (!canViewPayroll((session.user as any).employeeCode)) {
+  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
     (employee as any).contracts = [];
   }
 

@@ -16,7 +16,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
   if (req.status !== "PENDING_APPROVAL")
     return NextResponse.json({ error: { code: "INVALID_STATE", message: `Phiếu đang ở trạng thái ${req.status}` } }, { status: 400 });
   // BGĐ (BOM) là cấp cao nhất → được tự duyệt phiếu mình tạo. Người khác thì không.
-  if (req.createdById === userId && (session.user as any).role !== "BOM")
+  if (req.createdById === userId && (session.user as any).role !== "BOM" && (session.user as any).role !== "ADMIN")
     return NextResponse.json({ error: { code: "SELF_APPROVE", message: "Không tự duyệt phiếu mình tạo" } }, { status: 400 });
 
   const data = await prisma.stationeryRequest.update({

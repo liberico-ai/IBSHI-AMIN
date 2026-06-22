@@ -74,9 +74,9 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
 
   // Công văn ĐẾN: chỉ Phòng HCNS (HR_ADMIN/BOM) được thêm. Công văn đi: thêm cả MANAGER.
   const canManage = kind === "incoming"
-    ? (userRole === "HR_ADMIN" || userRole === "BOM")
-    : (userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "MANAGER");
-  const canDelete = userRole === "HR_ADMIN" || userRole === "BOM";
+    ? (userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN")
+    : (userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || userRole === "MANAGER");
+  const canDelete = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
 
   async function handleDelete(id: string) {
     if (!(await confirmDialog({ message: "Xác nhận xoá công văn này?", tone: "danger", confirmText: "Xoá" }))) return;

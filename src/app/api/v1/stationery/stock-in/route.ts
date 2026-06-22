@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!["HR_ADMIN", "BOM"].includes((session.user as any).role))
+  if (!["HR_ADMIN", "BOM", "ADMIN"].includes((session.user as any).role))
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const body = CreateSchema.parse(await request.json());

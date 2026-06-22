@@ -816,7 +816,7 @@ function EditEmployeeDialog({
   onClose: () => void;
   onSuccess: (updated: Partial<Employee>) => void;
 }) {
-  const isHR = userRole === "HR_ADMIN" || userRole === "BOM";
+  const isHR = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
   const [form, setForm] = useState({
     fullName: employee.fullName || "",
     gender: employee.gender || "MALE",

@@ -25,7 +25,7 @@ function findCol(header: any[], keywords: string[]): number {
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canViewPayroll((session.user as any).employeeCode)) {
+  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
   const { id } = await params;
@@ -61,7 +61,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canViewPayroll((session.user as any).employeeCode)) {
+  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền" } }, { status: 403 });
   }
   const { id } = await params;

@@ -10,7 +10,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const employeeCode = (session.user as any).employeeCode;
-  if (!canApproveRoomVehicle(employeeCode))
+  if (!canApproveRoomVehicle(employeeCode, (session.user as any).role))
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền duyệt/từ chối phiếu đặt phòng họp" } }, { status: 403 });
 
   const { id } = await params;

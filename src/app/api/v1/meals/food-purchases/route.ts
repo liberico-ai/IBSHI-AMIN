@@ -17,7 +17,7 @@ const CreateSchema = z.object({
 });
 
 function canManage(role: string, employeeCode?: string | null): boolean {
-  return role === "HR_ADMIN" || role === "BOM" || canManageFoodPurchase(employeeCode);
+  return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN" || canManageFoodPurchase(employeeCode);
 }
 
 export async function GET(request: NextRequest) {

@@ -471,7 +471,7 @@ export default function BaoCaoPage() {
   useEffect(() => { fetchOverview(); }, []);
   useEffect(() => { fetchSalary(salaryYear); }, [salaryYear]);
 
-  const canView = userRole === "HR_ADMIN" || userRole === "BOM";
+  const canView = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
 
   if (!canView) {
     return (

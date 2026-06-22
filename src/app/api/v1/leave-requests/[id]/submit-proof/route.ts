@@ -25,7 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!leave) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
   const isOwner = leave.employee?.userId === userId;
-  const isHR = ["HR_ADMIN", "BOM", "MANAGER"].includes(role);
+  const isHR = ["HR_ADMIN", "BOM", "MANAGER", "ADMIN"].includes(role);
   if (!isOwner && !isHR) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chính chủ hoặc HCNS bổ sung được" } }, { status: 403 });
   }

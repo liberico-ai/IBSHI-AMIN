@@ -4,8 +4,9 @@ import prisma from "@/lib/prisma";
 import { canViewPayroll } from "@/lib/access";
 import * as XLSX from "xlsx";
 
-// Import "Bổ sung khác" (điều chỉnh tay theo kỳ) → PayrollManualInput.adjustment.
-// Có thể ÂM (truy thu) hoặc DƯƠNG (bổ sung). Cộng thẳng vào Gross, chịu thuế.
+// Import "Bổ sung tiền ăn" → PayrollManualInput.mealBonus.
+// CỘNG THÊM (+/-) vào cột "Tiền ăn ca thêm giờ" tự tính từ chấm công. Chịu thuế (nằm trong Gross).
+// Cho phép tổng tiền ăn xuống ÂM khi truy thu (trừ thẳng vào Gross → giảm thực lĩnh).
 
 const toInt = (v: any) => { const n = Number(String(v ?? "").replace(/[^\d.-]/g, "")); return isFinite(n) ? Math.round(n) : 0; };
 function findCol(header: any[], keywords: string[]): number {
@@ -28,7 +29,7 @@ async function employeesWithAttendance(month: number, year: number) {
   });
 }
 
-// GET — template: Mã NV | Họ tên | Phòng ban | Bổ sung khác
+// GET — template: Mã NV | Họ tên | Phòng ban | Bổ sung tiền ăn
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
@@ -38,25 +39,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!period) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
   const emps = await employeesWithAttendance(period.month, period.year);
-  const existing = await prisma.payrollManualInput.findMany({ where: { month: period.month, year: period.year }, select: { employeeId: true, adjustment: true, note: true } });
-  const exMap = new Map(existing.map((e) => [e.employeeId, e]));
-  const aoa: any[][] = [["Mã NV", "Họ tên", "Phòng ban", "Bổ sung khác", "Lý do"]];
-  for (const e of emps) { const ex = exMap.get(e.id); aoa.push([e.code, e.fullName, e.department?.name || "", ex?.adjustment || 0, ex?.note || ""]); }
+  const existing = await prisma.payrollManualInput.findMany({ where: { month: period.month, year: period.year }, select: { employeeId: true, mealBonus: true } });
+  const exMap = new Map(existing.map((e) => [e.employeeId, e.mealBonus]));
+  const aoa: any[][] = [["Mã NV", "Họ tên", "Phòng ban", "Bổ sung tiền ăn"]];
+  for (const e of emps) { aoa.push([e.code, e.fullName, e.department?.name || "", exMap.get(e.id) || 0]); }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 10 }, { wch: 26 }, { wch: 22 }, { wch: 16 }, { wch: 30 }];
+  ws["!cols"] = [{ wch: 10 }, { wch: 26 }, { wch: 22 }, { wch: 16 }];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "BoSungKhac");
+  XLSX.utils.book_append_sheet(wb, ws, "BoSungTienAn");
   const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
   return new NextResponse(new Uint8Array(buf), {
     status: 200,
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="bo-sung-khac-T${period.month}-${period.year}.xlsx"`,
+      "Content-Disposition": `attachment; filename="bo-sung-tien-an-T${period.month}-${period.year}.xlsx"`,
     },
   });
 }
 
-// POST — import: thay thế toàn bộ điều chỉnh tay của kỳ.
+// POST — import: thay thế toàn bộ bổ sung tiền ăn của kỳ (idempotent, không đụng adjustment/pieceRate).
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
@@ -83,33 +84,31 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   for (let i = 0; i < Math.min(rows.length, 15); i++) if (findCol(rows[i], ["mã nv", "mã nhân", "manv", "ma nv"]) >= 0) { hi = i; break; }
   if (hi < 0) return NextResponse.json({ error: { code: "BAD_FORMAT", message: "Không tìm thấy cột 'Mã NV'" } }, { status: 422 });
   const codeCol = findCol(rows[hi], ["mã nv", "mã nhân", "manv", "ma nv"]);
-  const valCol = findCol(rows[hi], ["bổ sung", "bo sung", "điều chỉnh", "dieu chinh", "số tiền", "so tien"]);
-  const reasonCol = findCol(rows[hi], ["lý do", "ly do", "ghi chú", "ghi chu", "reason"]);
-  if (valCol < 0) return NextResponse.json({ error: { code: "BAD_FORMAT", message: "Không tìm thấy cột 'Bổ sung khác'" } }, { status: 422 });
+  const valCol = findCol(rows[hi], ["tiền ăn", "tien an", "bổ sung", "bo sung", "số tiền", "so tien"]);
+  if (valCol < 0) return NextResponse.json({ error: { code: "BAD_FORMAT", message: "Không tìm thấy cột 'Bổ sung tiền ăn'" } }, { status: 422 });
 
   const allEmps = await prisma.employee.findMany({ select: { id: true, code: true } });
   const codeToId = new Map(allEmps.map((e) => [e.code, e.id]));
-  const records: { employeeId: string; month: number; year: number; pieceRate: number; adjustment: number; note: string | null }[] = [];
+  const records: { employeeId: string; month: number; year: number; mealBonus: number }[] = [];
   const notFound: string[] = [];
   for (let i = hi + 1; i < rows.length; i++) {
     const code = String(rows[i][codeCol] || "").trim();
     if (!code) continue;
     const empId = codeToId.get(code);
     if (!empId) { notFound.push(code); continue; }
-    const adjustment = toInt(rows[i][valCol]);
-    if (adjustment === 0) continue;
-    const note = reasonCol >= 0 ? (String(rows[i][reasonCol] || "").trim() || null) : null;
-    records.push({ employeeId: empId, month: period.month, year: period.year, pieceRate: 0, adjustment, note });
+    const mealBonus = toInt(rows[i][valCol]);
+    if (mealBonus === 0) continue;
+    records.push({ employeeId: empId, month: period.month, year: period.year, mealBonus });
   }
 
   await prisma.$transaction([
-    // Reset CHỈ field điều chỉnh + lý do của kỳ (không xoá row → giữ mealBonus/pieceRate).
-    prisma.payrollManualInput.updateMany({ where: { month: period.month, year: period.year }, data: { adjustment: 0, note: null } }),
+    // Reset CHỈ field tiền ăn của kỳ (không xoá row → giữ adjustment/note/pieceRate).
+    prisma.payrollManualInput.updateMany({ where: { month: period.month, year: period.year }, data: { mealBonus: 0 } }),
     ...records.map((r) =>
       prisma.payrollManualInput.upsert({
         where: { employeeId_month_year: { employeeId: r.employeeId, month: r.month, year: r.year } },
-        update: { adjustment: r.adjustment, note: r.note },
-        create: { employeeId: r.employeeId, month: r.month, year: r.year, adjustment: r.adjustment, note: r.note },
+        update: { mealBonus: r.mealBonus },
+        create: { employeeId: r.employeeId, month: r.month, year: r.year, mealBonus: r.mealBonus },
       })
     ),
   ]);

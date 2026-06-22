@@ -95,7 +95,7 @@ export default function VeSinhPage() {
     if (tab === "issues") fetchIssues();
   }, [tab, selectedDate]);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "MANAGER";
+  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || userRole === "MANAGER";
 
   async function handleComplete(id: string) {
     await fetch(`/api/v1/cleaning/${id}`, {

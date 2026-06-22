@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   // Lương nhạy cảm: chỉ NV trong whitelist xem lương mới nhận được số liệu lương.
-  const canPay = canViewPayroll((session.user as any).employeeCode);
+  const canPay = canViewPayroll((session.user as any).employeeCode, (session.user as any).role);
   if (!canPay) {
     for (const e of data as any[]) {
       if (Array.isArray(e.contracts)) for (const c of e.contracts) { c.baseSalary = 0; c.insuranceSalary = 0; c.allowance = 0; }

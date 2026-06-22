@@ -33,7 +33,7 @@ const CreateSchema = z.object({
 });
 
 function canApprove(role: string): boolean {
-  return role === "HR_ADMIN" || role === "BOM";
+  return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
 }
 
 export async function GET(request: NextRequest) {

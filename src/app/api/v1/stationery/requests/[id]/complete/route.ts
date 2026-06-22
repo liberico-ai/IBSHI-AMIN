@@ -23,7 +23,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
   // Chỉ NGƯỜI ĐỀ XUẤT (requester) được xác nhận đã nhận VPP. BOM/HR_ADMIN xác nhận thay (admin).
   const meEmp = await prisma.employee.findFirst({ where: { userId }, select: { id: true } });
   const isRequester = !!meEmp && meEmp.id === req.requesterEmployeeId;
-  if (!isRequester && !["HR_ADMIN", "BOM"].includes((session.user as any).role))
+  if (!isRequester && !["HR_ADMIN", "BOM", "ADMIN"].includes((session.user as any).role))
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ người đề xuất mới được xác nhận đã nhận VPP" } }, { status: 403 });
 
   // Phần cần xác nhận của mỗi item = đã cấp − đã xác nhận trước đó (>= 0)
