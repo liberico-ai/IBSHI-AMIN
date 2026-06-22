@@ -1,0 +1,111 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import prisma from "@/lib/prisma";
+import { canViewPayroll } from "@/lib/access";
+import * as XLSX from "xlsx";
+
+// Import "Bổ sung khác" (điều chỉnh tay theo kỳ) → PayrollManualInput.adjustment.
+// Có thể ÂM (truy thu) hoặc DƯƠNG (bổ sung). Cộng thẳng vào Gross, chịu thuế.
+
+const toInt = (v: any) => { const n = Number(String(v ?? "").replace(/[^\d.-]/g, "")); return isFinite(n) ? Math.round(n) : 0; };
+function findCol(header: any[], keywords: string[]): number {
+  for (let i = 0; i < header.length; i++) {
+    const v = String(header[i] || "").trim().toLowerCase();
+    if (v && keywords.some((k) => v.includes(k))) return i;
+  }
+  return -1;
+}
+
+async function employeesWithAttendance(month: number, year: number) {
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+  const att = await prisma.attendanceRecord.findMany({ where: { date: { gte: start, lte: end } }, select: { employeeId: true } });
+  const ids = Array.from(new Set(att.map((a) => a.employeeId)));
+  return prisma.employee.findMany({
+    where: { id: { in: ids }, status: { in: ["ACTIVE", "PROBATION"] } },
+    select: { id: true, code: true, fullName: true, department: { select: { name: true } } },
+    orderBy: { fullName: "asc" },
+  });
+}
+
+// GET — template: Mã NV | Họ tên | Phòng ban | Bổ sung khác
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
+  if (!canViewPayroll((session.user as any).employeeCode)) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  const { id } = await params;
+  const period = await prisma.payrollPeriod.findUnique({ where: { id } });
+  if (!period) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+
+  const emps = await employeesWithAttendance(period.month, period.year);
+  const existing = await prisma.payrollManualInput.findMany({ where: { month: period.month, year: period.year }, select: { employeeId: true, adjustment: true, note: true } });
+  const exMap = new Map(existing.map((e) => [e.employeeId, e]));
+  const aoa: any[][] = [["Mã NV", "Họ tên", "Phòng ban", "Bổ sung khác", "Lý do"]];
+  for (const e of emps) { const ex = exMap.get(e.id); aoa.push([e.code, e.fullName, e.department?.name || "", ex?.adjustment || 0, ex?.note || ""]); }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{ wch: 10 }, { wch: 26 }, { wch: 22 }, { wch: 16 }, { wch: 30 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "BoSungKhac");
+  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  return new NextResponse(new Uint8Array(buf), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="bo-sung-khac-T${period.month}-${period.year}.xlsx"`,
+    },
+  });
+}
+
+// POST — import: thay thế toàn bộ điều chỉnh tay của kỳ.
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
+  if (!canViewPayroll((session.user as any).employeeCode)) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền" } }, { status: 403 });
+  const { id } = await params;
+  const period = await prisma.payrollPeriod.findUnique({ where: { id } });
+  if (!period) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  if (period.status === "APPROVED" || period.status === "PAID") {
+    return NextResponse.json({ error: { code: "INVALID_STATE", message: "Kỳ lương đã duyệt/đã trả — không nhập được" } }, { status: 409 });
+  }
+
+  let wb: XLSX.WorkBook;
+  try {
+    const fd = await request.formData();
+    const file = fd.get("file") as File | null;
+    if (!file) return NextResponse.json({ error: { code: "NO_FILE", message: "Chưa chọn file" } }, { status: 400 });
+    wb = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer" });
+  } catch (e: any) {
+    return NextResponse.json({ error: { code: "PARSE_ERROR", message: `Không đọc được file: ${e.message}` } }, { status: 400 });
+  }
+
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" }) as any[][];
+  let hi = -1;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) if (findCol(rows[i], ["mã nv", "mã nhân", "manv", "ma nv"]) >= 0) { hi = i; break; }
+  if (hi < 0) return NextResponse.json({ error: { code: "BAD_FORMAT", message: "Không tìm thấy cột 'Mã NV'" } }, { status: 422 });
+  const codeCol = findCol(rows[hi], ["mã nv", "mã nhân", "manv", "ma nv"]);
+  const valCol = findCol(rows[hi], ["bổ sung", "bo sung", "điều chỉnh", "dieu chinh", "số tiền", "so tien"]);
+  const reasonCol = findCol(rows[hi], ["lý do", "ly do", "ghi chú", "ghi chu", "reason"]);
+  if (valCol < 0) return NextResponse.json({ error: { code: "BAD_FORMAT", message: "Không tìm thấy cột 'Bổ sung khác'" } }, { status: 422 });
+
+  const allEmps = await prisma.employee.findMany({ select: { id: true, code: true } });
+  const codeToId = new Map(allEmps.map((e) => [e.code, e.id]));
+  const records: { employeeId: string; month: number; year: number; pieceRate: number; adjustment: number; note: string | null }[] = [];
+  const notFound: string[] = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const code = String(rows[i][codeCol] || "").trim();
+    if (!code) continue;
+    const empId = codeToId.get(code);
+    if (!empId) { notFound.push(code); continue; }
+    const adjustment = toInt(rows[i][valCol]);
+    if (adjustment === 0) continue;
+    const note = reasonCol >= 0 ? (String(rows[i][reasonCol] || "").trim() || null) : null;
+    records.push({ employeeId: empId, month: period.month, year: period.year, pieceRate: 0, adjustment, note });
+  }
+
+  await prisma.$transaction([
+    prisma.payrollManualInput.deleteMany({ where: { month: period.month, year: period.year } }),
+    ...(records.length ? [prisma.payrollManualInput.createMany({ data: records })] : []),
+  ]);
+
+  return NextResponse.json({ data: { imported: records.length, notFound: notFound.length, notFoundCodes: notFound.slice(0, 20) } });
+}

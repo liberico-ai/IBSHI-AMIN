@@ -45,7 +45,7 @@ type PayrollRecord = {
 type PayslipDetail = {
   insuranceSalary: number; allowance: number; totalIncome: number; dependentsCount: number;
   responsibilityAllow: number; farAllowance: number; bonusTotal: number;
-  pieceRate: number; adjustment: number;
+  pieceRate: number; adjustment: number; adjustmentNote?: string;
   standardDays: number; workDays: number; leaveDays: number;
   otWeekday: number; otWeekdayNight: number; otSunday: number; otSundayNight: number;
   otHoliday: number; otHolidayNight: number; otHoursTotal: number; otConvertedHours: number;
@@ -301,10 +301,10 @@ function PayslipModal({
               {d.leavePay > 0 && <Row label="Lương phép/lễ" value={formatVND(d.leavePay)} />}
               {d.fillPay > 0 && <Row label="Lương giờ OT bù công (1×)" value={formatVND(d.fillPay)} />}
               {d.salaryOT > 0 && <Row label="Lương tăng ca (đã nhân hệ số)" value={formatVND(d.salaryOT)} />}
-              {(d.pieceRate || 0) > 0 && <Row label="Lương sản phẩm/khoán" value={formatVND(d.pieceRate)} />}
+              {(d.pieceRate || 0) !== 0 && <Row label="Lương sản phẩm/khoán" value={formatVND(d.pieceRate)} />}
               {(d.responsibilityAllow || 0) > 0 && <Row label="Phụ cấp trách nhiệm" value={formatVND(d.responsibilityAllow)} />}
               {(d.farAllowance || 0) > 0 && <Row label="Phụ cấp nhà xa (≥20km)" value={formatVND(d.farAllowance)} />}
-              {(d.adjustment || 0) !== 0 && <Row label="Điều chỉnh/bổ sung" value={formatVND(d.adjustment)} />}
+              {(d.adjustment || 0) !== 0 && <Row label={`Điều chỉnh/bổ sung${d.adjustmentNote ? ` (${d.adjustmentNote})` : ""}`} value={formatVND(d.adjustment)} />}
               {(d.mealOT || 0) > 0 && <Row label="Tiền ăn tăng giờ (OT)" value={formatVND(d.mealOT)} />}
               <Row label="TỔNG THU NHẬP (GROSS)" value={formatVND(d.grossSalary)} bold color="var(--ibs-accent)" />
 
@@ -352,62 +352,78 @@ function PeriodDetailModal({
   const [slipRecord, setSlipRecord] = useState<PayrollRecord | null>(null);
   const totalGross = period.records.reduce((s, r) => s + r.grossSalary, 0);
   const totalNet = period.records.reduce((s, r) => s + r.netSalary, 0);
-  const totalBH = period.records.reduce((s, r) => s + r.bhxh + r.bhyt + r.bhtn, 0);
-  const totalBHEmployer = period.records.reduce((s, r) => s + (r.bhxhEmployer || 0), 0);
-  const totalBonus = period.records.reduce((s, r) => s + (r.detail?.bonusTotal || 0), 0);
-  const totalTNCN = period.records.reduce((s, r) => s + r.tncn, 0);
+
+  // 28 cột bảng lương để ký (chốt 2026-06-22, khớp mẫu HR). t: text|name|num|money|pdf.
+  const COLS: { k: string; h: string; t: "text" | "name" | "num" | "money" | "pdf" }[] = [
+    { k: "code", h: "Mã NV", t: "text" },
+    { k: "name", h: "Họ tên", t: "name" },
+    { k: "dept", h: "Phòng ban", t: "text" },
+    { k: "luongCB", h: "Lương CB", t: "money" },
+    { k: "kpi", h: "KPI", t: "money" },
+    { k: "tongTNhd", h: "Tổng thu nhập", t: "money" },
+    { k: "ngayCaNgay", h: "Ngày công ca ngày", t: "num" },
+    { k: "ngayCaDem", h: "Ngày công ca đêm", t: "num" },
+    { k: "ngayOT", h: "Ngày OT quy đổi", t: "num" },
+    { k: "ngayNghi", h: "Ngày công nghỉ hưởng lương", t: "num" },
+    { k: "luongCaNgay", h: "Lương ca ngày", t: "money" },
+    { k: "luongCaDem", h: "Lương ca đêm", t: "money" },
+    { k: "luongKPI", h: "Lương KPI", t: "money" },
+    { k: "luongOT", h: "Lương OT", t: "money" },
+    { k: "luongCheDo", h: "Lương chế độ", t: "money" },
+    { k: "luongTrachNhiem", h: "Lương trách nhiệm + phụ cấp", t: "money" },
+    { k: "luongNangSuat", h: "Lương năng suất (khoán)", t: "money" },
+    { k: "boSung", h: "Bổ sung khác", t: "money" },
+    { k: "anCa", h: "Tiền ăn ca thêm giờ", t: "money" },
+    { k: "grossTT", h: "Tổng thu nhập", t: "money" },
+    { k: "bhNLD", h: "BHXH NLĐ (10.5%)", t: "money" },
+    { k: "bhCty", h: "BHXH Công ty (21.5%)", t: "money" },
+    { k: "tncn", h: "Thuế TNCN", t: "money" },
+    { k: "thucNhan", h: "Tổng thực nhận", t: "money" },
+    { k: "tt1", h: "Thanh toán lần 1", t: "money" },
+    { k: "conLai", h: "Còn phải TT lần 2", t: "money" },
+    { k: "atm1", h: "ATM lần 1", t: "money" },
+    { k: "atm2", h: "ATM lần 2", t: "money" },
+    { k: "pdf", h: "Phiếu lương", t: "pdf" },
+  ];
+
+  const rowVals = (r: PayrollRecord): Record<string, any> => {
+    const d = r.detail;
+    const cc = d?.standardDays || 26;                       // mẫu số = công chuẩn tháng (ngày − CN)
+    const luongCB = d?.insuranceSalary ?? r.baseSalary ?? 0;
+    const trachNhiem = d?.bonusTotal ?? 0;
+    const kpi = (d?.allowance ?? 0) - trachNhiem;            // allowance đã gồm trách nhiệm → KPI = allowance − trách nhiệm
+    const workDays = r.workDays || 0;
+    const thucNhan = r.netSalary;
+    const tt1 = 0;                                           // thanh toán lần 1 — tính năng thanh toán từng đợt (làm sau)
+    return {
+      code: r.employee.code, name: r.employee.fullName, dept: r.employee.department?.name || "",
+      luongCB, kpi, tongTNhd: luongCB + kpi,
+      ngayCaNgay: workDays, ngayCaDem: 0, ngayOT: (r.otConvertedHours || 0) / 8, ngayNghi: d?.leaveDays ?? 0,
+      luongCaNgay: cc > 0 ? (workDays * luongCB) / cc : 0, luongCaDem: 0, luongKPI: cc > 0 ? (workDays * kpi) / cc : 0,
+      luongOT: d?.salaryOT ?? 0, luongCheDo: d?.leavePay ?? 0, luongTrachNhiem: trachNhiem,
+      luongNangSuat: d?.pieceRate ?? 0, boSung: d?.adjustment ?? 0, anCa: d?.mealOT ?? 0,
+      grossTT: r.grossSalary, bhNLD: r.bhxh + r.bhyt + r.bhtn, bhCty: r.bhxhEmployer || 0, tncn: r.tncn,
+      thucNhan, tt1, conLai: thucNhan - tt1, atm1: tt1, atm2: thucNhan - tt1,
+    };
+  };
+
+  const allVals = period.records.map((r) => ({ r, v: rowVals(r) }));
+  const totals: Record<string, number> = {};
+  for (const c of COLS) if (c.t === "money") totals[c.k] = allVals.reduce((s, x) => s + (x.v[c.k] || 0), 0);
 
   async function exportExcel() {
     const { default: ExcelJS } = await import("exceljs");
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet(`Lương T${period.month}-${period.year}`);
-
-    ws.columns = [
-      { header: "Mã NV",      key: "code",      width: 10 },
-      { header: "Họ tên",     key: "name",      width: 24 },
-      { header: "Phòng ban",  key: "dept",      width: 20 },
-      { header: "Ngày công",      key: "workDays",  width: 10 },
-      { header: "Ngày OT quy đổi", key: "otConv",    width: 14 },
-      { header: "Tổng ngày công", key: "totalDays", width: 14 },
-      { header: "Lương CB",       key: "base",      width: 16 },
-      { header: "Bổ sung lương",  key: "bonus",     width: 16 },
-      { header: "Gross",      key: "gross",     width: 16 },
-      { header: "BHXH",                key: "bhxh",      width: 14 },
-      { header: "BHYT",                key: "bhyt",      width: 14 },
-      { header: "BHTN",                key: "bhtn",      width: 14 },
-      { header: "BHXH NLĐ (10.5%)",    key: "bhEmp",     width: 16 },
-      { header: "BHXH Công ty (21.5%)",key: "bhCom",     width: 18 },
-      { header: "TNCN",                key: "tncn",      width: 14 },
-      { header: "Tổng thực nhận",      key: "net",       width: 18 },
-    ];
-
+    ws.columns = COLS.filter((c) => c.t !== "pdf").map((c) => ({ header: c.h, key: c.k, width: c.t === "name" ? 24 : c.t === "text" ? 14 : 16 }));
     ws.getRow(1).font = { bold: true };
-
-    period.records.forEach((r) => {
-      ws.addRow({
-        code:     r.employee.code,
-        name:     r.employee.fullName,
-        dept:     r.employee.department?.name,
-        workDays:  Number((r.workDays || 0).toFixed(2)),
-        otConv:    Number(((r.otConvertedHours || 0) / 8).toFixed(2)),
-        totalDays: Number((r.workDays + (r.otConvertedHours || 0) / 8).toFixed(2)),
-        base:      r.baseSalary,
-        bonus:    r.detail?.bonusTotal || 0,
-        gross:    r.grossSalary,
-        bhxh:     r.bhxh,
-        bhyt:     r.bhyt,
-        bhtn:     r.bhtn,
-        bhEmp:    r.bhxh + r.bhyt + r.bhtn,
-        bhCom:    r.bhxhEmployer || 0,
-        tncn:     r.tncn,
-        net:      r.netSalary,
-      });
-    });
-
+    for (const { v } of allVals) {
+      const row: Record<string, any> = {};
+      for (const c of COLS) if (c.t !== "pdf") row[c.k] = c.t === "num" ? Number((v[c.k] || 0).toFixed(2)) : v[c.k];
+      ws.addRow(row);
+    }
     const buf = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buf], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -488,195 +504,37 @@ function PeriodDetailModal({
               </p>
             </div>
           ) : (
-            <table className="w-full border-collapse text-[12px]">
+            <table className="w-full border-collapse text-[11px]">
               <thead>
                 <tr>
-                  {[
-                    "Mã NV",
-                    "Họ tên",
-                    "Phòng ban",
-                    "Ngày công",
-                    "Ngày OT quy đổi",
-                    "Tổng ngày công",
-                    "Lương CB",
-                    "Bổ sung lương",
-                    "Gross",
-                    "BHXH Người Lao Động",
-                    "BHXH Công Ty",
-                    "TNCN",
-                    "Tổng thực nhận",
-                    "Phiếu lương",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="px-3 py-2 text-left font-semibold border-b whitespace-nowrap"
-                      style={{
-                        borderColor: "var(--ibs-border)",
-                        color: "var(--ibs-text-dim)",
-                        background: "var(--ibs-bg)",
-                      }}
-                    >
-                      {h}
-                    </th>
+                  {COLS.map((c) => (
+                    <th key={c.k} className="px-2 py-2 font-semibold border-b whitespace-nowrap" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)", background: "var(--ibs-bg)", textAlign: c.t === "money" ? "right" : c.t === "num" ? "center" : "left" }}>{c.h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {period.records.map((r, i) => {
-                  const bhTotal = r.bhxh + r.bhyt + r.bhtn;
-                  return (
-                    <tr
-                      key={r.id}
-                      style={{
-                        background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
-                      }}
-                    >
-                      <td
-                        className="px-3 py-2 border-b font-mono font-semibold"
-                        style={{ borderColor: "rgba(51,65,85,0.3)", color: "var(--ibs-accent)" }}
-                      >
-                        {r.employee.code}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b font-medium whitespace-nowrap"
-                        style={{ borderColor: "rgba(51,65,85,0.3)" }}
-                      >
-                        <button
-                          onClick={() => setSlipRecord(r)}
-                          className="hover:underline text-left"
-                          style={{ color: "var(--ibs-accent)", fontWeight: 600 }}
-                          title="Xem phiếu lương chi tiết"
-                        >
-                          {r.employee.fullName}
-                        </button>
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b whitespace-nowrap"
-                        style={{ borderColor: "rgba(51,65,85,0.3)", color: "var(--ibs-text-dim)" }}
-                      >
-                        {r.employee.department?.name}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-center"
-                        style={{ borderColor: "rgba(51,65,85,0.3)" }}
-                      >
-                        {Number((r.workDays || 0).toFixed(2)).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-center"
-                        style={{ borderColor: "rgba(51,65,85,0.3)" }}
-                      >
-                        {Number(((r.otConvertedHours || 0) / 8).toFixed(2)).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-center font-medium"
-                        style={{ borderColor: "rgba(51,65,85,0.3)", color: "var(--ibs-accent)" }}
-                      >
-                        {Number((r.workDays + (r.otConvertedHours || 0) / 8).toFixed(2)).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-right whitespace-nowrap"
-                        style={{ borderColor: "rgba(51,65,85,0.3)" }}
-                      >
-                        {formatVND(r.baseSalary)}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-right whitespace-nowrap"
-                        style={{ borderColor: "rgba(51,65,85,0.3)", color: (r.detail?.bonusTotal || 0) > 0 ? "var(--ibs-text)" : "var(--ibs-text-dim)" }}
-                        title="Phụ cấp trách nhiệm + nhà xa (chỉ hiển thị, không tính vào Gross)"
-                      >
-                        {formatVND(r.detail?.bonusTotal || 0)}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-right whitespace-nowrap"
-                        style={{ borderColor: "rgba(51,65,85,0.3)" }}
-                      >
-                        {formatVND(r.grossSalary)}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-right whitespace-nowrap"
-                        style={{ borderColor: "rgba(51,65,85,0.3)", color: "var(--ibs-warning)" }}
-                      >
-                        {formatVND(bhTotal)}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-right whitespace-nowrap"
-                        style={{ borderColor: "rgba(51,65,85,0.3)", color: "var(--ibs-text-dim)" }}
-                      >
-                        {formatVND(r.bhxhEmployer || 0)}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-right whitespace-nowrap"
-                        style={{ borderColor: "rgba(51,65,85,0.3)", color: "var(--ibs-warning)" }}
-                      >
-                        {formatVND(r.tncn)}
-                      </td>
-                      <td
-                        className="px-3 py-2 border-b text-right whitespace-nowrap font-bold"
-                        style={{ borderColor: "rgba(51,65,85,0.3)", color: "var(--ibs-success)" }}
-                      >
-                        {formatVND(r.netSalary)}
-                      </td>
-                      <td className="px-3 py-2 border-b text-center" style={{ borderColor: "rgba(51,65,85,0.3)" }}>
-                        <a
-                          href={`/api/v1/payroll/${period.id}/slip/pdf?employeeId=${r.employeeId}`}
-                          download
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] border transition-colors hover:bg-white/5"
-                          style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-accent)" }}
-                        >
-                          <Download size={11} /> PDF
-                        </a>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {allVals.map(({ r, v }, i) => (
+                  <tr key={r.id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)" }}>
+                    {COLS.map((c) => {
+                      const val = v[c.k];
+                      const bc = "rgba(51,65,85,0.3)";
+                      if (c.t === "name") return <td key={c.k} className="px-2 py-1.5 border-b whitespace-nowrap" style={{ borderColor: bc }}><button onClick={() => setSlipRecord(r)} className="hover:underline text-left" style={{ color: "var(--ibs-accent)", fontWeight: 600 }} title="Xem phiếu lương">{val}</button></td>;
+                      if (c.t === "pdf") return <td key={c.k} className="px-2 py-1.5 border-b text-center" style={{ borderColor: bc }}><a href={`/api/v1/payroll/${period.id}/slip/pdf?employeeId=${r.employeeId}`} download className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-accent)" }}><Download size={10} /> PDF</a></td>;
+                      if (c.t === "text") return <td key={c.k} className="px-2 py-1.5 border-b whitespace-nowrap" style={{ borderColor: bc, color: c.k === "code" ? "var(--ibs-accent)" : "var(--ibs-text-dim)", fontFamily: c.k === "code" ? "monospace" : undefined, fontWeight: c.k === "code" ? 600 : undefined }}>{val}</td>;
+                      if (c.t === "num") return <td key={c.k} className="px-2 py-1.5 border-b text-center" style={{ borderColor: bc }}>{Number((val || 0).toFixed(2)).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}</td>;
+                      return <td key={c.k} className="px-2 py-1.5 border-b text-right whitespace-nowrap" style={{ borderColor: bc, color: c.k === "thucNhan" ? "var(--ibs-success)" : (c.k === "bhNLD" || c.k === "tncn") ? "var(--ibs-warning)" : undefined, fontWeight: c.k === "thucNhan" || c.k === "grossTT" ? 600 : undefined }}>{formatVND(val || 0)}</td>;
+                    })}
+                  </tr>
+                ))}
               </tbody>
               <tfoot>
                 <tr style={{ background: "rgba(0,180,216,0.04)" }}>
-                  <td
-                    colSpan={7}
-                    className="px-3 py-2.5 text-right font-bold text-[12px] border-t"
-                    style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}
-                  >
-                    Tổng cộng ({period.records.length} NV)
-                  </td>
-                  <td
-                    className="px-3 py-2.5 text-right font-bold text-[12px] whitespace-nowrap border-t"
-                    style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}
-                  >
-                    {formatVND(totalBonus)}
-                  </td>
-                  <td
-                    className="px-3 py-2.5 text-right font-bold text-[12px] whitespace-nowrap border-t"
-                    style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}
-                  >
-                    {formatVND(totalGross)}
-                  </td>
-                  <td
-                    className="px-3 py-2.5 text-right font-bold text-[12px] whitespace-nowrap border-t"
-                    style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-warning)" }}
-                  >
-                    {formatVND(totalBH)}
-                  </td>
-                  <td
-                    className="px-3 py-2.5 text-right font-bold text-[12px] whitespace-nowrap border-t"
-                    style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}
-                  >
-                    {formatVND(totalBHEmployer)}
-                  </td>
-                  <td
-                    className="px-3 py-2.5 text-right font-bold text-[12px] whitespace-nowrap border-t"
-                    style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-warning)" }}
-                  >
-                    {formatVND(totalTNCN)}
-                  </td>
-                  <td
-                    className="px-3 py-2.5 text-right font-bold text-[13px] whitespace-nowrap border-t"
-                    style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-success)" }}
-                  >
-                    {formatVND(totalNet)}
-                  </td>
-                  <td className="border-t" style={{ borderColor: "var(--ibs-border)" }} />
+                  <td colSpan={3} className="px-2 py-2 text-right font-bold border-t" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Tổng cộng ({period.records.length} NV)</td>
+                  {COLS.slice(3).map((c) => (
+                    c.t === "money"
+                      ? <td key={c.k} className="px-2 py-2 text-right font-bold whitespace-nowrap border-t" style={{ borderColor: "var(--ibs-border)", color: c.k === "thucNhan" ? "var(--ibs-success)" : "var(--ibs-text)" }}>{formatVND(totals[c.k] || 0)}</td>
+                      : <td key={c.k} className="border-t" style={{ borderColor: "var(--ibs-border)" }} />
+                  ))}
                 </tr>
               </tfoot>
             </table>
@@ -710,7 +568,7 @@ function ImportPieceRateModal({
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<{ imported: number; notFound: number; notFoundCodes: string[] } | null>(null);
+  const [result, setResult] = useState<{ imported: number; notFound: number; notFoundNames: string[] } | null>(null);
 
   async function handleUpload() {
     if (!file) { setError("Vui lòng chọn file Excel"); return; }
@@ -728,14 +586,14 @@ function ImportPieceRateModal({
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
       <div className="rounded-2xl w-full max-w-md p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-4">
-          <div className="text-[16px] font-bold">Import Lương sản phẩm — T{period.month}/{period.year}</div>
+          <div className="text-[16px] font-bold">Import Lương khoán theo Tổ — T{period.month}/{period.year}</div>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
 
         {!result ? (
           <div className="flex flex-col gap-4">
             <p className="text-[12.5px]" style={{ color: "var(--ibs-text-dim)" }}>
-              File Excel cần có cột <b>Mã NV</b> và <b>Lương sản phẩm</b> (kèm <b>Điều chỉnh</b> nếu có). Tải template có sẵn danh sách NV của kỳ:
+              File Excel cần có cột <b>Tổ</b> và <b>Lương khoán</b> (tiền khoán cả tổ). Khi bấm <b>"Tính lại"</b>, hệ thống tự chia cho từng NV theo công thức: (khoán tổ − lương thời gian tổ) ÷ tổng công tổ × công cá nhân. Tải template có sẵn danh sách tổ:
             </p>
             <a
               href={`/api/v1/payroll/${period.id}/piece-rate`}
@@ -765,13 +623,85 @@ function ImportPieceRateModal({
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <div className="text-[13px]">✅ Đã import <b>{result.imported}</b> nhân viên.</div>
+            <div className="text-[13px]">✅ Đã import khoán cho <b>{result.imported}</b> tổ.</div>
+            {result.notFound > 0 && (
+              <div className="text-[12px]" style={{ color: "var(--ibs-warning)" }}>
+                ⚠️ {result.notFound} tên Tổ không khớp hệ thống (bỏ qua){result.notFoundNames.length ? `: ${result.notFoundNames.join(", ")}` : ""}
+              </div>
+            )}
+            <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Giờ bấm <b>"Tính lại"</b> để hệ thống chia khoán ra lương SP từng NV.</div>
+            <div className="flex justify-end">
+              <button onClick={onSuccess} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>Xong</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Import Bổ sung lương (Bổ sung khác / điều chỉnh tay) Modal ───────────────
+function ImportAdjustmentModal({
+  period,
+  onClose,
+  onSuccess,
+}: {
+  period: PayrollPeriod;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<{ imported: number; notFound: number; notFoundCodes: string[] } | null>(null);
+
+  async function handleUpload() {
+    if (!file) { setError("Vui lòng chọn file Excel"); return; }
+    setUploading(true); setError("");
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/v1/payroll/${period.id}/adjustment`, { method: "POST", body: fd });
+    setUploading(false);
+    const data = await res.json();
+    if (res.ok) setResult(data.data); else setError(apiError(res.status, data.error));
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="rounded-2xl w-full max-w-md p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[16px] font-bold">Import Bổ sung lương — T{period.month}/{period.year}</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        {!result ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-[12.5px]" style={{ color: "var(--ibs-text-dim)" }}>
+              File Excel cần cột <b>Mã NV</b> và <b>Bổ sung khác</b> (số tiền). Nhập <b>số âm</b> để truy thu, dương để bổ sung. Có thể thêm cột <b>Lý do</b> — sẽ hiện ở phiếu lương chi tiết của NV (không hiện ở bảng tổng). Tải template có sẵn danh sách NV của kỳ:
+            </p>
+            <a href={`/api/v1/payroll/${period.id}/adjustment`} download className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold w-fit border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-accent)" }}>
+              <Download size={13} /> Tải template Excel
+            </a>
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Chọn file đã điền *</label>
+              <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)} className="block w-full text-[12px] file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-[12px] file:font-semibold" style={{ color: "var(--ibs-text)" }} />
+            </div>
+            {error && <div className="text-[12px] text-red-500">{error}</div>}
+            <div className="flex gap-2 justify-end">
+              <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+              <button onClick={handleUpload} disabled={uploading} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: uploading ? 0.7 : 1 }}>
+                {uploading ? "Đang import..." : "Import"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="text-[13px]">✅ Đã import bổ sung cho <b>{result.imported}</b> NV.</div>
             {result.notFound > 0 && (
               <div className="text-[12px]" style={{ color: "var(--ibs-warning)" }}>
                 ⚠️ {result.notFound} mã NV không có trong hệ thống (bỏ qua){result.notFoundCodes.length ? `: ${result.notFoundCodes.join(", ")}` : ""}
               </div>
             )}
-            <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Giờ anh có thể bấm <b>Tính lương</b> để ra số chính xác.</div>
+            <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Giờ bấm <b>"Tính lại"</b> để áp vào lương.</div>
             <div className="flex justify-end">
               <button onClick={onSuccess} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>Xong</button>
             </div>
@@ -959,6 +889,8 @@ export default function LuongPage() {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [importPeriod, setImportPeriod] = useState<PayrollPeriod | null>(null);
   const [importBhxhPeriod, setImportBhxhPeriod] = useState<PayrollPeriod | null>(null);
+  const [importAdjPeriod, setImportAdjPeriod] = useState<PayrollPeriod | null>(null);
+  const [actionMenu, setActionMenu] = useState<{ row: PayrollPeriod; x: number; y: number } | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => setAllowed(!!res.canViewPayroll)).catch(() => setAllowed(false));
@@ -1098,97 +1030,40 @@ export default function LuongPage() {
     {
       key: "actions",
       header: "",
-      width: "290px",
-      render: (row) => {
-        const isCalc = calculatingId === row.id;
-        const isActioning = actioningId === row.id;
-        return (
-          <div className="flex items-center gap-1 flex-wrap">
-            {/* Import lương sản phẩm: trước khi tính lương (DRAFT/PROCESSING) */}
-            {canManage && (row.status === "DRAFT" || row.status === "PROCESSING") && (
-              <button
-                onClick={() => setImportPeriod(row)}
-                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
-                style={{ background: "rgba(99,102,241,0.15)", color: "#818cf8" }}
-                title="Import file Lương sản phẩm theo sản lượng tháng"
-              >
-                <Download size={11} className="rotate-180" /> {row.pieceRateImported ? "Import lại lương SP" : "Import lương SP"}
-              </button>
-            )}
-
-            {/* Import file BHXH (HCNS tính ngoài): NLĐ 8/1.5/1% + công ty 21.5% */}
-            {canManage && (row.status === "DRAFT" || row.status === "PROCESSING") && (
-              <button
-                onClick={() => setImportBhxhPeriod(row)}
-                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
-                style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}
-                title="Import file BHXH HCNS tính ngoài (BHXH 8% / BHYT 1.5% / BHTN 1% / Công ty 21.5%)"
-              >
-                <Download size={11} className="rotate-180" /> Import file BHXH
-              </button>
-            )}
-
-            {/* Calculate: HR_ADMIN or BOM. Cho phép tính lương kể cả khi chưa import lương SP (mặc định = 0) */}
-            {canManage && (row.status === "DRAFT" || row.status === "PROCESSING") && (
-              <button
-                onClick={() => handleCalculate(row.id)}
-                disabled={isCalc}
-                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
-                style={{ background: "rgba(245,158,11,0.15)", color: "var(--ibs-warning)", opacity: isCalc ? 0.7 : 1 }}
-                title={row.pieceRateImported ? "Tính lương theo bảng công + lương SP đã import" : "Tính lương theo bảng công (chưa có lương SP — sẽ tính với SP = 0)"}
-              >
-                <RefreshCw size={11} className={isCalc ? "animate-spin" : ""} />
-                {isCalc ? "Đang tính..." : row.status === "DRAFT" ? "Tính lương" : "Tính lại"}
-              </button>
-            )}
-
-            {/* View detail: always */}
+      width: "200px",
+      render: (row) => (
+        <div className="flex items-center gap-1">
+          {canManage && (row.status === "DRAFT" || row.status === "PROCESSING") && (
             <button
-              onClick={() => handleViewDetail(row.id)}
-              disabled={loadingDetail}
+              onClick={() => handleCalculate(row.id)}
+              disabled={calculatingId === row.id}
               className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
-              style={{
-                background: "rgba(0,180,216,0.12)",
-                color: "var(--ibs-accent)",
-              }}
+              style={{ background: "rgba(245,158,11,0.15)", color: "var(--ibs-warning)", opacity: calculatingId === row.id ? 0.7 : 1 }}
             >
-              Xem chi tiết
+              <RefreshCw size={11} className={calculatingId === row.id ? "animate-spin" : ""} />
+              {calculatingId === row.id ? "Đang tính..." : row.status === "DRAFT" ? "Tính lương" : "Tính lại"}
             </button>
-
-            {/* Approve: BOM only, PROCESSING */}
-            {isBOM && row.status === "PROCESSING" && (
-              <button
-                onClick={() => handleApprove(row.id)}
-                disabled={isActioning}
-                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
-                style={{
-                  background: "rgba(16,185,129,0.15)",
-                  color: "var(--ibs-success)",
-                  opacity: isActioning ? 0.7 : 1,
-                }}
-              >
-                Duyệt
-              </button>
-            )}
-
-            {/* Mark paid: HR_ADMIN only, APPROVED */}
-            {isHRAdmin && row.status === "APPROVED" && (
-              <button
-                onClick={() => handleMarkPaid(row.id)}
-                disabled={isActioning}
-                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
-                style={{
-                  background: "rgba(16,185,129,0.15)",
-                  color: "var(--ibs-success)",
-                  opacity: isActioning ? 0.7 : 1,
-                }}
-              >
-                Đánh dấu đã trả
-              </button>
-            )}
-          </div>
-        );
-      },
+          )}
+          <button
+            onClick={() => handleViewDetail(row.id)}
+            disabled={loadingDetail}
+            className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
+            style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}
+          >
+            Xem chi tiết
+          </button>
+          {(canManage || isBOM || isHRAdmin) && (
+            <button
+              onClick={(e) => { const b = e.currentTarget.getBoundingClientRect(); setActionMenu({ row, x: b.right, y: b.bottom }); }}
+              className="flex items-center gap-0.5 px-2 py-1 rounded text-[11px] font-semibold"
+              style={{ background: "rgba(148,163,184,0.15)", color: "var(--ibs-text-dim)" }}
+              title="Thao tác khác (import, duyệt...)"
+            >
+              Thao tác ▾
+            </button>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -1302,6 +1177,40 @@ export default function LuongPage() {
         />
       )}
 
+      {/* Menu "Thao tác" theo từng kỳ (vị trí fixed — không bị bảng che) */}
+      {actionMenu && (() => {
+        const row = actionMenu.row;
+        const draft = row.status === "DRAFT" || row.status === "PROCESSING";
+        const item = (label: string, onClick: () => void, color?: string) => (
+          <button onClick={() => { onClick(); setActionMenu(null); }} className="w-full text-left px-3 py-2 text-[12.5px] font-medium" style={{ color: color || "var(--ibs-text)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+            {label}
+          </button>
+        );
+        const hasAny = (canManage && draft) || (isBOM && row.status === "PROCESSING") || (isHRAdmin && row.status === "APPROVED");
+        return (
+          <>
+            <div className="fixed inset-0 z-[58]" onClick={() => setActionMenu(null)} />
+            <div className="fixed z-[59] rounded-lg border shadow-xl py-1 flex flex-col"
+              style={{ top: actionMenu.y + 4, left: Math.max(8, actionMenu.x - 210), width: 210, background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+              <div className="px-3 py-1.5 text-[11px] font-semibold border-b" style={{ color: "var(--ibs-text-dim)", borderColor: "var(--ibs-border)" }}>
+                Tháng {row.month}/{row.year}
+              </div>
+              {canManage && draft && (
+                <>
+                  {item(`⬇ ${row.pieceRateImported ? "Import lại khoán (tổ)" : "Import khoán (tổ)"}`, () => setImportPeriod(row), "#818cf8")}
+                  {item("⬇ Import bổ sung lương", () => setImportAdjPeriod(row), "var(--ibs-warning)")}
+                  {item("⬇ Import file BHXH", () => setImportBhxhPeriod(row), "#22c55e")}
+                </>
+              )}
+              {isBOM && row.status === "PROCESSING" && item("✓ Duyệt kỳ lương", () => handleApprove(row.id), "var(--ibs-success)")}
+              {isHRAdmin && row.status === "APPROVED" && item("✓ Đánh dấu đã trả", () => handleMarkPaid(row.id), "var(--ibs-success)")}
+              {!hasAny && <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không có thao tác</div>}
+            </div>
+          </>
+        );
+      })()}
+
       {/* Loading detail overlay */}
       {loadingDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -1332,6 +1241,18 @@ export default function LuongPage() {
           onClose={() => setImportPeriod(null)}
           onSuccess={() => {
             setImportPeriod(null);
+            fetchPeriods();
+          }}
+        />
+      )}
+
+      {/* Import bổ sung lương modal */}
+      {importAdjPeriod && (
+        <ImportAdjustmentModal
+          period={importAdjPeriod}
+          onClose={() => setImportAdjPeriod(null)}
+          onSuccess={() => {
+            setImportAdjPeriod(null);
             fetchPeriods();
           }}
         />

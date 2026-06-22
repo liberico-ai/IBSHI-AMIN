@@ -33,7 +33,8 @@ export interface SalaryInput {
   unpaidWeekdayDays?: number;// số ngày NK rơi ngày thường (T2-T7 không lễ) — mục tiêu bù công
   ot: OTHours;
   dependentsCount: number;
-  bonusAllowance?: number;   // Bổ sung lương (trách nhiệm + nhà xa) — số phẳng, cộng vào Gross/Net
+  bonusAllowance?: number;   // Phụ cấp THỰC TRẢ (trách nhiệm + nhà xa nếu đủ điều kiện) — cộng vào Gross
+  bonusAllowanceFull?: number; // Phụ cấp ĐẦY ĐỦ (gồm cả phụ cấp có điều kiện) — dùng TRỪ khỏi đơn giá ngày (mặc định = bonusAllowance)
   pieceRate?: number;        // Lương sản phẩm/khoán (nhập theo kỳ) — chịu thuế
   adjustment?: number;       // Điều chỉnh/bổ sung tay theo kỳ (có thể âm) — chịu thuế
   mealOT?: number;           // Tiền ăn tăng giờ (tự tính từ chấm công) — số phẳng, cộng vào Gross, CHỊU thuế
@@ -91,9 +92,9 @@ export function calcTNCN(taxableMonthly: number): number {
 export function calculateSalary(input: SalaryInput): SalaryOutput {
   const CC = input.standardDays > 0 ? input.standardDays : SALARY_CONFIG.STANDARD_WORK_DAYS;
 
-  // bonusAllowance (PC trách nhiệm + PC nhà xa) là SỐ PHẲNG — không chia theo công.
-  // → Đơn giá ngày làm + giờ OT phải trừ phần này ra khỏi totalIncome trước khi chia CC.
-  const bonusAllowanceForBase = input.bonusAllowance || 0;
+  // PC trách nhiệm + nhà xa là SỐ PHẲNG — không chia theo công → TRỪ khỏi totalIncome trước khi chia CC.
+  // Dùng phụ cấp ĐẦY ĐỦ (full) để trừ — dù phụ cấp có điều kiện không được trả thì đơn giá ngày vẫn không đổi.
+  const bonusAllowanceForBase = input.bonusAllowanceFull ?? input.bonusAllowance ?? 0;
   const workIncomeBase = input.totalIncome - bonusAllowanceForBase;
 
   // Đơn giá SỐ THẬT (KHÔNG làm tròn — chốt 2026-06-19, khớp Excel kế toán không làm tròn).

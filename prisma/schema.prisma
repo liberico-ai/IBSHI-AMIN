@@ -894,7 +894,7 @@ model PayrollRecord {
   otHours             Float    @default(0)
   otConvertedHours    Float    @default(0)
   baseSalary          Int
-  pieceRateSalary     Int      @default(0)
+  pieceRateSalary     Float    @default(0)  // lương SP/khoán — số thật (chia từ khoán tổ, có thể lẻ/âm)
   hazardAllowance     Int      @default(0)
   responsibilityAllow Int      @default(0)
   mealAllowance       Int      @default(0)

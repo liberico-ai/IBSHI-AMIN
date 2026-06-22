@@ -58,10 +58,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // Đầu vào nhập tay theo kỳ: lương sản phẩm + điều chỉnh
   const manualInputs = await prisma.payrollManualInput.findMany({
     where: { month: period.month, year: period.year },
-    select: { employeeId: true, pieceRate: true, adjustment: true, mealBonus: true },
+    select: { employeeId: true, pieceRate: true, adjustment: true, mealBonus: true, note: true },
   });
-  const manualMap: Record<string, { pieceRate: number; adjustment: number; mealBonus: number }> = {};
-  for (const m of manualInputs) manualMap[m.employeeId] = { pieceRate: m.pieceRate, adjustment: m.adjustment, mealBonus: m.mealBonus };
+  const manualMap: Record<string, { pieceRate: number; adjustment: number; mealBonus: number; note: string | null }> = {};
+  for (const m of manualInputs) manualMap[m.employeeId] = { pieceRate: m.pieceRate, adjustment: m.adjustment, mealBonus: m.mealBonus, note: m.note };
 
   // BHXH HCNS tính NGOÀI rồi import (hệ thống KHÔNG tự tính). NLĐ = 8%+1.5%+1% (khoản trừ); employer = 21.5% (báo cáo).
   const bhxhInputs = await prisma.payrollBhxhInput.findMany({ where: { month: period.month, year: period.year } });
@@ -243,6 +243,56 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // Công chuẩn (CC) = số ngày trong tháng − số Chủ Nhật
   const CC = standardWorkDays(period.year, period.month);
 
+  // Helper: dựng workDaysActual + otAfter (sau bù công) cho 1 NV — dùng chung pre-pass & vòng chính.
+  const buildWorkOt = (empId: string) => {
+    const workDaysActualRaw = workDaysMap[empId] || 0;
+    const ot = otMap[empId] || { weekday: 0, sunday: 0, holiday: 0 };
+    const klHours = (unpaidWeekdayMap[empId] || 0) * 8;
+    const otTotal = (ot.weekday || 0) + (ot.sunday || 0) + (ot.holiday || 0);
+    const buHours = Math.min(klHours, otTotal);
+    const workDaysActual = workDaysActualRaw + buHours / 8;
+    let remainBu = buHours;
+    const otAfter = { weekday: ot.weekday || 0, sunday: ot.sunday || 0, holiday: ot.holiday || 0 };
+    for (const k of ["holiday", "sunday", "weekday"] as const) {
+      const take = Math.min(otAfter[k], remainBu); otAfter[k] -= take; remainBu -= take;
+    }
+    return { workDaysActual, otAfter };
+  };
+
+  // ── LƯƠNG KHOÁN (chia khoán theo tổ — chốt 2026-06-22) ──
+  // Công thức: Lương SP của NV = (Khoán tổ − Σ lương-thời-gian-OT tổ) ÷ Σ công-quy-đổi tổ × công-quy-đổi NV.
+  //   - lương-thời-gian-OT = lương ngày công đi làm + tiền OT (KHÔNG gồm phụ cấp/phép).
+  //   - công-quy-đổi = công thường + OT quy đổi (otConvertedHours/8).
+  //   - Phần chênh có thể ÂM (tổ làm theo giờ vượt khoán) → trừ vào lương.
+  // PASS 1: tính lương thời gian + công quy đổi từng NV.
+  const timeInfo: Record<string, { timeSalary: number; cong: number }> = {};
+  for (const emp of employees) {
+    const insuranceSalary = emp.contracts[0]?.insuranceSalary ?? emp.contracts[0]?.baseSalary ?? 0;
+    const allowance = emp.contracts[0]?.allowance ?? 0;
+    const { workDaysActual, otAfter } = buildWorkOt(emp.id);
+    const o = calculateSalary({
+      totalIncome: insuranceSalary + allowance, insuranceSalary, standardDays: CC,
+      workDaysActual, leaveDays: 0, unpaidWeekdayDays: 0,
+      ot: { weekday: otAfter.weekday, weekdayNight: 0, sunday: otAfter.sunday, sundayNight: 0, holiday: otAfter.holiday, holidayNight: 0 },
+      dependentsCount: 0, bonusAllowance: ((emp as any).responsibilityAllowance || 0) + ((emp as any).farAllowance || 0),
+      pieceRate: 0, adjustment: 0, mealOT: 0, priorOtHours: 0, importedBhxhEmployee: 0, importedBhxhEmployer: 0,
+    });
+    timeInfo[emp.id] = { timeSalary: o.salaryWorkActual + o.salaryOT, cong: o.workDaysActual + o.otConvertedHours / 8 };
+  }
+  // Khoán theo tổ kỳ này (cộng dồn nếu nhiều dòng/dự án cùng tổ).
+  const khoanRecords = await prisma.pieceRateRecord.findMany({ where: { month: period.month, year: period.year } });
+  const khoanByTeam: Record<string, number> = {};
+  for (const r of khoanRecords) khoanByTeam[r.teamId] = (khoanByTeam[r.teamId] || 0) + r.totalAmount;
+  // PASS 2: chia khoán cho từng NV trong tổ.
+  const luongKhoanMap: Record<string, number> = {};
+  for (const [teamId, khoan] of Object.entries(khoanByTeam)) {
+    const members = employees.filter((e) => (e as any).team?.id === teamId && timeInfo[e.id]);
+    const sumTime = members.reduce((s, e) => s + timeInfo[e.id].timeSalary, 0);
+    const sumCong = members.reduce((s, e) => s + timeInfo[e.id].cong, 0);
+    if (sumCong <= 0) continue;
+    for (const e of members) luongKhoanMap[e.id] = ((khoan - sumTime) / sumCong) * timeInfo[e.id].cong;
+  }
+
   // ── Tính lương cho từng NV (dùng calculateSalary từ lib/salary-calc.ts) ──
 
   const records: {
@@ -270,29 +320,19 @@ export async function calculatePayrollForPeriod(periodId: string) {
       missingContractEmployees.push({ code: emp.code, fullName: emp.fullName });
     }
 
-    const workDaysActualRaw = workDaysMap[emp.id] || 0;
     const leaveDays = (leavePaidMap[emp.id] || 0) + (holidayRestMap[emp.id] || 0);
-    const ot = otMap[emp.id] || { weekday: 0, sunday: 0, holiday: 0 };
+    // workDaysActual + otAfter (sau bù công) — xem buildWorkOt phía trên.
+    const { workDaysActual, otAfter } = buildWorkOt(emp.id);
+    // Lương SP = nhập tay (nếu có) + phần chia từ khoán tổ (có thể âm).
+    const luongKhoan = luongKhoanMap[emp.id] || 0;
+    const pieceRateTotal = (manualMap[emp.id]?.pieceRate || 0) + luongKhoan;
 
-    // BÙ CÔNG theo HR (chốt 2026-06-11, fix double-count):
-    //   - NV có KL (ABSENT_UNAPPROVED T2-T7, KHÔNG rơi lễ/CN) → bù bằng OT.
-    //   - Bù lấy giờ OT hệ số CAO NHẤT trước (Lễ → CN → thường).
-    //   - Phần OT dùng bù: cộng vào workDays (NV nhận 1× dailyRate) VÀ bị TIÊU HAO
-    //     khỏi OT quy đổi → KHÔNG trả thêm hệ số (tránh tính 2 lần).
-    //   - Chỉ phần OT DÔI ra (sau bù) mới được × hệ số.
-    const klHours = (unpaidWeekdayMap[emp.id] || 0) * 8;
-    const otTotal = (ot.weekday || 0) + (ot.sunday || 0) + (ot.holiday || 0);
-    const buHours = Math.min(klHours, otTotal);
-    const workDaysActual = workDaysActualRaw + buHours / 8;
-
-    // Tiêu hao buHours khỏi OT — hệ số cao nhất trước (Lễ → CN → thường).
-    let remainBu = buHours;
-    const otAfter = { weekday: ot.weekday || 0, sunday: ot.sunday || 0, holiday: ot.holiday || 0 };
-    for (const k of ["holiday", "sunday", "weekday"] as const) {
-      const take = Math.min(otAfter[k], remainBu);
-      otAfter[k] -= take;
-      remainBu -= take;
-    }
+    // Phụ cấp: trách nhiệm trả luôn; PC NHÀ XA chỉ trả khi CÔNG > 14 (chốt 2026-06-22).
+    const respAllow = (emp as any).responsibilityAllowance || 0;
+    const farAllow = (emp as any).farAllowance || 0;
+    const farPaid = workDaysActual > 14 ? farAllow : 0;
+    const bonusPaid = respAllow + farPaid;          // thực trả → cộng vào Gross
+    const bonusFull = respAllow + farAllow;         // đầy đủ → trừ khỏi đơn giá ngày
 
     const input: SalaryInput = {
       totalIncome,
@@ -311,8 +351,9 @@ export async function calculatePayrollForPeriod(periodId: string) {
         holidayNight: 0,
       },
       dependentsCount: emp.dependents || 0,
-      bonusAllowance: ((emp as any).responsibilityAllowance || 0) + ((emp as any).farAllowance || 0),
-      pieceRate: manualMap[emp.id]?.pieceRate || 0,
+      bonusAllowance: bonusPaid,        // thực trả (PC nhà xa chỉ khi công > 14)
+      bonusAllowanceFull: bonusFull,    // đầy đủ — trừ khỏi đơn giá ngày
+      pieceRate: pieceRateTotal,
       adjustment: manualMap[emp.id]?.adjustment || 0,
       mealOT: mealOTMap[emp.id] || 0, // tiền ăn tăng giờ — tự tính từ chấm công (chịu thuế)
       priorOtHours: priorOtMap[emp.id] || 0, // OT cộng dồn từ đầu năm → cap 200h miễn thuế
@@ -333,12 +374,15 @@ export async function calculatePayrollForPeriod(periodId: string) {
       insuranceSalary, allowance, totalIncome,
       dependentsCount: emp.dependents || 0,
       // Bổ sung lương: trách nhiệm + nhà xa (đã cộng vào Gross)
-      responsibilityAllow: (emp as any).responsibilityAllowance || 0,
-      farAllowance: (emp as any).farAllowance || 0,
-      bonusTotal: ((emp as any).responsibilityAllowance || 0) + ((emp as any).farAllowance || 0),
-      // Nhập tay theo kỳ (đã cộng vào Gross)
-      pieceRate: manualMap[emp.id]?.pieceRate || 0,
+      responsibilityAllow: respAllow,
+      farAllowance: farPaid,            // PC nhà xa thực trả (0 nếu công ≤ 14)
+      bonusTotal: bonusPaid,
+      // Lương sản phẩm/khoán (đã cộng vào Gross) = nhập tay + chia từ khoán tổ
+      pieceRate: pieceRateTotal,
+      pieceRateManual: manualMap[emp.id]?.pieceRate || 0,
+      luongKhoan,                                    // phần chia từ khoán tổ (có thể âm)
       adjustment: manualMap[emp.id]?.adjustment || 0,
+      adjustmentNote: manualMap[emp.id]?.note || "",   // lý do truy thu/bổ sung (hiện ở phiếu lương chi tiết)
       // Công
       standardDays: CC,
       workDays: workDaysActual,
@@ -383,7 +427,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       otHours: out.otHoursTotal,
       otConvertedHours: out.otConvertedHours,
       baseSalary: insuranceSalary,
-      pieceRateSalary: manualMap[emp.id]?.pieceRate || 0,
+      pieceRateSalary: pieceRateTotal,
       hazardAllowance: 0,
       responsibilityAllow: 0,
       mealAllowance: 0,
@@ -483,8 +527,8 @@ export async function listPayrollPeriods() {
     include: { records: { select: { id: true, netSalary: true, employeeId: true } } },
     orderBy: [{ year: "desc" }, { month: "desc" }],
   });
-  // Đánh dấu kỳ đã import lương sản phẩm (có ít nhất 1 dòng PayrollManualInput)
-  const manual = await prisma.payrollManualInput.groupBy({ by: ["month", "year"], _count: true });
-  const manualSet = new Set(manual.map((m) => `${m.month}-${m.year}`));
-  return periods.map((p) => ({ ...p, pieceRateImported: manualSet.has(`${p.month}-${p.year}`) }));
+  // Đánh dấu kỳ đã import khoán theo tổ (có ít nhất 1 dòng PieceRateRecord).
+  const khoan = await prisma.pieceRateRecord.groupBy({ by: ["month", "year"], _count: true });
+  const khoanSet = new Set(khoan.map((m) => `${m.month}-${m.year}`));
+  return periods.map((p) => ({ ...p, pieceRateImported: khoanSet.has(`${p.month}-${p.year}`) }));
 }
