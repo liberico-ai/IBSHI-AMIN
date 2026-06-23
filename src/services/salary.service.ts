@@ -327,10 +327,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const luongKhoan = luongKhoanMap[emp.id] || 0;
     const pieceRateTotal = (manualMap[emp.id]?.pieceRate || 0) + luongKhoan;
 
-    // Phụ cấp: trách nhiệm trả luôn; PC NHÀ XA chỉ trả khi CÔNG > 14 (chốt 2026-06-22).
+    // Phụ cấp: trách nhiệm trả luôn; PC NHÀ XA chỉ trả khi CÔNG ≥ 14 (đủ 14 công là được — chốt 2026-06-23).
     const respAllow = (emp as any).responsibilityAllowance || 0;
     const farAllow = (emp as any).farAllowance || 0;
-    const farPaid = workDaysActual > 14 ? farAllow : 0;
+    const farPaid = workDaysActual >= 14 ? farAllow : 0;
     const bonusPaid = respAllow + farPaid;          // thực trả → cộng vào Gross
     const bonusFull = respAllow + farAllow;         // đầy đủ → trừ khỏi đơn giá ngày
 
@@ -351,7 +351,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
         holidayNight: 0,
       },
       dependentsCount: emp.dependents || 0,
-      bonusAllowance: bonusPaid,        // thực trả (PC nhà xa chỉ khi công > 14)
+      bonusAllowance: bonusPaid,        // thực trả (PC nhà xa chỉ khi công ≥ 14)
       bonusAllowanceFull: bonusFull,    // đầy đủ — trừ khỏi đơn giá ngày
       pieceRate: pieceRateTotal,
       adjustment: manualMap[emp.id]?.adjustment || 0,
@@ -375,8 +375,9 @@ export async function calculatePayrollForPeriod(periodId: string) {
       dependentsCount: emp.dependents || 0,
       // Bổ sung lương: trách nhiệm + nhà xa (đã cộng vào Gross)
       responsibilityAllow: respAllow,
-      farAllowance: farPaid,            // PC nhà xa thực trả (0 nếu công ≤ 14)
-      bonusTotal: bonusPaid,
+      farAllowance: farPaid,            // PC nhà xa thực trả (0 nếu công < 14)
+      bonusTotal: bonusPaid,            // thực trả (vào cột "Lương trách nhiệm + phụ cấp")
+      bonusFull,                        // đầy đủ (resp + nhà xa full) — để trừ khỏi cột KPI (far KHÔNG nằm trong KPI)
       // Lương sản phẩm/khoán (đã cộng vào Gross) = nhập tay + chia từ khoán tổ
       pieceRate: pieceRateTotal,
       pieceRateManual: manualMap[emp.id]?.pieceRate || 0,
