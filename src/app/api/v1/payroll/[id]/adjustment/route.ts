@@ -89,18 +89,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const allEmps = await prisma.employee.findMany({ select: { id: true, code: true } });
   const codeToId = new Map(allEmps.map((e) => [e.code, e.id]));
-  const records: { employeeId: string; month: number; year: number; pieceRate: number; adjustment: number; note: string | null }[] = [];
-  const notFound: string[] = [];
+  // Gộp theo Mã NV: 1 người có nhiều dòng → CỘNG DỒN số tiền (gộp cả lý do).
+  const agg = new Map<string, { adjustment: number; notes: string[] }>();
+  const notFound = new Set<string>();
   for (let i = hi + 1; i < rows.length; i++) {
     const code = String(rows[i][codeCol] || "").trim();
     if (!code) continue;
     const empId = codeToId.get(code);
-    if (!empId) { notFound.push(code); continue; }
+    if (!empId) { notFound.add(code); continue; }
     const adjustment = toInt(rows[i][valCol]);
-    if (adjustment === 0) continue;
-    const note = reasonCol >= 0 ? (String(rows[i][reasonCol] || "").trim() || null) : null;
-    records.push({ employeeId: empId, month: period.month, year: period.year, pieceRate: 0, adjustment, note });
+    const note = reasonCol >= 0 ? String(rows[i][reasonCol] || "").trim() : "";
+    const cur = agg.get(empId) || { adjustment: 0, notes: [] };
+    cur.adjustment += adjustment;
+    if (note) cur.notes.push(note);
+    agg.set(empId, cur);
   }
+  const records = Array.from(agg.entries())
+    .filter(([, v]) => v.adjustment !== 0)
+    .map(([employeeId, v]) => ({
+      employeeId, month: period.month, year: period.year,
+      adjustment: v.adjustment,
+      note: v.notes.length ? Array.from(new Set(v.notes)).join("; ") : null,
+    }));
 
   await prisma.$transaction([
     // Reset CHỈ field điều chỉnh + lý do của kỳ (không xoá row → giữ mealBonus/pieceRate).
@@ -114,5 +124,5 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     ),
   ]);
 
-  return NextResponse.json({ data: { imported: records.length, notFound: notFound.length, notFoundCodes: notFound.slice(0, 20) } });
+  return NextResponse.json({ data: { imported: records.length, notFound: notFound.size, notFoundCodes: Array.from(notFound).slice(0, 20) } });
 }

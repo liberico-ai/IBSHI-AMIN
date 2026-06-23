@@ -89,17 +89,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const allEmps = await prisma.employee.findMany({ select: { id: true, code: true } });
   const codeToId = new Map(allEmps.map((e) => [e.code, e.id]));
-  const records: { employeeId: string; month: number; year: number; mealBonus: number }[] = [];
-  const notFound: string[] = [];
+  // Gộp theo Mã NV: 1 người có nhiều dòng → CỘNG DỒN tiền ăn.
+  const agg = new Map<string, number>();
+  const notFound = new Set<string>();
   for (let i = hi + 1; i < rows.length; i++) {
     const code = String(rows[i][codeCol] || "").trim();
     if (!code) continue;
     const empId = codeToId.get(code);
-    if (!empId) { notFound.push(code); continue; }
+    if (!empId) { notFound.add(code); continue; }
     const mealBonus = toInt(rows[i][valCol]);
-    if (mealBonus === 0) continue;
-    records.push({ employeeId: empId, month: period.month, year: period.year, mealBonus });
+    agg.set(empId, (agg.get(empId) || 0) + mealBonus);
   }
+  const records = Array.from(agg.entries())
+    .filter(([, v]) => v !== 0)
+    .map(([employeeId, mealBonus]) => ({ employeeId, month: period.month, year: period.year, mealBonus }));
 
   await prisma.$transaction([
     // Reset CHỈ field tiền ăn của kỳ (không xoá row → giữ adjustment/note/pieceRate).
@@ -113,5 +116,5 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     ),
   ]);
 
-  return NextResponse.json({ data: { imported: records.length, notFound: notFound.length, notFoundCodes: notFound.slice(0, 20) } });
+  return NextResponse.json({ data: { imported: records.length, notFound: notFound.size, notFoundCodes: Array.from(notFound).slice(0, 20) } });
 }
