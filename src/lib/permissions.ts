@@ -170,3 +170,12 @@ export function canDo<M extends ModuleKey>(
   const required = MODULE_PERMISSIONS[module][action] as string;
   return checkPermission(userRole, required);
 }
+
+/**
+ * Quản trị hệ thống — chỉ đúng role "ADMIN" (KHÔNG dùng thứ bậc).
+ * Dùng cho các tính năng riêng admin: nhật ký hoạt động, export log...
+ */
+export const SYSTEM_ADMIN_ROLE = "ADMIN";
+export function isSystemAdmin(userRole: string): boolean {
+  return userRole === SYSTEM_ADMIN_ROLE;
+}

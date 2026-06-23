@@ -18,7 +18,7 @@ export async function GET(_req: NextRequest) {
   }
 
   const where: any = { status: { in: ["ACTIVE", "PROBATION"] } };
-  if (["HR_ADMIN", "BOM"].includes(role)) {
+  if (["HR_ADMIN", "BOM", "ADMIN"].includes(role)) {
     // HCNS / BGĐ: tất cả NV (mọi phòng ban + tổ).
   } else if (emp?.jobRole === "Tổ trưởng" && emp?.teamId) {
     where.teamId = emp.teamId; // Tổ trưởng → CHỈ tổ mình phụ trách.

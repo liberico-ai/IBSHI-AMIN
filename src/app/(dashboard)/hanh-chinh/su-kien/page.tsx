@@ -61,7 +61,7 @@ export default function SuKienPage() {
   }, []);
   useEffect(() => { fetchEvents(); }, [filterType, filterStatus]);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "MANAGER";
+  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || userRole === "MANAGER";
 
   async function handleDelete(id: string) {
     if (!(await confirmDialog({ message: "Xóa sự kiện này?", tone: "danger", confirmText: "Xóa" }))) return;
@@ -180,7 +180,7 @@ export default function SuKienPage() {
                     {ev.status === "ONGOING" && (
                       <button onClick={() => handleStatusChange(ev.id, "COMPLETED")} className="text-[11px] px-2 py-0.5 rounded" style={{ background: "rgba(107,114,128,0.15)", color: "#6b7280" }}>Kết thúc</button>
                     )}
-                    {userRole === "BOM" && (
+                    {(userRole === "BOM" || userRole === "ADMIN") && (
                       <button onClick={() => handleDelete(ev.id)} className="p-1 rounded" style={{ color: "var(--ibs-danger)" }}><Trash2 size={13} /></button>
                     )}
                   </>}

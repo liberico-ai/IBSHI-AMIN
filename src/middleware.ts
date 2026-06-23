@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextFetchEvent } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-export async function middleware(request: NextRequest) {
+// Các path KHÔNG log tác vụ (nhiễu / hệ thống / tránh vòng lặp).
+const NO_LOG_PREFIX = [
+  "/api/v1/activity-log",
+  "/api/v1/auth",
+  "/api/v1/telegram",
+  "/api/v1/cron",
+  "/api/v1/notifications",
+];
+
+export async function middleware(request: NextRequest, event: NextFetchEvent) {
   const token = await getToken({
     req: request,
     secret: process.env.NEXTAUTH_SECRET,
@@ -16,6 +25,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/change-password") ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/v1/auth") ||
+    pathname.startsWith("/api/v1/activity-log") || // endpoint tự kiểm tra quyền
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon")
   ) {
@@ -32,6 +42,28 @@ export async function middleware(request: NextRequest) {
   // Redirect to change-password page if forced
   if ((token as any).forcePasswordChange && pathname !== "/change-password") {
     return NextResponse.redirect(new URL("/change-password", request.url));
+  }
+
+  // ── Phase 2: log mọi tác vụ GHI qua API (fire-and-forget) ──
+  const method = request.method;
+  if (
+    (method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE") &&
+    pathname.startsWith("/api/v1/") &&
+    !NO_LOG_PREFIX.some((p) => pathname.startsWith(p)) &&
+    token.sub
+  ) {
+    const xff = request.headers.get("x-forwarded-for") || "";
+    const ip = (xff.split(",")[0] || request.headers.get("x-real-ip") || "").trim();
+    event.waitUntil(
+      fetch(`${request.nextUrl.origin}/api/v1/activity-log`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-internal-log": process.env.NEXTAUTH_SECRET || "",
+        },
+        body: JSON.stringify({ userId: token.sub, method, path: pathname, ip }),
+      }).catch(() => {})
+    );
   }
 
   return NextResponse.next();

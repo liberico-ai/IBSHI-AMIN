@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   let where: any = {};
   if (period) where.period = period;
 
-  const isHR = ["HR_ADMIN", "BOM"].includes(userRole);
+  const isHR = ["HR_ADMIN", "BOM", "ADMIN"].includes(userRole);
 
   if (employeeId && isHR) {
     where.employeeId = employeeId;

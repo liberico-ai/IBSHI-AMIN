@@ -355,7 +355,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       bonusAllowanceFull: bonusFull,    // đầy đủ — trừ khỏi đơn giá ngày
       pieceRate: pieceRateTotal,
       adjustment: manualMap[emp.id]?.adjustment || 0,
-      mealOT: mealOTMap[emp.id] || 0, // tiền ăn tăng giờ — tự tính từ chấm công (chịu thuế)
+      mealOT: (mealOTMap[emp.id] || 0) + (manualMap[emp.id]?.mealBonus || 0), // tiền ăn tăng giờ: tự tính + bổ sung import (chịu thuế)
       priorOtHours: priorOtMap[emp.id] || 0, // OT cộng dồn từ đầu năm → cap 200h miễn thuế
       importedBhxhEmployee: bhxhMap[emp.id]?.employee || 0, // BHXH NLĐ import (khoản trừ)
       importedBhxhEmployer: bhxhMap[emp.id]?.employer || 0, // BHXH công ty 21.5% import (báo cáo)

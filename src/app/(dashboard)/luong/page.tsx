@@ -712,6 +712,78 @@ function ImportAdjustmentModal({
   );
 }
 
+// ── Import Bổ sung tiền ăn (cộng/trừ cột Tiền ăn ca thêm giờ) Modal ──────────
+function ImportMealBonusModal({
+  period,
+  onClose,
+  onSuccess,
+}: {
+  period: PayrollPeriod;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<{ imported: number; notFound: number; notFoundCodes: string[] } | null>(null);
+
+  async function handleUpload() {
+    if (!file) { setError("Vui lòng chọn file Excel"); return; }
+    setUploading(true); setError("");
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/v1/payroll/${period.id}/meal-bonus`, { method: "POST", body: fd });
+    setUploading(false);
+    const data = await res.json();
+    if (res.ok) setResult(data.data); else setError(apiError(res.status, data.error));
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="rounded-2xl w-full max-w-md p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[16px] font-bold">Import Bổ sung tiền ăn — T{period.month}/{period.year}</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        {!result ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-[12.5px]" style={{ color: "var(--ibs-text-dim)" }}>
+              File Excel cần cột <b>Mã NV</b> và <b>Bổ sung tiền ăn</b> (số tiền). Số này <b>cộng/trừ</b> vào cột <b>Tiền ăn ca thêm giờ</b> (số âm để trừ bớt). Chịu thuế nên hệ thống tính lại thuế + thực lĩnh. Tải template có sẵn danh sách NV của kỳ:
+            </p>
+            <a href={`/api/v1/payroll/${period.id}/meal-bonus`} download className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold w-fit border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-accent)" }}>
+              <Download size={13} /> Tải template Excel
+            </a>
+            <div>
+              <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Chọn file đã điền *</label>
+              <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)} className="block w-full text-[12px] file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-[12px] file:font-semibold" style={{ color: "var(--ibs-text)" }} />
+            </div>
+            {error && <div className="text-[12px] text-red-500">{error}</div>}
+            <div className="flex gap-2 justify-end">
+              <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+              <button onClick={handleUpload} disabled={uploading} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: uploading ? 0.7 : 1 }}>
+                {uploading ? "Đang import..." : "Import"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="text-[13px]">✅ Đã import bổ sung tiền ăn cho <b>{result.imported}</b> NV.</div>
+            {result.notFound > 0 && (
+              <div className="text-[12px]" style={{ color: "var(--ibs-warning)" }}>
+                ⚠️ {result.notFound} mã NV không có trong hệ thống (bỏ qua){result.notFoundCodes.length ? `: ${result.notFoundCodes.join(", ")}` : ""}
+              </div>
+            )}
+            <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Giờ bấm <b>"Tính lại"</b> để áp vào lương.</div>
+            <div className="flex justify-end">
+              <button onClick={onSuccess} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>Xong</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Import file BHXH Modal (preview → confirm) ──────────────────────────────
 function ImportBhxhModal({
   period,
@@ -890,6 +962,7 @@ export default function LuongPage() {
   const [importPeriod, setImportPeriod] = useState<PayrollPeriod | null>(null);
   const [importBhxhPeriod, setImportBhxhPeriod] = useState<PayrollPeriod | null>(null);
   const [importAdjPeriod, setImportAdjPeriod] = useState<PayrollPeriod | null>(null);
+  const [importMealPeriod, setImportMealPeriod] = useState<PayrollPeriod | null>(null);
   const [actionMenu, setActionMenu] = useState<{ row: PayrollPeriod; x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -1200,6 +1273,7 @@ export default function LuongPage() {
                 <>
                   {item(`⬇ ${row.pieceRateImported ? "Import lại khoán (tổ)" : "Import khoán (tổ)"}`, () => setImportPeriod(row), "#818cf8")}
                   {item("⬇ Import bổ sung lương", () => setImportAdjPeriod(row), "var(--ibs-warning)")}
+                  {item("⬇ Import bổ sung tiền ăn", () => setImportMealPeriod(row), "#f59e0b")}
                   {item("⬇ Import file BHXH", () => setImportBhxhPeriod(row), "#22c55e")}
                 </>
               )}
@@ -1253,6 +1327,18 @@ export default function LuongPage() {
           onClose={() => setImportAdjPeriod(null)}
           onSuccess={() => {
             setImportAdjPeriod(null);
+            fetchPeriods();
+          }}
+        />
+      )}
+
+      {/* Import bổ sung tiền ăn modal */}
+      {importMealPeriod && (
+        <ImportMealBonusModal
+          period={importMealPeriod}
+          onClose={() => setImportMealPeriod(null)}
+          onSuccess={() => {
+            setImportMealPeriod(null);
             fetchPeriods();
           }}
         />

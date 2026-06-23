@@ -20,7 +20,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: { code: "INVALID_STATE" } }, { status: 400 });
 
   const isOwner = b.requester.user?.id === userId;
-  const isAdmin = role === "HR_ADMIN" || role === "BOM";
+  const isAdmin = role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
   if (!isOwner && !isAdmin)
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc admin được huỷ" } }, { status: 403 });
 

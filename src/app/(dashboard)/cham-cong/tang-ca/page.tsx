@@ -285,7 +285,7 @@ export default function TangCaPage() {
       .finally(() => setLoading(false));
   }, [statusFilter]);
 
-  const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM";
+  const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
 
   async function handleAction(id: string, action: "APPROVE" | "REJECT") {
     setActionLoading(id + action);

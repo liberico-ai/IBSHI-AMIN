@@ -7,7 +7,7 @@ import { canManageFoodPurchase } from "@/lib/access";
 
 // Thực XUẤT thực phẩm — bếp nhập lượng thực nấu; trừ tồn kho FIFO; chặn xuất vượt tồn.
 function canManage(role: string, employeeCode?: string | null): boolean {
-  return role === "HR_ADMIN" || role === "BOM" || canManageFoodPurchase(employeeCode);
+  return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN" || canManageFoodPurchase(employeeCode);
 }
 
 const CreateSchema = z.object({

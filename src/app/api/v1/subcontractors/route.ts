@@ -6,7 +6,7 @@ import { z } from "zod";
 // Danh mục nhà thầu phụ. Đọc: mọi người dùng đã đăng nhập (form đăng ký suất ăn cần).
 // Thêm/sửa/xóa: HCNS (HR_ADMIN / BOM).
 function canManage(role: string): boolean {
-  return role === "HR_ADMIN" || role === "BOM";
+  return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
 }
 
 const CreateSchema = z.object({

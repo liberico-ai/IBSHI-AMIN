@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
-  if (!["HR_ADMIN", "BOM"].includes(role)) {
+  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role)) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được chốt snapshot" } }, { status: 403 });
   }
   const body = await req.json().catch(() => ({}));

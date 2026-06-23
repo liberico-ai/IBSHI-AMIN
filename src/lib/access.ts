@@ -10,9 +10,9 @@ export const PAYROLL_CONTRACT_VIEWERS = new Set<string>([
   "nv190906", // Lê Thị Hải Yến (P. HCNS)
 ]);
 
-/** Có được xem M7 - Lương + tab Hợp đồng không? */
-export function canViewPayroll(employeeCode?: string | null): boolean {
-  return !!employeeCode && PAYROLL_CONTRACT_VIEWERS.has(employeeCode);
+/** Có được xem M7 - Lương + tab Hợp đồng không? (ADMIN hệ thống = toàn quyền) */
+export function canViewPayroll(employeeCode?: string | null, role?: string | null): boolean {
+  return role === "ADMIN" || (!!employeeCode && PAYROLL_CONTRACT_VIEWERS.has(employeeCode));
 }
 
 // Danh sách NV được phép DUYỆT phiếu đặt phòng họp + đặt xe.
@@ -23,9 +23,9 @@ export const ROOM_VEHICLE_APPROVERS = new Set<string>([
   "190865", // Hoàng Văn Toại
 ]);
 
-/** Có được duyệt phiếu đặt phòng họp + đặt xe không? */
-export function canApproveRoomVehicle(employeeCode?: string | null): boolean {
-  return !!employeeCode && ROOM_VEHICLE_APPROVERS.has(employeeCode);
+/** Có được duyệt phiếu đặt phòng họp + đặt xe không? (ADMIN hệ thống = toàn quyền) */
+export function canApproveRoomVehicle(employeeCode?: string | null, role?: string | null): boolean {
+  return role === "ADMIN" || (!!employeeCode && ROOM_VEHICLE_APPROVERS.has(employeeCode));
 }
 
 // Danh sách NV được TOÀN QUYỀN tab "Chi phí mua thực phẩm" (Nhà ăn) dù không phải HCNS.
@@ -33,9 +33,9 @@ export const FOOD_PURCHASE_MANAGERS = new Set<string>([
   "190089", // Nguyễn Thị Thu Nguyệt (P. Thương mại)
 ]);
 
-/** Có được toàn quyền tab "Chi phí mua thực phẩm" không? */
-export function canManageFoodPurchase(employeeCode?: string | null): boolean {
-  return !!employeeCode && FOOD_PURCHASE_MANAGERS.has(employeeCode);
+/** Có được toàn quyền tab "Chi phí mua thực phẩm" không? (ADMIN hệ thống = toàn quyền) */
+export function canManageFoodPurchase(employeeCode?: string | null, role?: string | null): boolean {
+  return role === "ADMIN" || (!!employeeCode && FOOD_PURCHASE_MANAGERS.has(employeeCode));
 }
 
 // Danh sách NV được xem + cấp phát tab "Danh sách yêu cầu VPP" (Văn phòng phẩm).
@@ -45,12 +45,12 @@ export const VPP_REQUEST_MANAGERS = new Set<string>([
   "190067", // Nguyễn Thanh Tùng
 ]);
 
-/** Có được xem + cấp phát "Danh sách yêu cầu VPP" không? */
-export function canManageVppRequests(employeeCode?: string | null): boolean {
-  return !!employeeCode && VPP_REQUEST_MANAGERS.has(employeeCode);
+/** Có được xem + cấp phát "Danh sách yêu cầu VPP" không? (ADMIN hệ thống = toàn quyền) */
+export function canManageVppRequests(employeeCode?: string | null, role?: string | null): boolean {
+  return role === "ADMIN" || (!!employeeCode && VPP_REQUEST_MANAGERS.has(employeeCode));
 }
 
 /** Toàn quyền VPP (xem tất cả + duyệt + cấp phát): 3 người chỉ định HOẶC BGĐ (BOM). */
 export function canManageVpp(role?: string | null, employeeCode?: string | null): boolean {
-  return role === "BOM" || canManageVppRequests(employeeCode);
+  return role === "BOM" || role === "ADMIN" || canManageVppRequests(employeeCode);
 }

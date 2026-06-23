@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { X, RefreshCw, Shield, Users, FileText } from "lucide-react";
+import { X, RefreshCw, Shield, Users, FileText, BarChart3, Download } from "lucide-react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDateTime, apiError } from "@/lib/utils";
+import { useSession } from "next-auth/react";
+import { usePermission } from "@/hooks/use-permission";
+import { isSystemAdmin } from "@/lib/permissions";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type SystemUser = {
@@ -31,6 +34,7 @@ type AuditLog = {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const ROLE_CONFIG: Record<string, { label: string; bg: string; color: string }> = {
+  ADMIN:     { label: "Quản trị HT", bg: "rgba(239,68,68,0.15)", color: "#ef4444" },
   BOM:       { label: "Ban GĐ",   bg: "rgba(168,85,247,0.15)", color: "#a855f7" },
   HR_ADMIN:  { label: "HC Nhân sự", bg: "rgba(59,130,246,0.15)",  color: "#3b82f6" },
   MANAGER:   { label: "Trưởng phòng", bg: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" },
@@ -38,7 +42,7 @@ const ROLE_CONFIG: Record<string, { label: string; bg: string; color: string }> 
   EMPLOYEE:  { label: "Nhân viên", bg: "rgba(100,116,139,0.15)", color: "#94a3b8" },
 };
 
-const ROLE_ORDER = ["BOM", "HR_ADMIN", "MANAGER", "TEAM_LEAD", "EMPLOYEE"];
+const ROLE_ORDER = ["ADMIN", "BOM", "HR_ADMIN", "MANAGER", "TEAM_LEAD", "EMPLOYEE"];
 
 const ACTION_CONFIG: Record<string, { label: string; bg: string; color: string }> = {
   CREATE:  { label: "Tạo mới",   bg: "rgba(34,197,94,0.15)",   color: "var(--ibs-success)" },
@@ -46,6 +50,10 @@ const ACTION_CONFIG: Record<string, { label: string; bg: string; color: string }
   DELETE:  { label: "Xoá",       bg: "rgba(239,68,68,0.15)",    color: "var(--ibs-danger)" },
   APPROVE: { label: "Duyệt",     bg: "rgba(20,184,166,0.15)",   color: "#14b8a6" },
   REJECT:  { label: "Từ chối",   bg: "rgba(249,115,22,0.15)",   color: "#f97316" },
+  LOGIN:   { label: "Đăng nhập", bg: "rgba(168,85,247,0.15)",   color: "#a855f7" },
+  VIEW:    { label: "Truy cập",  bg: "rgba(100,116,139,0.15)",  color: "#94a3b8" },
+  IMPORT:  { label: "Nhập file", bg: "rgba(59,130,246,0.15)",   color: "#3b82f6" },
+  EXPORT:  { label: "Xuất file", bg: "rgba(34,197,94,0.15)",    color: "var(--ibs-success)" },
 };
 
 // ── Badge components ───────────────────────────────────────────────────────────
@@ -110,8 +118,8 @@ function ForbiddenBlock({ partial }: { partial?: boolean }) {
         style={{ color: "var(--ibs-text-dim)" }}
       >
         {partial
-          ? "Chức năng này chỉ dành cho Ban Giám đốc (BOM). Vui lòng liên hệ quản trị viên."
-          : "Trang Cài đặt hệ thống chỉ dành cho Ban Giám đốc (BOM). Vui lòng liên hệ quản trị viên để được cấp quyền."}
+          ? "Chức năng này chỉ dành cho Quản trị hệ thống (ADMIN). Vui lòng liên hệ quản trị viên."
+          : "Trang Cài đặt hệ thống chỉ dành cho Quản trị hệ thống (ADMIN). Vui lòng liên hệ quản trị viên để được cấp quyền."}
       </p>
     </div>
   );
@@ -657,15 +665,185 @@ function AuditLogTab() {
   );
 }
 
+// ── Tab: Báo cáo hoạt động (tổng hợp) ────────────────────────────────────────────
+type ReportUser = {
+  employeeCode: string;
+  fullName: string;
+  department: string;
+  logins: number;
+  views: number;
+  actions: number;
+  lastActive: string;
+};
+type ReportModule = { module: string; views: number; users: number };
+type ReportData = {
+  from: string;
+  to: string;
+  totals: { logins: number; views: number; actions: number; activeUsers: number };
+  users: ReportUser[];
+  modules: ReportModule[];
+};
+
+const isoToday = () => new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD theo giờ máy
+
+function ReportTab() {
+  const [from, setFrom] = useState<string>(isoToday());
+  const [to, setTo] = useState<string>(isoToday());
+  const [data, setData] = useState<ReportData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const load = (f = from, t = to) => {
+    setLoading(true);
+    fetch(`/api/v1/settings/activity-report?from=${f}&to=${t}`)
+      .then((r) => r.json())
+      .then((j) => setData(j.data || null))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const quick = (kind: "today" | "week" | "month") => {
+    const now = new Date();
+    let f = new Date(now);
+    if (kind === "week") f.setDate(now.getDate() - 6);
+    if (kind === "month") f = new Date(now.getFullYear(), now.getMonth(), 1);
+    const fs = f.toLocaleDateString("en-CA");
+    const ts = now.toLocaleDateString("en-CA");
+    setFrom(fs); setTo(ts); load(fs, ts);
+  };
+
+  const exportExcel = async () => {
+    if (!data) return;
+    setExporting(true);
+    try {
+      const ExcelJS = (await import("exceljs")).default;
+      const wb = new ExcelJS.Workbook();
+      const range = data.from === data.to ? data.from : `${data.from}_${data.to}`;
+
+      const s1 = wb.addWorksheet("Theo nhân sự");
+      s1.columns = [
+        { header: "Mã NV", key: "code", width: 12 },
+        { header: "Họ tên", key: "name", width: 26 },
+        { header: "Phòng ban", key: "dept", width: 24 },
+        { header: "Số lần đăng nhập", key: "logins", width: 16 },
+        { header: "Lượt truy cập module", key: "views", width: 18 },
+        { header: "Số thao tác", key: "actions", width: 14 },
+        { header: "Hoạt động gần nhất", key: "last", width: 20 },
+      ];
+      data.users.forEach((u) =>
+        s1.addRow({ code: u.employeeCode, name: u.fullName, dept: u.department, logins: u.logins, views: u.views, actions: u.actions, last: formatDateTime(u.lastActive) })
+      );
+      s1.getRow(1).font = { bold: true };
+
+      const s2 = wb.addWorksheet("Theo module");
+      s2.columns = [
+        { header: "Module", key: "module", width: 30 },
+        { header: "Lượt truy cập", key: "views", width: 16 },
+        { header: "Số NV sử dụng", key: "users", width: 16 },
+      ];
+      data.modules.forEach((m) => s2.addRow({ module: m.module, views: m.views, users: m.users }));
+      s2.getRow(1).font = { bold: true };
+
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bao-cao-hoat-dong-${range}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const userCols: Column<Record<string, unknown>>[] = [
+    { key: "employeeCode", header: "Mã NV", sortable: true },
+    { key: "fullName", header: "Họ tên", sortable: true },
+    { key: "department", header: "Phòng ban", sortable: true },
+    { key: "logins", header: "Đăng nhập", sortable: true, render: (r) => <span className="tabular-nums">{(r as unknown as ReportUser).logins}</span> },
+    { key: "views", header: "Truy cập module", sortable: true, render: (r) => <span className="tabular-nums">{(r as unknown as ReportUser).views}</span> },
+    { key: "actions", header: "Thao tác", sortable: true, render: (r) => <span className="tabular-nums">{(r as unknown as ReportUser).actions}</span> },
+    { key: "lastActive", header: "Gần nhất", sortable: true, render: (r) => <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{formatDateTime((r as unknown as ReportUser).lastActive)}</span> },
+  ];
+  const moduleCols: Column<Record<string, unknown>>[] = [
+    { key: "module", header: "Module", sortable: true },
+    { key: "views", header: "Lượt truy cập", sortable: true, render: (r) => <span className="tabular-nums">{(r as unknown as ReportModule).views}</span> },
+    { key: "users", header: "Số NV sử dụng", sortable: true, render: (r) => <span className="tabular-nums">{(r as unknown as ReportModule).users}</span> },
+  ];
+
+  const cards = [
+    { label: "NV hoạt động", value: data?.totals.activeUsers ?? 0, color: "#a855f7" },
+    { label: "Lượt đăng nhập", value: data?.totals.logins ?? 0, color: "#3b82f6" },
+    { label: "Lượt truy cập module", value: data?.totals.views ?? 0, color: "#10b981" },
+    { label: "Tổng thao tác", value: data?.totals.actions ?? 0, color: "#f59e0b" },
+  ];
+
+  return (
+    <div>
+      {/* Bộ lọc */}
+      <div className="flex flex-wrap items-end gap-3 mb-5">
+        <div>
+          <label className="block text-[11px] mb-1" style={{ color: "var(--ibs-text-dim)" }}>Từ ngày</label>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="px-3 py-2 rounded-lg text-[13px]" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }} />
+        </div>
+        <div>
+          <label className="block text-[11px] mb-1" style={{ color: "var(--ibs-text-dim)" }}>Đến ngày</label>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="px-3 py-2 rounded-lg text-[13px]" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }} />
+        </div>
+        <button onClick={() => load()} className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+          <RefreshCw size={14} /> Xem
+        </button>
+        <div className="flex gap-1">
+          <button onClick={() => quick("today")} className="px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hôm nay</button>
+          <button onClick={() => quick("week")} className="px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text-dim)" }}>7 ngày</button>
+          <button onClick={() => quick("month")} className="px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Tháng này</button>
+        </div>
+        <button onClick={exportExcel} disabled={exporting || !data} className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium ml-auto" style={{ background: "#10b981", color: "#fff", opacity: exporting || !data ? 0.6 : 1 }}>
+          <Download size={14} /> {exporting ? "Đang xuất…" : "Export Excel"}
+        </button>
+      </div>
+
+      {/* Thẻ tổng hợp */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        {cards.map((c) => (
+          <div key={c.label} className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+            <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{c.label}</div>
+            <div className="text-[24px] font-semibold tabular-nums" style={{ color: c.color }}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bảng theo nhân sự */}
+      <div className="text-[13px] font-medium mb-2" style={{ color: "var(--ibs-text)" }}>Theo nhân sự</div>
+      <div className="rounded-xl border overflow-hidden mb-6" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <DataTable columns={userCols} data={(data?.users || []) as unknown as Record<string, unknown>[]} loading={loading} emptyText="Không có hoạt động trong khoảng này" pageSize={15} />
+      </div>
+
+      {/* Bảng theo module */}
+      <div className="text-[13px] font-medium mb-2" style={{ color: "var(--ibs-text)" }}>Theo module</div>
+      <div className="rounded-xl border overflow-hidden" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <DataTable columns={moduleCols} data={(data?.modules || []) as unknown as Record<string, unknown>[]} loading={loading} emptyText="Không có lượt truy cập module" pageSize={15} />
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function CaiDatPage() {
-  // Role — in production comes from session via layout context
-  const [userRole] = useState<string>("BOM");
-  const [activeTab, setActiveTab] = useState<"users" | "audit">("users");
+  // Role thật lấy từ session
+  const { role } = usePermission();
+  const { status } = useSession();
+  const [activeTab, setActiveTab] = useState<"users" | "audit" | "report">("users");
 
-  const isBOM = userRole === "BOM";
+  const isAdmin = isSystemAdmin(role); // CHỈ Quản trị hệ thống mới vào Cài đặt
 
-  if (!isBOM) {
+  if (status === "loading") {
+    return <PageTitle title="Cài đặt hệ thống" description="Đang tải…" />;
+  }
+
+  if (!isAdmin) {
     return (
       <div>
         <PageTitle title="Cài đặt hệ thống" description="Phân quyền, tài khoản người dùng và audit log" />
@@ -677,6 +855,7 @@ export default function CaiDatPage() {
   const tabs = [
     { id: "users" as const, label: "Người dùng", icon: Users },
     { id: "audit" as const, label: "Audit Log", icon: FileText },
+    { id: "report" as const, label: "Báo cáo hoạt động", icon: BarChart3 },
   ];
 
   return (
@@ -711,8 +890,9 @@ export default function CaiDatPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "users" && <UsersTab isBOM={isBOM} />}
+      {activeTab === "users" && <UsersTab isBOM={true} />}
       {activeTab === "audit" && <AuditLogTab />}
+      {activeTab === "report" && <ReportTab />}
     </div>
   );
 }

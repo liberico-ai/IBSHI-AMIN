@@ -83,6 +83,7 @@ const NAV_SECTIONS: NavSection[] = [
 ];
 
 const ROLE_LABELS: Record<string, string> = {
+  ADMIN: "Quản trị hệ thống",
   BOM: "Ban Giám đốc",
   HR_ADMIN: "P. Hành chính NS",
   MANAGER: "Trưởng phòng",

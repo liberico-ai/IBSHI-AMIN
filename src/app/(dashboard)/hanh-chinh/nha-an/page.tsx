@@ -358,7 +358,7 @@ export default function NhaAnPage() {
     fetchRegs();
   }
 
-  const isHRAdmin = userRole === "HR_ADMIN" || userRole === "BOM";
+  const isHRAdmin = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
   // NV được cấp riêng toàn quyền tab "Chi phí mua thực phẩm" (food) dù không phải HCNS.
   const isFoodManager = isHRAdmin || canManageFoodPurchase(myEmployeeCode);
 

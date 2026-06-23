@@ -20,6 +20,6 @@ export async function GET() {
     email: session.user.email,
     role: (session.user as any).role,
     employeeCode,
-    canViewPayroll: canViewPayroll(employeeCode),
+    canViewPayroll: canViewPayroll(employeeCode, (session.user as any).role),
   });
 }

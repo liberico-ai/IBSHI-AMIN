@@ -12,7 +12,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (userRole !== "BOM") {
+  if (userRole !== "BOM" && userRole !== "ADMIN") {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ BGĐ trả lại được" } }, { status: 403 });
   }
 

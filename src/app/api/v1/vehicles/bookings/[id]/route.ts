@@ -22,7 +22,7 @@ export async function PUT(
 
   const employeeCode = (session.user as any).employeeCode;
   const userId = (session.user as any).id;
-  const isApprover = canApproveRoomVehicle(employeeCode);
+  const isApprover = canApproveRoomVehicle(employeeCode, (session.user as any).role);
 
   const { id } = await params;
   const booking = await prisma.vehicleBooking.findUnique({

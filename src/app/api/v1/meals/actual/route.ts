@@ -6,7 +6,7 @@ import { z } from "zod";
 // Con số suất ăn THỰC TẾ bếp phục vụ — đối soát Kế hoạch (đăng ký) vs Thực tế theo ngày.
 // Đọc: ai đăng nhập cũng xem được. Nhập/sửa: chỉ HCNS (HR_ADMIN/BOM).
 function canManage(role: string): boolean {
-  return role === "HR_ADMIN" || role === "BOM";
+  return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
 }
 
 const SaveSchema = z.object({

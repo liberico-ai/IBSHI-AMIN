@@ -10,7 +10,7 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canViewPayroll((session.user as any).employeeCode)) {
+  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
   }
 
@@ -23,7 +23,7 @@ export async function GET(
 
   // Determine which employee's slip to show
   let employeeId: string | undefined;
-  const isHR = ["HR_ADMIN", "BOM"].includes(userRole);
+  const isHR = ["HR_ADMIN", "BOM", "ADMIN"].includes(userRole);
 
   if (requestedEmployeeId && isHR) {
     employeeId = requestedEmployeeId;

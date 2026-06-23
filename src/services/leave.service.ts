@@ -35,7 +35,7 @@ export async function approveLeave(id: string, approvedById: string, approverRol
   }
 
   const year = new Date().getFullYear();
-  const isHrOrAbove = approverRole === "HR_ADMIN" || approverRole === "BOM";
+  const isHrOrAbove = approverRole === "HR_ADMIN" || approverRole === "BOM" || approverRole === "ADMIN";
 
   // First-level approval: TEAM_LEAD / MANAGER forwards to HR
   if (req.status === "PENDING" && !isHrOrAbove) {

@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { canDo } from "@/lib/permissions";
+import { isSystemAdmin } from "@/lib/permissions";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "settings", "read")) {
+  if (!isSystemAdmin(userRole)) {
     return NextResponse.json(
-      { error: { code: "FORBIDDEN", message: "Bạn không có quyền xem danh sách người dùng" } },
+      { error: { code: "FORBIDDEN", message: "Chỉ Quản trị hệ thống (ADMIN)" } },
       { status: 403 }
     );
   }
@@ -40,9 +40,9 @@ export async function PUT(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "settings", "update")) {
+  if (!isSystemAdmin(userRole)) {
     return NextResponse.json(
-      { error: { code: "FORBIDDEN", message: "Bạn không có quyền sửa vai trò người dùng (chỉ Ban Giám đốc)" } },
+      { error: { code: "FORBIDDEN", message: "Chỉ Quản trị hệ thống (ADMIN) mới sửa được vai trò người dùng" } },
       { status: 403 }
     );
   }

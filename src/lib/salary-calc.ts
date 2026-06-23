@@ -155,7 +155,7 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const bonusAllowance = input.bonusAllowance || 0;   // trách nhiệm + nhà xa
   const pieceRate = input.pieceRate || 0;             // lương sản phẩm/khoán
   const adjustment = input.adjustment || 0;           // điều chỉnh tay (có thể âm)
-  const mealOT = Math.max(0, input.mealOT || 0); // tiền ăn tăng giờ (tự tính)
+  const mealOT = input.mealOT || 0; // tiền ăn tăng giờ (tự tính + bổ sung); có thể ÂM khi truy thu
 
   // Các khoản tiền GIỮ SỐ THẬT (KHÔNG làm tròn — chỉ làm tròn ở TNCN + Net).
   const salaryWorkActual = workDaysActual * dailyRateFull;

@@ -12,7 +12,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!["HR_ADMIN", "BOM"].includes(role))
+  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role))
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ TP HCNS / BGĐ được duyệt" } }, { status: 403 });
 
   const { contractId } = await params;

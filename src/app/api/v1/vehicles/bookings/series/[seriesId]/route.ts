@@ -28,7 +28,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!sample) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
   const isOwner = sample.requester?.userId === userId;
-  const isApprover = canApproveRoomVehicle(employeeCode);
+  const isApprover = canApproveRoomVehicle(employeeCode, (session.user as any).role);
 
   if (body.action === "CANCEL") {
     if (!isOwner && !isApprover) {

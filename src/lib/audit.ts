@@ -6,7 +6,7 @@ import prisma from "@/lib/prisma";
  */
 export function logAudit(data: {
   userId: string;
-  action: "CREATE" | "UPDATE" | "DELETE" | "APPROVE" | "REJECT";
+  action: "CREATE" | "UPDATE" | "DELETE" | "APPROVE" | "REJECT" | "LOGIN" | "VIEW" | "IMPORT" | "EXPORT";
   entityType: string;
   entityId: string;
   oldValue?: unknown;

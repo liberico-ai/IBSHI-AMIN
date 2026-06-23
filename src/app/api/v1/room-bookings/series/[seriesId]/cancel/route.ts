@@ -22,7 +22,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ se
   if (!sample) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
   const isOwner = sample.requester?.userId === userId;
-  const isApprover = canApproveRoomVehicle(employeeCode);
+  const isApprover = canApproveRoomVehicle(employeeCode, (session.user as any).role);
   if (!isOwner && !isApprover) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền huỷ series này" } }, { status: 403 });
   }
