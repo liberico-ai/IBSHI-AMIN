@@ -44,7 +44,7 @@ type PayrollRecord = {
 
 type PayslipDetail = {
   insuranceSalary: number; allowance: number; totalIncome: number; dependentsCount: number;
-  responsibilityAllow: number; farAllowance: number; bonusTotal: number;
+  responsibilityAllow: number; farAllowance: number; bonusTotal: number; bonusFull?: number;
   pieceRate: number; adjustment: number; adjustmentNote?: string;
   standardDays: number; workDays: number; leaveDays: number;
   otWeekday: number; otWeekdayNight: number; otSunday: number; otSundayNight: number;
@@ -390,8 +390,9 @@ function PeriodDetailModal({
     const d = r.detail;
     const cc = d?.standardDays || 26;                       // mẫu số = công chuẩn tháng (ngày − CN)
     const luongCB = d?.insuranceSalary ?? r.baseSalary ?? 0;
-    const trachNhiem = d?.bonusTotal ?? 0;
-    const kpi = (d?.allowance ?? 0) - trachNhiem;            // allowance đã gồm trách nhiệm → KPI = allowance − trách nhiệm
+    const trachNhiem = d?.bonusTotal ?? 0;                   // thực trả: vào cột "Lương trách nhiệm + phụ cấp"
+    // KPI trừ phụ cấp ĐẦY ĐỦ (resp + nhà xa full) → 200k nhà xa KHÔNG nằm trong KPI (kể cả khi công≤14 bị cắt).
+    const kpi = (d?.allowance ?? 0) - (d?.bonusFull ?? trachNhiem);
     const workDays = r.workDays || 0;
     const thucNhan = r.netSalary;
     const tt1 = 0;                                           // thanh toán lần 1 — tính năng thanh toán từng đợt (làm sau)
