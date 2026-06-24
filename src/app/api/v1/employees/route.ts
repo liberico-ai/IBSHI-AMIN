@@ -86,7 +86,10 @@ export async function GET(request: NextRequest) {
         position: true,
         team: true,
         contracts: {
-          orderBy: { createdAt: "desc" },
+          // Lấy HĐ đang hiệu lực (mới nhất theo ngày bắt đầu, bỏ HĐ đã chấm dứt)
+          // — KHÔNG dùng createdAt vì HĐ nhập bổ sung (vd thử việc) tạo sau sẽ lọt lên nhầm.
+          where: { status: { not: "TERMINATED" } },
+          orderBy: { startDate: "desc" },
           take: 1,
         },
         children: { select: { dateOfBirth: true } },

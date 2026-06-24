@@ -61,6 +61,7 @@ export async function GET(
 const UpdateEmployeeSchema = z.object({
   // Thông tin cơ bản
   fullName: z.string().min(1).optional(),
+  photo: z.string().optional().nullable(),
   gender: z.enum(["MALE", "FEMALE"]).optional(),
   dateOfBirth: z.string().optional(),
   idNumber: z.string().optional(),
