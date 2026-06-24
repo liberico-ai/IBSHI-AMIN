@@ -108,6 +108,7 @@ type Employee = {
     issueDate: string;
     expiryDate?: string;
     status: string;
+    fileUrl?: string | null;
   }[];
   workHistory: {
     id: string;
@@ -2073,7 +2074,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                 <table className="w-full border-collapse">
                   <thead>
                     <tr>
-                      {["Tên chứng chỉ", "Cơ quan cấp", "Ngày cấp", "Ngày hết hạn", "Trạng thái"].map((h) => (
+                      {["Tên chứng chỉ", "Cơ quan cấp", "Ngày cấp", "Ngày hết hạn", "Trạng thái", "File"].map((h) => (
                         <th
                           key={h}
                           className="text-left px-4 py-2.5 text-[11px] uppercase tracking-[0.8px] font-semibold border-b"
@@ -2110,6 +2111,13 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge status={cert.status} />
+                        </td>
+                        <td className="px-4 py-3">
+                          {cert.fileUrl ? (
+                            <a href={viewUrl(cert.fileUrl)} target="_blank" rel="noreferrer" className="text-[12px] font-medium underline inline-flex items-center gap-1" style={{ color: "var(--ibs-accent)" }}>📎 Xem</a>
+                          ) : (
+                            <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>—</span>
+                          )}
                         </td>
                       </tr>
                     ))}

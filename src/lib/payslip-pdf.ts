@@ -11,7 +11,7 @@ const FONT_REG = path.join(FONTS_DIR, "BeVietnamPro-Regular.ttf");
 const FONT_BOLD = path.join(FONTS_DIR, "BeVietnamPro-Bold.ttf");
 
 const f = (n: number) => Math.round(n || 0).toLocaleString("vi-VN") + " ₫";
-const h = (n: number) => (n || 0).toLocaleString("vi-VN", { maximumFractionDigits: 2 });
+const h = (n: number) => (n || 0).toLocaleString("vi-VN", { maximumFractionDigits: 4 }); // công/giờ giữ số thật (chỉ tiền mới làm tròn)
 
 export interface PayslipPdfInput {
   month: number;

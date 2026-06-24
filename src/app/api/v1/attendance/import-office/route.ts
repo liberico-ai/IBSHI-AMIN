@@ -87,6 +87,21 @@ export async function POST(request: NextRequest) {
     const createdBy = (session.user as any).id;
     let created = 0;
 
+    // ── XOÁ dữ liệu chấm công CŨ của tháng (chỉ các NV CÓ trong file) trước khi nạp lại ──
+    // Tránh dữ liệu rác từ lần import trước: nếu file mới bỏ bớt 1 ngày (vd xoá 1 chủ nhật OT),
+    // bản ghi cũ ngày đó vẫn nằm lại nếu chỉ upsert. Xoá theo employeeId trong file →
+    // không ảnh hưởng NV của file khác (trực tiếp / gián tiếp nhập riêng).
+    const empIdsInFile = Array.from(new Set(
+      records.map((r) => codeToId.get(r.employeeCode)).filter((x): x is string => !!x)
+    ));
+    if (empIdsInFile.length > 0) {
+      const monthStart = new Date(Date.UTC(year, month - 1, 1));
+      const monthEnd = new Date(Date.UTC(year, month, 1));
+      await prisma.attendanceRecord.deleteMany({
+        where: { employeeId: { in: empIdsInFile }, date: { gte: monthStart, lt: monthEnd } },
+      });
+    }
+
     // Batch upserts (10 at a time)
     for (let i = 0; i < records.length; i += 10) {
       const chunk = records.slice(i, i + 10);

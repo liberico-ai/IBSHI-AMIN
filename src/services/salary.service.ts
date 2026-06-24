@@ -127,6 +127,9 @@ export async function calculatePayrollForPeriod(periodId: string) {
   //   ABSENT_APPROVED(_HALF) (phép) → leaveDays (hưởng theo Lương BHXH/CC).
   const workDaysMap: Record<string, number> = {};        // công thường (ngày làm thực, ÷8)
   const alDaysFromAttendance: Record<string, number> = {};
+  // Nghỉ do BHXH chi trả (ML thai sản + SL ốm) — CHỈ ĐẾM để hiển thị ở cột "nghỉ hưởng lương";
+  // KHÔNG cộng lương công ty (BHXH chi trả riêng).
+  const bhxhLeaveDaysMap: Record<string, number> = {};
   const unpaidWeekdayMap: Record<string, number> = {};   // NK ngày thường (mục tiêu bù công)
   const otMap: Record<string, { weekday: number; weekdayNight: number; sunday: number; sundayNight: number; holiday: number; holidayNight: number }> = {};
   const ensureOt = (id: string) => (otMap[id] ||= { weekday: 0, weekdayNight: 0, sunday: 0, sundayNight: 0, holiday: 0, holidayNight: 0 });
@@ -144,6 +147,9 @@ export async function calculatePayrollForPeriod(periodId: string) {
     if ((a.paidLeaveDays || 0) > 0) {
       alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + (a.paidLeaveDays || 0);
     }
+    // Nghỉ BHXH (ML thai sản / SL ốm): đếm số ngày (gồm nửa ngày "0.5ML"/"0.5SL") để HIỂN THỊ — không vào lương.
+    const bhxhLv = (a.leaveCode || "").toUpperCase().replace(",", ".").match(/^(\d*\.?\d+)?(ML|SL)$/);
+    if (bhxhLv) bhxhLeaveDaysMap[a.employeeId] = (bhxhLeaveDaysMap[a.employeeId] || 0) + (bhxhLv[1] ? parseFloat(bhxhLv[1]) : 1);
     if (isHoliday(d)) {
       // Lễ — wh+oh → OT × hệ số (chốt 2026-06-08).
       //   - Comp Holiday → ×2 (HR coi như CN)
@@ -408,7 +414,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
       standardDays: CC,
       workDays: totalCong,            // TỔNG công = ca ngày + ca đêm (cột "Công" hiển thị)
       nightWorkDays: nightCong,       // công ca đêm (để tách khỏi cột Lương ca ngày)
-      leaveDays: input.leaveDays,
+      leaveDays: input.leaveDays,     // phép/lễ CÔNG TY trả (AL + Lễ) — dùng tính lương chế độ
+      bhxhLeaveDays: bhxhLeaveDaysMap[emp.id] || 0, // ML+SL do BHXH trả — CHỈ hiển thị cột "nghỉ hưởng lương", không vào lương
       // OT giờ tách theo loại (sau khi đã tiêu hao phần bù công — khớp OT quy đổi)
       otWeekday: otAfter.weekday, otWeekdayNight: otAfter.weekdayNight,
       otSunday: otAfter.sunday, otSundayNight: otAfter.sundayNight,
