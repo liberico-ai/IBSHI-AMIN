@@ -6,11 +6,13 @@ import { canDo } from "@/lib/permissions";
 type RecordInput = {
   employeeCode: string;
   date: string;
-  workHours: number;
-  otHours: number;
+  workHours: number;        // HC N — công hành chính ca ngày
+  otHours: number;          // Thêm giờ N — tăng ca ca ngày
+  nightHours?: number;      // HC Đ — công hành chính ca đêm
+  otNightHours?: number;    // Thêm giờ Đ — tăng ca ca đêm
   status?: string;
   paidLeaveDays?: number;   // ngày nghỉ phép có lương (AL) trong ngày: 0/0.5/1
-  leaveCode?: string | null; // mã nghỉ gốc (AL/UL/SL/ML/L)
+  leaveCode?: string | null; // mã nghỉ gốc (AL/UL/SL/ML/MC/L...)
 };
 
 export async function POST(request: NextRequest) {
@@ -33,9 +35,8 @@ export async function POST(request: NextRequest) {
     // Defensive: từ chối record có workHours hoặc otHours bất thường (1 ngày max 24h)
     // Bảo vệ DB khỏi lỗi parse Excel nhầm cột (vd mã NV / Excel-date-serial bị đẩy vào workHours).
     const bad = records.filter((r) => {
-      const wh = Number(r.workHours);
-      const oh = Number(r.otHours);
-      return !Number.isFinite(wh) || !Number.isFinite(oh) || wh < 0 || oh < 0 || wh > 24 || oh > 24;
+      const vals = [r.workHours, r.otHours, r.nightHours ?? 0, r.otNightHours ?? 0].map(Number);
+      return vals.some((v) => !Number.isFinite(v) || v < 0 || v > 24);
     });
     if (bad.length > 0) {
       const sample = bad.slice(0, 3).map((r) => `${r.employeeCode} ngày ${r.date} (work=${r.workHours}, ot=${r.otHours})`).join("; ");
@@ -96,12 +97,14 @@ export async function POST(request: NextRequest) {
 
           const date = new Date(r.date);
           const paidLeaveDays = r.paidLeaveDays ?? 0;
-          // Derive status:
-          //   >=7h → PRESENT; >0 → HALF_DAY; nếu không làm nhưng có nghỉ phép có lương → ABSENT_APPROVED(_HALF);
-          //   còn lại = vắng không phép. (Ngưỡng 7h vì file ghi 7.5–7.95h cho ngày đủ.)
+          const nightHours = r.nightHours ?? 0;
+          const otNightHours = r.otNightHours ?? 0;
+          // Trạng thái theo TỔNG giờ hành chính ngày + đêm (NV ca đêm có workHours=0 nhưng nightHours>0).
+          //   >=7h → PRESENT; >0 → HALF_DAY; có nghỉ phép có lương → ABSENT_APPROVED(_HALF); còn lại = vắng không phép.
+          const presentHours = (r.workHours || 0) + nightHours;
           const status = r.status ?? (
-            r.workHours >= 7 ? "PRESENT"
-            : r.workHours > 0 ? "HALF_DAY"
+            presentHours >= 7 ? "PRESENT"
+            : presentHours > 0 ? "HALF_DAY"
             : paidLeaveDays >= 1 ? "ABSENT_APPROVED"
             : paidLeaveDays > 0 ? "ABSENT_APPROVED_HALF"
             : "ABSENT_UNAPPROVED"
@@ -109,8 +112,8 @@ export async function POST(request: NextRequest) {
 
           await prisma.attendanceRecord.upsert({
             where: { employeeId_date: { employeeId, date } },
-            create: { employeeId, date, status: status as any, workHours: r.workHours, otHours: r.otHours, paidLeaveDays, leaveCode: r.leaveCode ?? null, createdBy },
-            update: { status: status as any, workHours: r.workHours, otHours: r.otHours, paidLeaveDays, leaveCode: r.leaveCode ?? null },
+            create: { employeeId, date, status: status as any, workHours: r.workHours, otHours: r.otHours, nightHours, otNightHours, paidLeaveDays, leaveCode: r.leaveCode ?? null, createdBy },
+            update: { status: status as any, workHours: r.workHours, otHours: r.otHours, nightHours, otNightHours, paidLeaveDays, leaveCode: r.leaveCode ?? null },
           });
           created++;
         })

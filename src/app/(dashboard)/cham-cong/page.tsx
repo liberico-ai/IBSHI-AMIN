@@ -122,7 +122,7 @@ function OfficeAttendanceCard({
       const wb = XLSX.read(data, { type: "array" });
       const rows: unknown[][] = pickAttendanceSheet(XLSX, wb, year, month);
 
-      type Rec = { employeeCode: string; date: string; workHours: number; otHours: number; paidLeaveDays?: number; leaveCode?: string | null };
+      type Rec = { employeeCode: string; date: string; workHours: number; otHours: number; nightHours: number; otNightHours: number; paidLeaveDays?: number; leaveCode?: string | null };
       const records: Rec[] = [];
 
       // Step 1: Find the header row mapping day → column index.
@@ -174,56 +174,94 @@ function OfficeAttendanceCard({
         return null;
       };
 
+      // Chuẩn hoá text 1 ô (bỏ dấu, đ→d, gộp khoảng trắng) để khớp nhãn dòng.
+      const norm = (v: unknown) => String(v ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim();
+      // Nhãn dòng (file MỚI) → loại ca. HC N / HC Đ / Thêm giờ N / Thêm giờ Đ / Khác. null = không có nhãn mới.
+      const shiftOf = (r: unknown[]): "dayWork" | "nightWork" | "otDay" | "otNight" | "leave" | null => {
+        for (let c = 0; c < r.length; c++) {
+          const s = norm(r[c]);
+          if (!s) continue;
+          if (/^hc ?n$/.test(s)) return "dayWork";
+          if (/^hc ?d$/.test(s)) return "nightWork";
+          if (/^khac$/.test(s)) return "leave";
+          if (/them ?gi/.test(s)) return /d$|dem/.test(s) ? "otNight" : "otDay";
+        }
+        return null;
+      };
+      // Lấy SỐ thuần ở 1 ô (tránh "0.5AL"/"L" — mã nghỉ, không phải giờ).
+      const numAt = (r: unknown[] | undefined, col: number) => {
+        const s = String(r?.[col] ?? "").trim();
+        return /^-?\d+(\.\d+)?$/.test(s) ? parseFloat(s) : 0;
+      };
+
       for (let i = 0; i < rows.length; i++) {
         const code = codeOfRow(rows[i] as unknown[]);
         if (!code) continue;
-        const workRow = rows[i] as unknown[];
 
-        // Gom các dòng nối tiếp (OT / trống / note) cho tới dòng NV kế tiếp.
-        // OT row = ưu tiên dòng có nhãn "Thêm giờ" ở col 40 (tránh nhầm dòng note chứa "0.5AL"/"L"/"UL").
-        // Fallback: dòng đầu tiên có dữ liệu số > 0 ở day-col.
-        let otRow: unknown[] | undefined;
-        const blockRows: unknown[][] = [];
+        // Gom TOÀN BỘ block của NV (mọi dòng cùng mã, hoặc dòng nối tiếp không mã NHƯNG có nội dung).
+        const block: unknown[][] = [rows[i] as unknown[]];
         let j = i + 1;
         for (; j < rows.length; j++) {
-          const nextCode = codeOfRow(rows[j] as unknown[]);
-          if (nextCode && nextCode !== code) break; // KHÁC NV → dừng. Cùng mã hoặc không có mã → dòng nối tiếp.
-          blockRows.push(rows[j] as unknown[]);
+          const r = rows[j] as unknown[];
+          const nextCode = codeOfRow(r);
+          if (nextCode && nextCode !== code) break; // KHÁC NV → dừng.
+          if (!nextCode) {
+            // Dòng không mã: chỉ gom nếu CÓ nội dung (nhãn ca / số giờ / mã nghỉ). Dòng trống/footer → dừng.
+            let hasContent = shiftOf(r) !== null;
+            if (!hasContent) dayColMap.forEach((c) => { if (numAt(r, c) > 0 || isLeaveToken((r as any)?.[c])) hasContent = true; });
+            if (!hasContent) break;
+          }
+          block.push(r);
         }
-        // 1) Tìm theo nhãn "Thêm giờ"/"Thêm gi" trong col 40
-        for (const cand of blockRows) {
-          const label = String((cand as any)?.[40] ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-          if (label.includes("them gi")) { otRow = cand; break; }
+        i = j - 1; // bỏ qua cả block
+
+        // Phân loại dòng theo NHÃN (file mới: 5 dòng).
+        let dayRow: unknown[] | undefined, nightRow: unknown[] | undefined, otDayRow: unknown[] | undefined,
+          otNightRow: unknown[] | undefined, leaveRow: unknown[] | undefined;
+        let hasNewLabels = false;
+        for (const r of block) {
+          const t = shiftOf(r);
+          if (!t) continue;
+          hasNewLabels = true;
+          if (t === "dayWork" && !dayRow) dayRow = r;
+          else if (t === "nightWork" && !nightRow) nightRow = r;
+          else if (t === "otDay" && !otDayRow) otDayRow = r;
+          else if (t === "otNight" && !otNightRow) otNightRow = r;
+          else if (t === "leave" && !leaveRow) leaveRow = r;
         }
-        // 2) Fallback: dòng đầu tiên có day-col data số > 0
-        if (!otRow) {
-          for (const cand of blockRows) {
-            let hasData = false;
-            dayColMap.forEach((colIdx) => { if ((parseFloat(String((cand as any)?.[colIdx] ?? "")) || 0) > 0) hasData = true; });
-            if (hasData) { otRow = cand; break; }
+
+        if (!hasNewLabels) {
+          // FILE CŨ: dòng đầu = công ngày; OT = dòng có nhãn "Thêm giờ" (col 40) hoặc dòng đầu có số; nghỉ = dòng có mã.
+          dayRow = block[0];
+          for (const r of block.slice(1)) { if (norm(r[40]).includes("them gi")) { otDayRow = r; break; } }
+          if (!otDayRow) for (const r of block.slice(1)) {
+            let hasData = false; dayColMap.forEach((c) => { if (numAt(r, c) > 0) hasData = true; });
+            if (hasData) { otDayRow = r; break; }
+          }
+          for (const r of block) {
+            if (r === otDayRow) continue;
+            let hasLeave = false; dayColMap.forEach((c) => { if (isLeaveToken((r as any)?.[c])) hasLeave = true; });
+            if (hasLeave) { leaveRow = r; break; }
+          }
+        } else if (!leaveRow) {
+          // File mới nhưng dòng "Khác" chưa bắt được qua nhãn → dò theo mã nghỉ.
+          for (const r of block) {
+            let hasLeave = false; dayColMap.forEach((c) => { if (isLeaveToken((r as any)?.[c])) hasLeave = true; });
+            if (hasLeave) { leaveRow = r; break; }
           }
         }
-        // 3) DÒNG NGHỈ (dòng 3) = blockRow ≠ otRow có chứa mã nghỉ (AL/UL/SL/ML/L)
-        let leaveRow: unknown[] | undefined;
-        for (const cand of blockRows) {
-          if (cand === otRow) continue;
-          let hasLeave = false;
-          dayColMap.forEach((colIdx) => { if (isLeaveToken((cand as any)?.[colIdx])) hasLeave = true; });
-          if (hasLeave) { leaveRow = cand; break; }
-        }
-        i = j - 1; // bỏ qua cả block; i++ của vòng lặp sẽ nhảy tới NV kế tiếp
+        if (!dayRow) dayRow = block[0];
 
         dayColMap.forEach((colIdx, d) => {
-          const wh = parseFloat(String(workRow?.[colIdx] ?? "")) || 0;
-          // OT chỉ chấp nhận chuỗi số thuần (tránh "0.5UL" / "0.5AL" — đây là mã nghỉ, không phải OT).
-          const otStr = String(otRow?.[colIdx] ?? "").trim();
-          const oh = otRow && /^-?\d+(\.\d+)?$/.test(otStr) ? parseFloat(otStr) : 0;
-          // Nghỉ phép có lương (AL) từ dòng nghỉ
-          const lv = parseLeaveCode(leaveRow?.[colIdx]);
-          if (wh === 0 && oh === 0 && lv.paidLeaveDays === 0 && !lv.code) return;
+          const wh = numAt(dayRow, colIdx);          // HC N
+          const nh = numAt(nightRow, colIdx);        // HC Đ
+          const oh = numAt(otDayRow, colIdx);        // Thêm giờ N
+          const onh = numAt(otNightRow, colIdx);     // Thêm giờ Đ
+          const lv = parseLeaveCode(leaveRow?.[colIdx]); // Khác
+          if (wh === 0 && nh === 0 && oh === 0 && onh === 0 && lv.paidLeaveDays === 0 && !lv.code) return;
           const dt = new Date(year, month - 1, d);
           if (dt.getMonth() !== month - 1) return;
-          records.push({ employeeCode: code, date: `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`, workHours: wh, otHours: oh, paidLeaveDays: lv.paidLeaveDays, leaveCode: lv.code });
+          records.push({ employeeCode: code, date: `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`, workHours: wh, otHours: oh, nightHours: nh, otNightHours: onh, paidLeaveDays: lv.paidLeaveDays, leaveCode: lv.code });
         });
       }
 
@@ -234,7 +272,7 @@ function OfficeAttendanceCard({
 
       // Defensive: chặn record có giờ làm bất thường (1 ngày max 24h).
       // Lỗi này thường do parse Excel nhầm cột (mã NV / Excel-date-serial → workHours).
-      const badRecords = records.filter((r) => r.workHours < 0 || r.otHours < 0 || r.workHours > 24 || r.otHours > 24);
+      const badRecords = records.filter((r) => [r.workHours, r.otHours, r.nightHours, r.otNightHours].some((v) => v < 0 || v > 24));
       if (badRecords.length > 0) {
         const sample = badRecords.slice(0, 3).map((r) => `${r.employeeCode} ${r.date} (work=${r.workHours}, ot=${r.otHours})`).join("; ");
         setImportMsg({ ok: false, text: `Phát hiện ${badRecords.length}/${records.length} dòng có giờ làm bất thường (>24h). File có thể bị nhầm cột. Mẫu: ${sample}` });

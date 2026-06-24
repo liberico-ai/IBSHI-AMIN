@@ -32,6 +32,7 @@ export interface SalaryInput {
   leaveDays: number;         // phép + lễ (hưởng theo Lương BHXH/CC)
   unpaidWeekdayDays?: number;// số ngày NK rơi ngày thường (T2-T7 không lễ) — mục tiêu bù công
   ot: OTHours;
+  nightShift?: { weekday: number; sunday: number; holiday: number }; // GIỜ ca đêm (HC Đ) theo loại ngày — lương ×1.3/2.7/3.9
   dependentsCount: number;
   bonusAllowance?: number;   // Phụ cấp THỰC TRẢ (trách nhiệm + nhà xa nếu đủ điều kiện) — cộng vào Gross
   bonusAllowanceFull?: number; // Phụ cấp ĐẦY ĐỦ (gồm cả phụ cấp có điều kiện) — dùng TRỪ khỏi đơn giá ngày (mặc định = bonusAllowance)
@@ -57,6 +58,7 @@ export interface SalaryOutput {
   leavePay: number;          // lương phép + lễ
   fillPay: number;           // lương giờ OT bù (1×)
   salaryOT: number;          // lương OT đã nhân hệ số
+  nightShiftPay: number;     // lương ca đêm (HC Đ) = Σ giờ × đơn giá giờ × hệ số (1.3/2.7/3.9)
   mealOT: number;            // tiền ăn tăng giờ (tự tính từ chấm công)
   grossSalary: number;       // tổng thu nhập thực tế tháng
   // Khấu trừ
@@ -157,12 +159,18 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   const adjustment = input.adjustment || 0;           // điều chỉnh tay (có thể âm)
   const mealOT = input.mealOT || 0; // tiền ăn tăng giờ (tự tính + bổ sung); có thể ÂM khi truy thu
 
+  // Lương CA ĐÊM (HC Đ — làm đêm là chính): mỗi giờ × đơn giá giờ × hệ số (đêm thường 1.3 / CN 2.7 / lễ 3.9).
+  const ns = input.nightShift || { weekday: 0, sunday: 0, holiday: 0 };
+  const nightShiftPay = ns.weekday * hourlyRateFull * SALARY_CONFIG.NIGHT_SHIFT_WEEKDAY
+                      + ns.sunday * hourlyRateFull * SALARY_CONFIG.NIGHT_SHIFT_SUNDAY
+                      + ns.holiday * hourlyRateFull * SALARY_CONFIG.NIGHT_SHIFT_HOLIDAY;
+
   // Các khoản tiền GIỮ SỐ THẬT (KHÔNG làm tròn — chỉ làm tròn ở TNCN + Net).
-  const salaryWorkActual = workDaysActual * dailyRateFull;
+  const salaryWorkActual = workDaysActual * dailyRateFull;  // workDaysActual = công CA NGÀY (ca đêm tính riêng ở nightShiftPay)
   const leavePay = leaveDays * dailyRateInsurance;
   const fillPay = 0; // không còn bù-công
   const salaryOT = otPayMultiplied;
-  const grossSalary = salaryWorkActual + leavePay + salaryOT + bonusAllowance + pieceRate + adjustment + mealOT;
+  const grossSalary = salaryWorkActual + leavePay + salaryOT + nightShiftPay + bonusAllowance + pieceRate + adjustment + mealOT;
 
   // BHXH — KHÔNG tự tính nữa (bỏ rule ≥14 công + tự nhân hệ số).
   // Lấy thẳng từ file HCNS đã tính ngoài rồi import vào. NLĐ là khoản TRỪ; phần công ty chỉ để báo cáo.
@@ -200,6 +208,7 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
     leavePay,
     fillPay,
     salaryOT,
+    nightShiftPay,
     mealOT,
     grossSalary,
     bhxhEmployee,

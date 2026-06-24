@@ -86,6 +86,12 @@ export const SALARY_CONFIG = {
   OT_RATE_SUNDAY_NIGHT: 2.7,        // 5.4 đêm chủ nhật
   OT_RATE_HOLIDAY: 3.0,             // 5.5 ngày lễ
   OT_RATE_HOLIDAY_NIGHT: 3.9,       // 5.6 đêm ngày lễ
+  // ── Hệ số CA ĐÊM (HC Đ — làm đêm là chính, KHÁC OT đêm) ──
+  //   Đêm ngày thường = ĐG ngày thường + 30% phụ cấp đêm = ×1.3
+  //   Đêm chủ nhật = ×2.7 ; Đêm ngày lễ = ×3.9
+  NIGHT_SHIFT_WEEKDAY: 1.3,
+  NIGHT_SHIFT_SUNDAY: 2.7,
+  NIGHT_SHIFT_HOLIDAY: 3.9,
   // ── Phụ cấp cố định (theo vai trò/chức vụ) ──
   HAZARD_ALLOWANCE: 1200000,
   TEAM_LEAD_ALLOWANCE: 800000,

@@ -12,20 +12,23 @@ export interface LeaveParse {
   code: string | null;     // mã gốc đã chuẩn hoá (AL/UL/SL/ML/L) để lưu tra cứu
 }
 
+// Mã nghỉ = (số ngày tuỳ chọn) + 1-3 CHỮ CÁI. Vd: AL, 0.5AL, UL, MC, SL, ML, L...
+// CHỈ "AL" là nghỉ phép CÓ LƯƠNG; mã khác (UL/SL/ML/MC/L/...) → công ty không trả, chỉ lưu mã để tra cứu.
+const LEAVE_RE = /^(\d*\.?\d+)?([A-Z]{1,3})$/;
+
 export function parseLeaveCode(raw: unknown): LeaveParse {
-  const s = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  const s = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, "").replace(",", ".");
   if (!s || s === "-" || /^-?\d+(\.\d+)?$/.test(s)) return { paidLeaveDays: 0, code: null }; // trống/số thuần → không phải mã nghỉ
-  // AL có lương: bắt "AL", "0.5AL", "1AL", "0,5AL"
-  const al = s.replace(",", ".").match(/^(\d*\.?\d+)?AL$/);
-  if (al) return { paidLeaveDays: al[1] ? parseFloat(al[1]) : 1, code: s };
-  // UL/SL/ML/L (+ nửa ngày) → công ty không trả
-  const other = s.replace(",", ".").match(/^(\d*\.?\d+)?(UL|SL|ML|L)$/);
-  if (other) return { paidLeaveDays: 0, code: s };
-  return { paidLeaveDays: 0, code: null };
+  const m = s.match(LEAVE_RE);
+  if (!m) return { paidLeaveDays: 0, code: null };
+  const qty = m[1] ? parseFloat(m[1]) : 1;
+  const paid = m[2] === "AL" ? qty : 0; // chỉ AL có lương
+  return { paidLeaveDays: paid, code: s };
 }
 
-/** Một ô có phải mã nghỉ (chữ) không — để nhận diện DÒNG NGHỈ trong block của NV. */
+/** Một ô có phải mã nghỉ (chữ) không — để nhận diện DÒNG NGHỈ ("Khác") trong block của NV. */
 export function isLeaveToken(raw: unknown): boolean {
-  const s = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, "");
-  return /^(\d*\.?\d+)?(AL|UL|SL|ML|L)$/.test(s.replace(",", "."));
+  const s = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, "").replace(",", ".");
+  if (!s || /^-?\d+(\.\d+)?$/.test(s)) return false;
+  return LEAVE_RE.test(s);
 }
