@@ -505,10 +505,12 @@ model AttendanceRecord {
   date       DateTime
   checkIn    DateTime?
   checkOut   DateTime?
-  workHours  Float            @default(0)
+  workHours  Float            @default(0) // giờ công hành chính ca NGÀY (HC N)
   status     AttendanceStatus @default(PRESENT)
-  otHours    Float            @default(0)
-  paidLeaveDays  Float        @default(0) // ngày nghỉ phép CÓ LƯƠNG trong ngày (AL): 0 / 0.5 / 1 — từ dòng "nghỉ" file công
+  otHours    Float            @default(0) // giờ tăng ca ca NGÀY (Thêm giờ N)
+  nightHours   Float          @default(0) // giờ công hành chính ca ĐÊM (HC Đ)
+  otNightHours Float          @default(0) // giờ tăng ca ca ĐÊM (Thêm giờ Đ)
+  paidLeaveDays  Float        @default(0) // ngày nghỉ phép CÓ LƯƠNG trong ngày (AL): 0 / 0.5 / 1 — từ dòng "Khác"
   leaveCode  String?          // mã nghỉ gốc từ file công (AL/UL/SL/ML/L...) để tra cứu
   note       String?
   createdBy  String

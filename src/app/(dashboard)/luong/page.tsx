@@ -50,7 +50,7 @@ type PayslipDetail = {
   otWeekday: number; otWeekdayNight: number; otSunday: number; otSundayNight: number;
   otHoliday: number; otHolidayNight: number; otHoursTotal: number; otConvertedHours: number;
   otFillHours: number; otPaidHours: number;
-  salaryWorkActual: number; leavePay: number; fillPay: number; salaryOT: number; mealOT: number; grossSalary: number;
+  salaryWorkActual: number; leavePay: number; fillPay: number; salaryOT: number; nightShiftPay?: number; nightWorkDays?: number; mealOT: number; grossSalary: number;
   bhxhEmployee: number; bhxh8: number; bhyt15: number; bhtn1: number; bhxhEmployer: number;
   otTaxExempt: number; taxableIncome: number; personalDeduction: number; taxableIncomeAfter: number;
   tncn: number; netSalary: number; companyTotalCost: number;
@@ -301,6 +301,7 @@ function PayslipModal({
               {d.leavePay > 0 && <Row label="Lương phép/lễ" value={formatVND(d.leavePay)} />}
               {d.fillPay > 0 && <Row label="Lương giờ OT bù công (1×)" value={formatVND(d.fillPay)} />}
               {d.salaryOT > 0 && <Row label="Lương tăng ca (đã nhân hệ số)" value={formatVND(d.salaryOT)} />}
+              {(d.nightShiftPay || 0) > 0 && <Row label="Lương ca đêm (HC Đ ×1.3/2.7/3.9)" value={formatVND(d.nightShiftPay || 0)} />}
               {(d.pieceRate || 0) !== 0 && <Row label="Lương sản phẩm/khoán" value={formatVND(d.pieceRate)} />}
               {(d.responsibilityAllow || 0) > 0 && <Row label="Phụ cấp trách nhiệm" value={formatVND(d.responsibilityAllow)} />}
               {(d.farAllowance || 0) > 0 && <Row label="Phụ cấp nhà xa (≥20km)" value={formatVND(d.farAllowance)} />}
@@ -393,14 +394,16 @@ function PeriodDetailModal({
     const trachNhiem = d?.bonusTotal ?? 0;                   // thực trả: vào cột "Lương trách nhiệm + phụ cấp"
     // KPI trừ phụ cấp ĐẦY ĐỦ (resp + nhà xa full) → 200k nhà xa KHÔNG nằm trong KPI (kể cả khi công≤14 bị cắt).
     const kpi = (d?.allowance ?? 0) - (d?.bonusFull ?? trachNhiem);
-    const workDays = r.workDays || 0;
+    const workDays = r.workDays || 0;                       // TỔNG công (ca ngày + ca đêm)
+    const nightDays = (d as any)?.nightWorkDays ?? 0;        // công ca đêm
+    const dayDays = workDays - nightDays;                    // công ca ngày (tách để tính cột Lương ca ngày/KPI)
     const thucNhan = r.netSalary;
     const tt1 = 0;                                           // thanh toán lần 1 — tính năng thanh toán từng đợt (làm sau)
     return {
       code: r.employee.code, name: r.employee.fullName, dept: r.employee.department?.name || "",
       luongCB, kpi, tongTNhd: luongCB + kpi,
-      ngayCaNgay: workDays, ngayCaDem: 0, ngayOT: (r.otConvertedHours || 0) / 8, ngayNghi: d?.leaveDays ?? 0,
-      luongCaNgay: cc > 0 ? (workDays * luongCB) / cc : 0, luongCaDem: 0, luongKPI: cc > 0 ? (workDays * kpi) / cc : 0,
+      ngayCaNgay: dayDays, ngayCaDem: nightDays, ngayOT: (r.otConvertedHours || 0) / 8, ngayNghi: d?.leaveDays ?? 0,
+      luongCaNgay: cc > 0 ? (dayDays * luongCB) / cc : 0, luongCaDem: (d as any)?.nightShiftPay ?? 0, luongKPI: cc > 0 ? (dayDays * kpi) / cc : 0,
       luongOT: d?.salaryOT ?? 0, luongCheDo: d?.leavePay ?? 0, luongTrachNhiem: trachNhiem,
       luongNangSuat: d?.pieceRate ?? 0, boSung: d?.adjustment ?? 0, anCa: d?.mealOT ?? 0,
       grossTT: r.grossSalary, bhNLD: r.bhxh + r.bhyt + r.bhtn, bhCty: r.bhxhEmployer || 0, tncn: r.tncn,
