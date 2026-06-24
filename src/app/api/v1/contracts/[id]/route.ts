@@ -7,9 +7,12 @@ import { z } from "zod";
 const UpdateContractSchema = z.object({
   contractNumber: z.string().min(1).optional(),
   contractType: z.enum(["PROBATION", "DEFINITE_12M", "DEFINITE_24M", "DEFINITE_36M", "INDEFINITE"]).optional(),
+  position: z.string().nullable().optional(),
   startDate: z.string().optional(),
   endDate: z.string().nullable().optional(),
   baseSalary: z.number().int().positive().optional(),
+  insuranceSalary: z.number().int().min(0).nullable().optional(),
+  allowance: z.number().int().min(0).nullable().optional(),
   status: z.enum(["ACTIVE", "EXPIRING_SOON", "EXPIRED", "TERMINATED", "RENEWED"]).optional(),
   fileUrl: z.string().nullable().optional(),
 });

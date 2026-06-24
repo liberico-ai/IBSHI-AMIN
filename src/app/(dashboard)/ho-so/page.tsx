@@ -6,13 +6,14 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { getInitials, apiError } from "@/lib/utils";
+import { viewUrl } from "@/lib/use-presigned-url";
 import { UserPlus, Eye, RefreshCw, X, Download, SlidersHorizontal } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
 import { DateInput } from "@/components/shared/date-input";
 import { BankAccountsEditor, type BankAccount } from "@/components/shared/bank-accounts-editor";
 
 type Employee = {
-  id: string; code: string; fullName: string; gender: string; status: string;
+  id: string; code: string; fullName: string; photo?: string | null; gender: string; status: string;
   startDate: string;
   idNumber?: string | null; taxCode?: string | null; address?: string | null;
   insuranceNumber?: string | null; dateOfBirth?: string | null;
@@ -379,10 +380,16 @@ export default function EmployeesPage() {
         const emp = row as unknown as Employee;
         return (
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-[11px] font-bold text-white"
-              style={{ background: "var(--ibs-accent)" }}>
-              {getInitials(emp.fullName)}
-            </div>
+            {emp.photo ? (
+              <img src={viewUrl(emp.photo)} alt={emp.fullName}
+                className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                onError={(e) => { const t = e.currentTarget; t.onerror = null; t.style.display = "none"; }} />
+            ) : (
+              <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-[11px] font-bold text-white"
+                style={{ background: "var(--ibs-accent)" }}>
+                {getInitials(emp.fullName)}
+              </div>
+            )}
             <span className="font-medium">{emp.fullName}</span>
           </div>
         );

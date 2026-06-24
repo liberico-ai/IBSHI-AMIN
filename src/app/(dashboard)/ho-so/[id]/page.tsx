@@ -22,6 +22,7 @@ import {
   Plus,
   X,
   Pencil,
+  Trash2,
 } from "lucide-react";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BankAccountsEditor, normalizeBankAccounts, type BankAccount } from "@/components/shared/bank-accounts-editor";
@@ -33,6 +34,7 @@ type Employee = {
   id: string;
   code: string;
   fullName: string;
+  photo?: string | null;
   gender: string;
   dateOfBirth: string;
   idNumber: string;
@@ -804,6 +806,195 @@ function AddCertificateDialog({
   );
 }
 
+// ── Sửa hợp đồng (số HĐ / loại / vị trí / ngày / lương / trạng thái) ──────────
+const CONTRACT_STATUS_OPTIONS = [
+  { value: "ACTIVE", label: "Đang làm" },
+  { value: "EXPIRING_SOON", label: "Sắp hết hạn" },
+  { value: "EXPIRED", label: "Hết hạn" },
+  { value: "RENEWED", label: "Đã gia hạn" },
+  { value: "TERMINATED", label: "Đã chấm dứt" },
+];
+function EditContractDialog({ employeeId, contract, onClose, onSuccess }: {
+  employeeId: string; contract: any; onClose: () => void; onSuccess: () => void;
+}) {
+  const money = (v: any) => (v ? Number(v).toLocaleString("vi-VN") : "");
+  const [f, setF] = useState({
+    contractNumber: contract.contractNumber || "",
+    contractType: contract.contractType || "DEFINITE_12M",
+    position: contract.position || "",
+    startDate: contract.startDate ? String(contract.startDate).slice(0, 10) : "",
+    endDate: contract.endDate ? String(contract.endDate).slice(0, 10) : "",
+    baseSalary: money(contract.baseSalary),
+    insuranceSalary: money(contract.insuranceSalary),
+    allowance: money(contract.allowance),
+    status: contract.status || "ACTIVE",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: string, v: any) => setF((s) => ({ ...s, [k]: v }));
+  const num = (s: string) => parseInt(String(s).replace(/\D/g, ""), 10) || 0;
+
+  async function submit() {
+    setError(null);
+    if (!f.contractNumber.trim() || !f.startDate) { setError("Cần số HĐ và ngày bắt đầu"); return; }
+    setSaving(true);
+    try {
+      const body: any = {
+        contractNumber: f.contractNumber.trim(),
+        contractType: f.contractType,
+        position: f.position.trim() || null,
+        startDate: f.startDate,
+        endDate: f.contractType === "INDEFINITE" ? null : (f.endDate || null),
+        status: f.status,
+        insuranceSalary: num(f.insuranceSalary),
+        allowance: num(f.allowance),
+      };
+      if (num(f.baseSalary) > 0) body.baseSalary = num(f.baseSalary);
+      const res = await fetch(`/api/v1/contracts/${contract.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      onSuccess();
+    } catch { setError("Lỗi kết nối"); } finally { setSaving(false); }
+  }
+
+  const fcls = "w-full rounded-lg px-2.5 py-1.5 text-[12px] border outline-none";
+  const fst = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" } as React.CSSProperties;
+  const L = ({ children }: { children: React.ReactNode }) => <label className="text-[11px] font-medium block mb-1" style={{ color: "var(--ibs-text-dim)" }}>{children}</label>;
+  const Money = (k: string) => <input type="text" inputMode="numeric" value={(f as any)[k]} onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); set(k, d ? Number(d).toLocaleString("vi-VN") : ""); }} placeholder="0" className={fcls} style={fst} />;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+      <div className="rounded-2xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[16px] font-bold">Sửa hợp đồng</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-[11px] mb-3 p-2.5 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
+          ⓘ Sửa thông tin hợp đồng. Đổi trạng thái sang "Đã chấm dứt" để ẩn HĐ nhập sai khỏi danh sách.
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
+          <div className="col-span-2 md:col-span-1"><L>Số HĐ *</L><input value={f.contractNumber} onChange={(e) => set("contractNumber", e.target.value)} className={fcls} style={fst} /></div>
+          <div>
+            <L>Loại HĐ *</L>
+            <select value={f.contractType} onChange={(e) => set("contractType", e.target.value)} className={fcls} style={fst}>
+              {CONTRACT_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <L>Trạng thái</L>
+            <select value={f.status} onChange={(e) => set("status", e.target.value)} className={fcls} style={fst}>
+              {CONTRACT_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div className="col-span-2 md:col-span-3"><L>Vị trí / chức danh</L><input value={f.position} onChange={(e) => set("position", e.target.value)} className={fcls} style={fst} /></div>
+          <div><L>Ngày bắt đầu *</L><DateInput value={f.startDate} onChange={(e) => set("startDate", e.target.value)} className={fcls} style={fst} /></div>
+          <div><L>Ngày kết thúc</L><DateInput value={f.endDate} onChange={(e) => set("endDate", e.target.value)} disabled={f.contractType === "INDEFINITE"} className={fcls} style={{ ...fst, opacity: f.contractType === "INDEFINITE" ? 0.5 : 1 }} /></div>
+          <div></div>
+          <div><L>Lương cơ bản</L>{Money("baseSalary")}</div>
+          <div><L>Lương đóng BHXH</L>{Money("insuranceSalary")}</div>
+          <div><L>Phụ cấp</L>{Money("allowance")}</div>
+        </div>
+        {error && <div className="text-[12px] text-red-500 mt-2">{error}</div>}
+        <div className="flex gap-2 justify-end mt-4">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}>{saving ? "Đang lưu..." : "Lưu"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Photo Modal — xem ảnh chân dung to + upload lại (ghi đè) ──────────────────
+function PhotoModal({
+  employeeId, employeeName, currentPhoto, canEdit, onClose, onUpdated,
+}: {
+  employeeId: string; employeeName: string; currentPhoto?: string | null;
+  canEdit: boolean; onClose: () => void; onUpdated: (url: string) => void;
+}) {
+  const [photo, setPhoto] = useState<string | null | undefined>(currentPhoto);
+  const [showUpload, setShowUpload] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function savePhoto(url: string) {
+    setSaving(true); setError(null);
+    try {
+      const res = await fetch(`/api/v1/employees/${employeeId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photo: url }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      setPhoto(url);
+      setShowUpload(false);
+      onUpdated(url);
+    } catch {
+      setError("Lỗi kết nối");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <div
+        className="rounded-2xl w-full max-w-lg p-5"
+        style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[15px] font-semibold">Ảnh chân dung — {employeeName}</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {photo ? (
+          <img
+            src={viewUrl(photo)}
+            alt={employeeName}
+            className="w-full max-h-[68vh] object-contain rounded-lg"
+            style={{ background: "#000" }}
+          />
+        ) : (
+          <div className="py-16 text-center text-[13px] rounded-lg" style={{ background: "var(--ibs-bg)", color: "var(--ibs-text-dim)" }}>
+            Chưa có ảnh chân dung
+          </div>
+        )}
+
+        {canEdit && (
+          <div className="mt-4">
+            {showUpload ? (
+              <>
+                <FileUpload
+                  bucket={BUCKETS.HR_DOCUMENTS}
+                  folder="photos"
+                  accept=".jpg,.jpeg,.png,.webp"
+                  label="Chọn ảnh chân dung mới (sẽ ghi đè ảnh cũ)"
+                  onUploaded={(r) => savePhoto(r.url)}
+                  onError={(m) => setError(m)}
+                />
+                {saving && <div className="text-[12px] mt-2" style={{ color: "var(--ibs-text-dim)" }}>Đang lưu ảnh...</div>}
+                <button onClick={() => setShowUpload(false)} className="mt-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Hủy</button>
+              </>
+            ) : (
+              <button
+                onClick={() => setShowUpload(true)}
+                disabled={saving}
+                className="w-full px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
+                style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}
+              >
+                {photo ? "Tải ảnh khác (ghi đè ảnh hiện tại)" : "Tải ảnh lên"}
+              </button>
+            )}
+          </div>
+        )}
+        {error && <div className="text-[12px] text-red-500 mt-2">{error}</div>}
+      </div>
+    </div>
+  );
+}
+
 // ── Edit Employee Dialog ──────────────────────────────────────────────────────
 function EditEmployeeDialog({
   employee,
@@ -1123,6 +1314,16 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
   const [showChildForm, setShowChildForm] = useState<null | { mode: "create" } | { mode: "edit"; child: any }>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
   const [canViewPayroll, setCanViewPayroll] = useState(false);
+  const [showPhoto, setShowPhoto] = useState(false);
+  const [editContract, setEditContract] = useState<any>(null);
+  const isHRUser = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
+
+  async function handleDeleteContract(c: any) {
+    if (!(await confirmDialog({ message: `Xoá hợp đồng ${c.contractNumber}? (HĐ sẽ chuyển sang "Đã chấm dứt" và ẩn khỏi danh sách)`, tone: "danger", confirmText: "Xoá" }))) return;
+    const res = await fetch(`/api/v1/contracts/${c.id}`, { method: "DELETE" });
+    if (res.ok) loadEmployee();
+    else { const d = await res.json().catch(() => ({})); void alertDialog(apiError(res.status, d?.error)); }
+  }
 
   useEffect(() => {
     fetch("/api/v1/me")
@@ -1165,7 +1366,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
 
   const tabs: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: "info", label: "Thông tin cá nhân", icon: User },
-    ...(canViewPayroll ? [{ key: "contracts" as Tab, label: "Hợp đồng", icon: FileText, count: employee.contracts.length }] : []),
+    ...(canViewPayroll ? [{ key: "contracts" as Tab, label: "Hợp đồng", icon: FileText, count: employee.contracts.filter((c) => c.status !== "TERMINATED").length }] : []),
     { key: "certificates", label: "Chứng chỉ", icon: Award, count: employee.certificates.length },
     { key: "history", label: "Lịch sử công tác", icon: History, count: employee.workHistory.length },
   ];
@@ -1198,13 +1399,30 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
         className="rounded-xl border p-6 mb-5 flex items-start gap-5"
         style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}
       >
-        {/* Avatar */}
-        <div
-          className="w-16 h-16 rounded-full flex items-center justify-center text-[20px] font-bold text-white flex-shrink-0"
-          style={{ background: "var(--ibs-accent)" }}
+        {/* Avatar — click để xem ảnh to / đổi ảnh. Ảnh chân dung nếu có, fallback chữ tắt */}
+        <button
+          type="button"
+          onClick={() => setShowPhoto(true)}
+          title="Xem / đổi ảnh chân dung"
+          className="flex-shrink-0 rounded-full transition-transform hover:scale-105 cursor-pointer"
         >
-          {getInitials(employee.fullName)}
-        </div>
+          {employee.photo ? (
+            <img
+              src={viewUrl(employee.photo)}
+              alt={employee.fullName}
+              className="w-16 h-16 rounded-full object-cover block"
+              style={{ border: "1px solid var(--ibs-border)" }}
+              onError={(e) => { const t = e.currentTarget; t.onerror = null; t.src = ""; t.style.display = "none"; }}
+            />
+          ) : (
+            <div
+              className="w-16 h-16 rounded-full flex items-center justify-center text-[20px] font-bold text-white"
+              style={{ background: "var(--ibs-accent)" }}
+            >
+              {getInitials(employee.fullName)}
+            </div>
+          )}
+        </button>
 
         {/* Info */}
         <div className="flex-1 min-w-0">
@@ -1291,6 +1509,24 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
       </div>
 
       {/* Dialogs */}
+      {showPhoto && employee && (
+        <PhotoModal
+          employeeId={employee.id}
+          employeeName={employee.fullName}
+          currentPhoto={employee.photo}
+          canEdit={userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN"}
+          onClose={() => setShowPhoto(false)}
+          onUpdated={(url) => setEmployee((prev) => (prev ? { ...prev, photo: url } : prev))}
+        />
+      )}
+      {editContract && employee && (
+        <EditContractDialog
+          employeeId={employee.id}
+          contract={editContract}
+          onClose={() => setEditContract(null)}
+          onSuccess={() => { setEditContract(null); loadEmployee(); }}
+        />
+      )}
       {showEditEmployee && employee && (
         <EditEmployeeDialog
           employee={employee}
@@ -1640,7 +1876,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
               const dLeft = current ? daysUntil(current.endDate) : null;
               // Cho ký HĐ mới khi: chưa có HĐ nào, hoặc không còn HĐ đang hiệu lực,
               // hoặc HĐ hiện tại còn ≤ 45 ngày là hết hạn. HĐ vô thời hạn (dLeft = null) → không gia hạn.
-              const canAdd = employee.contracts.length === 0 || !current || (dLeft !== null && dLeft <= 45);
+              const canAdd = employee.contracts.filter((c) => c.status !== "TERMINATED").length === 0 || !current || (dLeft !== null && dLeft <= 45);
               const reason = !canAdd
                 ? (current && dLeft === null
                     ? "HĐ không xác định thời hạn — dùng Ký phụ lục để điều chỉnh"
@@ -1649,7 +1885,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
               return (
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="text-[13px] font-semibold">
-                    Danh sách hợp đồng ({employee.contracts.length})
+                    Danh sách hợp đồng ({employee.contracts.filter((c) => c.status !== "TERMINATED").length})
                     {current && dLeft !== null && (
                       <span className="ml-2 font-normal" style={{ color: dLeft <= 45 ? "var(--ibs-warning)" : "var(--ibs-text-dim)" }}>
                         · HĐ hiện tại còn {dLeft} ngày
@@ -1668,7 +1904,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                 </div>
               );
             })()}
-            {employee.contracts.length === 0 ? (
+            {employee.contracts.filter((c) => c.status !== "TERMINATED").length === 0 ? (
               <div className="text-center py-10 text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>
                 Chưa có hợp đồng nào
               </div>
@@ -1691,7 +1927,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                     </tr>
                   </thead>
                   <tbody>
-                    {employee.contracts.map((c) => (
+                    {employee.contracts.filter((c) => c.status !== "TERMINATED").map((c) => (
                       <tr key={c.id} className="border-b" style={{ borderColor: "rgba(51,65,85,0.5)" }}>
                         <td className="px-4 py-3 text-[13px] font-medium">{c.contractNumber}</td>
                         <td className="px-4 py-3 text-[13px]">{CONTRACT_TYPE_LABELS[c.contractType] || c.contractType}</td>
@@ -1733,6 +1969,12 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                             {c.fileUrl && <span title="HĐ này có bản scan đính kèm" style={{ color: "var(--ibs-success)" }}>📎</span>}
                             {c.status === "ACTIVE" && (
                               <button onClick={() => setAddendumTarget({ id: c.id, number: c.contractNumber })} className="text-[11px] font-medium underline" style={{ color: "#8b5cf6" }}>+ Phụ lục</button>
+                            )}
+                            {isHRUser && (
+                              <>
+                                <button onClick={() => setEditContract(c)} title="Sửa hợp đồng" className="p-1 rounded hover:bg-white/[0.06]" style={{ color: "var(--ibs-text-dim)" }}><Pencil size={13} /></button>
+                                <button onClick={() => handleDeleteContract(c)} title="Xoá hợp đồng" className="p-1 rounded hover:bg-white/[0.06]" style={{ color: "var(--ibs-danger)" }}><Trash2 size={13} /></button>
+                              </>
                             )}
                           </div>
                         </td>
