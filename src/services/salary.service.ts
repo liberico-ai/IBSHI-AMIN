@@ -359,10 +359,12 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const nightCong = (nightShift.weekday + nightShift.sunday + nightShift.holiday) / 8;
     const totalCong = workDaysActual + nightCong; // công ca ngày + công ca đêm
 
-    // Phụ cấp: trách nhiệm trả luôn; PC NHÀ XA chỉ trả khi CÔNG ≥ 14 (tính cả ca đêm — chốt 2026-06-23).
+    // Phụ cấp: trách nhiệm trả luôn; PC NHÀ XA chỉ trả khi CÔNG ≥ 14 (tính cả ca đêm — chốt 2026-06-23)
+    // VÀ chỉ cho NV CHÍNH THỨC (HĐ không phải Thử việc) — chốt 2026-06-25. NV thử việc KHÔNG nhận nhà xa.
     const respAllow = (emp as any).responsibilityAllowance || 0;
     const farAllow = (emp as any).farAllowance || 0;
-    const farPaid = totalCong >= 14 ? farAllow : 0;
+    const isProbation = contract?.contractType === "PROBATION";
+    const farPaid = totalCong >= 14 && !isProbation ? farAllow : 0;
     const bonusPaid = respAllow + farPaid;          // thực trả → cộng vào Gross
     const bonusFull = respAllow + farAllow;         // đầy đủ → trừ khỏi đơn giá ngày
 
