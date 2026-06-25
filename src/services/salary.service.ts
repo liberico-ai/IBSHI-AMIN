@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { calculateSalary, type SalaryInput } from "@/lib/salary-calc";
+import { leaveCodeBase, leaveQty, COMPANY_PAID_LEAVE, BHXH_LEAVE } from "@/lib/attendance-codes";
 import { standardWorkDays, isHoliday, isCompensatoryHoliday, paidHolidaysInMonth } from "@/lib/holidays";
 
 // ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
@@ -45,8 +46,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
 
   const employees = await prisma.employee.findMany({
     where: {
+      // Tính lương cho MỌI NV CÓ CÔNG trong tháng — KỂ CẢ đã nghỉ việc (RESIGNED/TERMINATED/ON_LEAVE).
+      // VD: NV làm hết T4, nghỉ từ T5; làm bảng công T5 thì trạng thái đã là "Đã nghỉ" nhưng vẫn
+      // phát sinh công T4 → vẫn phải trả lương T4 (chốt 2026-06-25). Lọc theo CÓ chấm công là đủ.
       id: { in: employeeIdsWithAttendance },
-      status: { in: ["ACTIVE", "PROBATION"] },
     },
     include: {
       contracts: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 1 },
@@ -127,8 +130,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
   //   ABSENT_APPROVED(_HALF) (phép) → leaveDays (hưởng theo Lương BHXH/CC).
   const workDaysMap: Record<string, number> = {};        // công thường (ngày làm thực, ÷8)
   const alDaysFromAttendance: Record<string, number> = {};
-  // Nghỉ do BHXH chi trả (ML thai sản + SL ốm) — CHỈ ĐẾM để hiển thị ở cột "nghỉ hưởng lương";
-  // KHÔNG cộng lương công ty (BHXH chi trả riêng).
+  // CL (ma chay) + WL (tai nạn LĐ) + ML (đám cưới) — CÔNG TY trả lương (như AL). Đếm để cộng leaveDays.
+  //   (AL xử lý qua paidLeaveDays; L lễ qua lịch lễ — không tính lại ở đây.)
+  const companyExtraLeaveMap: Record<string, number> = {};
+  // SL (ốm) + MT (thai sản) — BHXH chi trả: CHỈ ĐẾM để hiển thị cột "nghỉ hưởng lương", KHÔNG cộng lương công ty.
   const bhxhLeaveDaysMap: Record<string, number> = {};
   const unpaidWeekdayMap: Record<string, number> = {};   // NK ngày thường (mục tiêu bù công)
   const otMap: Record<string, { weekday: number; weekdayNight: number; sunday: number; sundayNight: number; holiday: number; holidayNight: number }> = {};
@@ -147,9 +152,13 @@ export async function calculatePayrollForPeriod(periodId: string) {
     if ((a.paidLeaveDays || 0) > 0) {
       alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + (a.paidLeaveDays || 0);
     }
-    // Nghỉ BHXH (ML thai sản / SL ốm): đếm số ngày (gồm nửa ngày "0.5ML"/"0.5SL") để HIỂN THỊ — không vào lương.
-    const bhxhLv = (a.leaveCode || "").toUpperCase().replace(",", ".").match(/^(\d*\.?\d+)?(ML|SL)$/);
-    if (bhxhLv) bhxhLeaveDaysMap[a.employeeId] = (bhxhLeaveDaysMap[a.employeeId] || 0) + (bhxhLv[1] ? parseFloat(bhxhLv[1]) : 1);
+    // Phân loại mã nghỉ (gồm nửa ngày "0.5XX"):
+    const lvBase = leaveCodeBase(a.leaveCode);
+    if (lvBase === "CL" || lvBase === "WL" || lvBase === "ML") {           // công ty trả → leaveDays
+      companyExtraLeaveMap[a.employeeId] = (companyExtraLeaveMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
+    } else if (lvBase === "SL" || lvBase === "MT") {                        // BHXH trả → chỉ hiển thị
+      bhxhLeaveDaysMap[a.employeeId] = (bhxhLeaveDaysMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
+    }
     if (isHoliday(d)) {
       // Lễ — wh+oh → OT × hệ số (chốt 2026-06-08).
       //   - Comp Holiday → ×2 (HR coi như CN)
@@ -174,13 +183,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
       } else if (a.status === "BUSINESS_TRIP") {
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 1;
       } else if (a.status === "ABSENT_UNAPPROVED") {
-        // KL (vắng không lương → mục tiêu bù công bằng OT) CHỈ gồm: nghỉ không lương (UL)
-        // + vắng không phép thật (không mã).
-        // LOẠI TRỪ (không phải KL, không bù):
-        //   SL = ốm, ML = thai sản → BHXH chi trả.
-        //   L  = lễ → phòng khi lịch lễ trong file lệch với lịch hệ thống.
-        const code = (a.leaveCode || "").toUpperCase().replace(/[0-9.,\s]/g, "");
-        if (code !== "SL" && code !== "ML" && code !== "L") {
+        // KL (vắng không lương → mục tiêu bù công bằng OT) = nghỉ KHÔNG lương (UL) + vắng không mã.
+        // LOẠI TRỪ (không phải KL): mọi mã CÓ HƯỞNG — công ty trả (AL/L/CL/WL/ML) hoặc BHXH (SL/MT).
+        const code = leaveCodeBase(a.leaveCode);
+        if (![...COMPANY_PAID_LEAVE, ...BHXH_LEAVE].includes(code)) {
           unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
         }
       }
@@ -340,7 +346,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
       missingContractEmployees.push({ code: emp.code, fullName: emp.fullName });
     }
 
-    const leaveDays = (leavePaidMap[emp.id] || 0) + (holidayRestMap[emp.id] || 0);
+    // Nghỉ CÔNG TY trả = AL (leavePaidMap) + Lễ (holidayRestMap) + CL/WL/ML (companyExtraLeaveMap).
+    const leaveDays = (leavePaidMap[emp.id] || 0) + (holidayRestMap[emp.id] || 0) + (companyExtraLeaveMap[emp.id] || 0);
     // workDaysActual + otAfter (sau bù công) — xem buildWorkOt phía trên.
     const { workDaysActual, otAfter } = buildWorkOt(emp.id);
     // Lương SP = nhập tay (nếu có) + phần chia từ khoán tổ (có thể âm).
@@ -415,7 +422,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       workDays: totalCong,            // TỔNG công = ca ngày + ca đêm (cột "Công" hiển thị)
       nightWorkDays: nightCong,       // công ca đêm (để tách khỏi cột Lương ca ngày)
       leaveDays: input.leaveDays,     // phép/lễ CÔNG TY trả (AL + Lễ) — dùng tính lương chế độ
-      bhxhLeaveDays: bhxhLeaveDaysMap[emp.id] || 0, // ML+SL do BHXH trả — CHỈ hiển thị cột "nghỉ hưởng lương", không vào lương
+      bhxhLeaveDays: bhxhLeaveDaysMap[emp.id] || 0, // SL+MT do BHXH trả — CHỈ hiển thị cột "nghỉ hưởng lương", không vào lương
       // OT giờ tách theo loại (sau khi đã tiêu hao phần bù công — khớp OT quy đổi)
       otWeekday: otAfter.weekday, otWeekdayNight: otAfter.weekdayNight,
       otSunday: otAfter.sunday, otSundayNight: otAfter.sundayNight,

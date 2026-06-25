@@ -1,11 +1,21 @@
-// Phân loại mã nghỉ trong file công (dòng "nghỉ" — dòng 3 mỗi NV).
-// Quy ước IBSHI (chốt 2026-05-28):
-//   AL  = nghỉ phép năm CÓ LƯƠNG (công ty trả theo lương BHXH).  "0.5AL" = 0.5 ngày phép.
-//   UL  = nghỉ KHÔNG lương.                                       "0.5UL" = 0.5 ngày ko lương.
-//   SL  = nghỉ ốm   → BHXH chi trả, công ty KHÔNG trả (= 0).
-//   ML  = thai sản  → BHXH chi trả, công ty KHÔNG trả (= 0).
-//   L   = nghỉ lễ   → xử lý qua lịch lễ (holiday-rest), không tính ở đây.
-// → Chỉ AL phát sinh "ngày nghỉ có lương" trên bảng lương công ty.
+// Phân loại mã nghỉ trong file công (dòng "nghỉ"/"Khác").
+// Quy ước IBSHI (chốt 2026-06-25 — theo HCNS):
+//   CÔNG TY TRẢ lương: AL (phép năm), L (lễ), CL (ma chay), WL (tai nạn LĐ), ML (đám cưới).
+//   BHXH TRẢ (công ty không trả, chỉ HIỂN THỊ vào cột nghỉ hưởng lương): SL (ốm), MT (thai sản).
+//   KHÔNG lương: UL.
+//   "0.5XX" = nửa ngày của mã XX.
+
+// Mã công ty trả lương (ngoài AL & L vốn xử lý riêng): CL/WL/ML cũng trả như AL.
+export const COMPANY_PAID_LEAVE = ["AL", "L", "CL", "WL", "ML"];
+// Mã do BHXH chi trả — chỉ hiển thị, công ty không trả.
+export const BHXH_LEAVE = ["SL", "MT"];
+// Mã chữ thuần (bỏ số/fraction): "0.5CL" → "CL".
+export const leaveCodeBase = (code: unknown): string => String(code ?? "").toUpperCase().replace(/[0-9.,\s]/g, "");
+// Số ngày của 1 mã nghỉ (fraction): "0.5CL" → 0.5, "CL" → 1, không phải mã → 0.
+export const leaveQty = (code: unknown): number => {
+  const m = String(code ?? "").toUpperCase().replace(",", ".").match(/^(\d*\.?\d+)?([A-Z]{1,3})$/);
+  return m ? (m[1] ? parseFloat(m[1]) : 1) : 0;
+};
 
 export interface LeaveParse {
   paidLeaveDays: number;   // số ngày nghỉ CÓ LƯƠNG (chỉ AL): 0 / 0.5 / 1...
