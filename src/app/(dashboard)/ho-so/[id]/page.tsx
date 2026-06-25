@@ -1932,7 +1932,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                       <tr key={c.id} className="border-b" style={{ borderColor: "rgba(51,65,85,0.5)" }}>
                         <td className="px-4 py-3 text-[13px] font-medium">{c.contractNumber}</td>
                         <td className="px-4 py-3 text-[13px]">{CONTRACT_TYPE_LABELS[c.contractType] || c.contractType}</td>
-                        <td className="px-4 py-3 text-[13px]">{employee.jobPosition || c.position || <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}</td>
+                        <td className="px-4 py-3 text-[13px]">{c.position || employee.jobPosition || <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}</td>
                         <td className="px-4 py-3 text-[13px]">{formatDate(new Date(c.startDate))}</td>
                         <td className="px-4 py-3 text-[13px]">
                           {c.endDate ? formatDate(new Date(c.endDate)) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}
