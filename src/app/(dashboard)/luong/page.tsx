@@ -402,7 +402,8 @@ function PeriodDetailModal({
     return {
       code: r.employee.code, name: r.employee.fullName, dept: r.employee.department?.name || "",
       luongCB, kpi, tongTNhd: luongCB + kpi,
-      ngayCaNgay: dayDays, ngayCaDem: nightDays, ngayOT: (r.otConvertedHours || 0) / 8, ngayNghi: (d?.leaveDays ?? 0) + ((d as any)?.bhxhLeaveDays ?? 0),
+      // "Nghỉ hưởng lương" = CHỈ nghỉ công ty trả (AL/L/CL/WL/ML) = leaveDays. SL/MT do BHXH trả → KHÔNG vào cột này.
+      ngayCaNgay: dayDays, ngayCaDem: nightDays, ngayOT: (r.otConvertedHours || 0) / 8, ngayNghi: (d?.leaveDays ?? 0),
       luongCaNgay: cc > 0 ? (dayDays * luongCB) / cc : 0, luongCaDem: (d as any)?.nightShiftPay ?? 0, luongKPI: cc > 0 ? (dayDays * kpi) / cc : 0,
       luongOT: d?.salaryOT ?? 0, luongCheDo: d?.leavePay ?? 0, luongTrachNhiem: trachNhiem,
       luongNangSuat: d?.pieceRate ?? 0, boSung: d?.adjustment ?? 0, anCa: d?.mealOT ?? 0,
