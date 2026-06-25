@@ -210,24 +210,27 @@ export async function calculatePayrollForPeriod(periodId: string) {
     }
   }
 
-  // ── TIỀN ĂN TĂNG GIỜ (chốt 2026-06-19) ──
+  // ── TIỀN ĂN TĂNG GIỜ (chốt 2026-06-19; TÁCH ca ngày/đêm 2026-06-25) ──
   // Tự tính từ chấm công, theo GIỜ OT THỰC TẾ (CHƯA bù trừ — dùng giờ gốc, KHÁC lương OT).
-  //   Ngày thường (T2–T7, không lễ): 2h≤OT<4h → 15.000đ; OT≥4h → 20.000đ (theo otHours).
-  //   Lễ: tổng giờ làm (wh+oh) ≥ 4h → 20.000đ.
+  //   Ngày thường (T2–T7, không lễ): tính RIÊNG suất OT ca NGÀY và suất OT ca ĐÊM —
+  //     mỗi suất: 2h≤OT<4h → 15.000đ; OT≥4h → 20.000đ.
+  //     (vd 1 ngày có 3h OT ngày + 2h OT đêm = 15k + 15k = 30k; 1 ngày chỉ 6h OT đêm = 20k.)
+  //   Lễ: tổng giờ làm (HC + OT, cả ngày lẫn đêm) ≥ 4h → 20.000đ (1 suất).
   //   Chủ nhật & nghỉ bù: 0 (đi làm CN luôn có nấu cơm → phần cộng & trừ triệt tiêu).
+  const mealByOt = (h: number) => (h >= 4 ? 20000 : h >= 2 ? 15000 : 0);
   const mealOTMap: Record<string, number> = {};
   for (const a of attendanceData) {
     const d = new Date(a.date);
     const wh = a.workHours || 0;
-    const oh = a.otHours || 0;
+    const oh = a.otHours || 0;        // OT ca ngày
+    const onh = a.otNightHours || 0;  // OT ca đêm
     let meal = 0;
     if (d.getUTCDay() === 0 || isCompensatoryHoliday(d)) {
       meal = 0; // Chủ nhật / nghỉ bù → coi như có nấu cơm
     } else if (isHoliday(d)) {
-      if (wh + oh >= 4) meal = 20000; // ngày lễ
+      if (wh + oh + onh >= 4) meal = 20000; // ngày lễ → 1 suất
     } else {
-      if (oh >= 4) meal = 20000;       // ngày thường, OT ≥ 4h
-      else if (oh >= 2) meal = 15000;  // ngày thường, 2h ≤ OT < 4h
+      meal = mealByOt(oh) + mealByOt(onh); // ngày thường: suất ca ngày + suất ca đêm (riêng)
     }
     if (meal > 0) mealOTMap[a.employeeId] = (mealOTMap[a.employeeId] || 0) + meal;
   }
