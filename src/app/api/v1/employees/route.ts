@@ -86,10 +86,11 @@ export async function GET(request: NextRequest) {
         position: true,
         team: true,
         contracts: {
-          // Lấy HĐ đang hiệu lực (mới nhất theo ngày bắt đầu, bỏ HĐ đã chấm dứt)
-          // — KHÔNG dùng createdAt vì HĐ nhập bổ sung (vd thử việc) tạo sau sẽ lọt lên nhầm.
+          // Lấy HĐ đang hiệu lực: ưu tiên HĐ ĐANG LÀM (status ACTIVE đứng đầu enum),
+          // rồi mới tới ngày bắt đầu mới nhất. Bỏ HĐ đã chấm dứt.
+          // — Tránh: HĐ cũ (Hết hạn) trùng ngày bắt đầu với HĐ đang làm bị lấy nhầm.
           where: { status: { not: "TERMINATED" } },
-          orderBy: { startDate: "desc" },
+          orderBy: [{ status: "asc" }, { startDate: "desc" }],
           take: 1,
         },
         children: { select: { dateOfBirth: true } },
