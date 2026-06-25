@@ -242,7 +242,7 @@ function PayslipModal({
   onClose: () => void;
 }) {
   const d = record.detail;
-  const num = (n: number) => (n || 0).toLocaleString("vi-VN", { maximumFractionDigits: 2 });
+  const num = (n: number) => (n || 0).toLocaleString("vi-VN", { maximumFractionDigits: 4 }); // công/giờ giữ số thật, không làm tròn 2 số
   const convDays = d ? (d.otConvertedHours || 0) / 8 : 0;
   const totalWorkDays = d ? (d.workDays || 0) + convDays : 0;
 
@@ -402,7 +402,7 @@ function PeriodDetailModal({
     return {
       code: r.employee.code, name: r.employee.fullName, dept: r.employee.department?.name || "",
       luongCB, kpi, tongTNhd: luongCB + kpi,
-      ngayCaNgay: dayDays, ngayCaDem: nightDays, ngayOT: (r.otConvertedHours || 0) / 8, ngayNghi: d?.leaveDays ?? 0,
+      ngayCaNgay: dayDays, ngayCaDem: nightDays, ngayOT: (r.otConvertedHours || 0) / 8, ngayNghi: (d?.leaveDays ?? 0) + ((d as any)?.bhxhLeaveDays ?? 0),
       luongCaNgay: cc > 0 ? (dayDays * luongCB) / cc : 0, luongCaDem: (d as any)?.nightShiftPay ?? 0, luongKPI: cc > 0 ? (dayDays * kpi) / cc : 0,
       luongOT: d?.salaryOT ?? 0, luongCheDo: d?.leavePay ?? 0, luongTrachNhiem: trachNhiem,
       luongNangSuat: d?.pieceRate ?? 0, boSung: d?.adjustment ?? 0, anCa: d?.mealOT ?? 0,
@@ -423,7 +423,8 @@ function PeriodDetailModal({
     ws.getRow(1).font = { bold: true };
     for (const { v } of allVals) {
       const row: Record<string, any> = {};
-      for (const c of COLS) if (c.t !== "pdf") row[c.k] = c.t === "num" ? Number((v[c.k] || 0).toFixed(2)) : v[c.k];
+      // Công/OT (num) GIỮ SỐ THẬT — chỉ tiền (money) mới làm tròn (chốt: chỉ làm tròn lương & thuế).
+      for (const c of COLS) if (c.t !== "pdf") row[c.k] = c.t === "num" ? (v[c.k] || 0) : v[c.k];
       ws.addRow(row);
     }
     const buf = await wb.xlsx.writeBuffer();
@@ -525,7 +526,7 @@ function PeriodDetailModal({
                       if (c.t === "name") return <td key={c.k} className="px-2 py-1.5 border-b whitespace-nowrap" style={{ borderColor: bc }}><button onClick={() => setSlipRecord(r)} className="hover:underline text-left" style={{ color: "var(--ibs-accent)", fontWeight: 600 }} title="Xem phiếu lương">{val}</button></td>;
                       if (c.t === "pdf") return <td key={c.k} className="px-2 py-1.5 border-b text-center" style={{ borderColor: bc }}><a href={`/api/v1/payroll/${period.id}/slip/pdf?employeeId=${r.employeeId}`} download className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-accent)" }}><Download size={10} /> PDF</a></td>;
                       if (c.t === "text") return <td key={c.k} className="px-2 py-1.5 border-b whitespace-nowrap" style={{ borderColor: bc, color: c.k === "code" ? "var(--ibs-accent)" : "var(--ibs-text-dim)", fontFamily: c.k === "code" ? "monospace" : undefined, fontWeight: c.k === "code" ? 600 : undefined }}>{val}</td>;
-                      if (c.t === "num") return <td key={c.k} className="px-2 py-1.5 border-b text-center" style={{ borderColor: bc }}>{Number((val || 0).toFixed(2)).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}</td>;
+                      if (c.t === "num") return <td key={c.k} className="px-2 py-1.5 border-b text-center" style={{ borderColor: bc }}>{(val || 0).toLocaleString("vi-VN", { maximumFractionDigits: 4 })}</td>;
                       return <td key={c.k} className="px-2 py-1.5 border-b text-right whitespace-nowrap" style={{ borderColor: bc, color: c.k === "thucNhan" ? "var(--ibs-success)" : (c.k === "bhNLD" || c.k === "tncn") ? "var(--ibs-warning)" : undefined, fontWeight: c.k === "thucNhan" || c.k === "grossTT" ? 600 : undefined }}>{formatVND(val || 0)}</td>;
                     })}
                   </tr>
