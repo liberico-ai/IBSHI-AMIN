@@ -1,7 +1,7 @@
 import prisma from "@/lib/prisma";
 import { calculateSalary, type SalaryInput } from "@/lib/salary-calc";
 import { leaveCodeBase, leaveQty, COMPANY_PAID_LEAVE, BHXH_LEAVE } from "@/lib/attendance-codes";
-import { standardWorkDays, isHoliday, isCompensatoryHoliday, paidHolidaysInMonth } from "@/lib/holidays";
+import { standardWorkDays, isHoliday, isCompensatoryHoliday } from "@/lib/holidays";
 
 // ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
 
@@ -135,6 +135,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
   const companyExtraLeaveMap: Record<string, number> = {};
   // SL (ốm) + MT (thai sản) — BHXH chi trả: CHỈ ĐẾM để hiển thị cột "nghỉ hưởng lương", KHÔNG cộng lương công ty.
   const bhxhLeaveDaysMap: Record<string, number> = {};
+  // L (nghỉ lễ) — CHỈ đếm khi ô ngày CÓ chữ "L". NV không có "L" (vào sau lễ / nghỉ cả tháng / thai sản) → KHÔNG có lương lễ.
+  const holidayCodeMap: Record<string, number> = {};
   const unpaidWeekdayMap: Record<string, number> = {};   // NK ngày thường (mục tiêu bù công)
   const otMap: Record<string, { weekday: number; weekdayNight: number; sunday: number; sundayNight: number; holiday: number; holidayNight: number }> = {};
   const ensureOt = (id: string) => (otMap[id] ||= { weekday: 0, weekdayNight: 0, sunday: 0, sundayNight: 0, holiday: 0, holidayNight: 0 });
@@ -158,6 +160,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
       companyExtraLeaveMap[a.employeeId] = (companyExtraLeaveMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
     } else if (lvBase === "SL" || lvBase === "MT") {                        // BHXH trả → chỉ hiển thị
       bhxhLeaveDaysMap[a.employeeId] = (bhxhLeaveDaysMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
+    } else if (lvBase === "L") {                                            // Nghỉ Lễ — CHỈ ô có "L" mới được công lễ
+      holidayCodeMap[a.employeeId] = (holidayCodeMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
     }
     if (isHoliday(d)) {
       // Lễ — wh+oh → OT × hệ số (chốt 2026-06-08).
@@ -252,13 +256,12 @@ export async function calculatePayrollForPeriod(periodId: string) {
     leavePaidMap[empId] = (leavePaidMap[empId] || 0) + days;
   }
 
-  // Nghỉ lễ: lễ chính thức (VN_HOLIDAYS, kể cả rơi CN) → TẤT CẢ NV được +1 công nghỉ có lương
-  // (đi làm vào lễ vẫn được công này, cộng thêm OT theo hệ số).
-  // Nghỉ bù (COMP) KHÔNG tính → không cộng vào leaveDays.
-  const paidHolidayCount = paidHolidaysInMonth(period.year, period.month).length;
+  // Nghỉ lễ (chốt 2026-06-26): CHỈ NV có mã "L" trên ô ngày lễ mới được +1 công lễ hưởng lương.
+  //   → NV vào sau ngày lễ / nghỉ nguyên tháng / nghỉ thai sản (không có "L") KHÔNG được lương lễ.
+  //   Đi làm vào lễ vẫn được cộng OT theo hệ số (xử lý ở vòng trên), độc lập với công lễ này.
   const holidayRestMap: Record<string, number> = {};
-  for (const empId of employeeIdsWithAttendance) {
-    if (paidHolidayCount > 0) holidayRestMap[empId] = paidHolidayCount;
+  for (const [empId, n] of Object.entries(holidayCodeMap)) {
+    if (n > 0) holidayRestMap[empId] = n;
   }
 
   // Công chuẩn (CC) = số ngày trong tháng − số Chủ Nhật
