@@ -65,6 +65,13 @@ const CONTRACT_TYPE_LABELS: Record<string, string> = {
   INDEFINITE: "Không XĐ", PROBATION: "Thử việc",
 };
 
+// Nhãn trạng thái NV tiếng Việt — dùng khi export (thay vì enum thô ACTIVE/RESIGNED...).
+const STATUS_LABELS: Record<string, string> = {
+  ACTIVE: "Đang làm việc", PROBATION: "Thử việc", ON_LEAVE: "Tạm nghỉ",
+  RESIGNED: "Đã nghỉ việc", TERMINATED: "Đã chấm dứt HĐ",
+};
+const statusLabel = (s: string) => STATUS_LABELS[s] || s;
+
 // Khoảng độ tuổi con cái cho dropdown lọc export.
 const CHILD_AGE_RANGES: { value: string; label: string; min?: number; max?: number }[] = [
   { value: "", label: "Con: mọi độ tuổi" },
@@ -239,7 +246,7 @@ export default function EmployeesPage() {
         dept: emp.department?.name || "",
         pos: emp.jobRole || emp.position?.name || "",
         contract: CONTRACT_TYPE_LABELS[emp.contracts?.[0]?.contractType || ""] || "",
-        status: emp.status,
+        status: statusLabel(emp.status),
         startDate: emp.startDate ? new Date(emp.startDate).toLocaleDateString("vi-VN") : "",
       });
     });
