@@ -24,12 +24,33 @@ export async function calculatePayrollForPeriod(periodId: string) {
   const endDate = new Date(period.year, period.month, 0, 23, 59, 59);
 
   // M3: Bảng chấm công đã import (vân tay khối gián tiếp + khuôn mặt khối trực tiếp)
-  const attendanceData = await prisma.attendanceRecord.findMany({
+  let attendanceData = await prisma.attendanceRecord.findMany({
     where: { date: { gte: startDate, lte: endDate } },
     select: { employeeId: true, status: true, workHours: true, otHours: true, nightHours: true, otNightHours: true, date: true, paidLeaveDays: true, leaveCode: true },
   });
 
-  // CHỈ tính lương cho NV CÓ DỮ LIỆU CHẤM CÔNG trong tháng
+  // ── TẠM NGHỈ (ON_LEAVE): ẩn các ngày trong khoảng tạm nghỉ — KHÔNG tính lương ngày đó (chốt 2026-06-26).
+  //   NV tạm nghỉ cả kỳ → bị loại hết công → tự rớt khỏi danh sách tính lương (coi như ẩn đi).
+  const dStr = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
+  const attIdsRaw = Array.from(new Set(attendanceData.map((a) => a.employeeId)));
+  if (attIdsRaw.length > 0) {
+    const suspended = await prisma.employee.findMany({
+      where: { id: { in: attIdsRaw }, status: "ON_LEAVE", suspendedFrom: { not: null }, suspendedTo: { not: null } },
+      select: { id: true, suspendedFrom: true, suspendedTo: true },
+    });
+    if (suspended.length > 0) {
+      const win: Record<string, { from: string; to: string }> = {};
+      for (const s of suspended) win[s.id] = { from: dStr(s.suspendedFrom!), to: dStr(s.suspendedTo!) };
+      attendanceData = attendanceData.filter((a) => {
+        const w = win[a.employeeId];
+        if (!w) return true;
+        const ds = dStr(a.date);
+        return ds < w.from || ds > w.to; // chỉ giữ ngày NGOÀI khoảng tạm nghỉ
+      });
+    }
+  }
+
+  // CHỈ tính lương cho NV CÓ DỮ LIỆU CHẤM CÔNG trong tháng (sau khi đã ẩn ngày tạm nghỉ)
   // (theo spec: "hiển thị bảng lương của tất cả NV có chấm công đã import vào M3")
   const employeeIdsWithAttendance = Array.from(
     new Set(attendanceData.map((a) => a.employeeId))
@@ -272,17 +293,18 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const workDaysActualRaw = workDaysMap[empId] || 0;
     const ot = otMap[empId] || { weekday: 0, weekdayNight: 0, sunday: 0, sundayNight: 0, holiday: 0, holidayNight: 0 };
     const klHours = (unpaidWeekdayMap[empId] || 0) * 8;
-    // Bù công CHỈ dùng OT ngày (day buckets) — OT đêm trả đủ hệ số, không dùng để bù.
-    const otTotal = (ot.weekday || 0) + (ot.sunday || 0) + (ot.holiday || 0);
+    // Bù công dùng TẤT CẢ OT (ca ngày + ca đêm) — tiêu OT HỆ SỐ CAO trước (chốt 2026-06-26).
+    //   Thứ tự hệ số giảm dần: lễ đêm 3.9 > lễ 3.0 > CN đêm 2.7 > CN 2.0 = đêm thường 2.0 > thường 1.5.
+    const otTotal = (ot.weekday || 0) + (ot.weekdayNight || 0) + (ot.sunday || 0) + (ot.sundayNight || 0) + (ot.holiday || 0) + (ot.holidayNight || 0);
     const buHours = Math.min(klHours, otTotal);
-    const workDaysActual = workDaysActualRaw + buHours / 8; // = CÔNG CA NGÀY (chưa gồm ca đêm)
+    const workDaysActual = workDaysActualRaw + buHours / 8; // công ca ngày + giờ OT (ngày/đêm) đã quy về 1× để bù
     let remainBu = buHours;
     const otAfter = {
       weekday: ot.weekday || 0, weekdayNight: ot.weekdayNight || 0,
       sunday: ot.sunday || 0, sundayNight: ot.sundayNight || 0,
       holiday: ot.holiday || 0, holidayNight: ot.holidayNight || 0,
     };
-    for (const k of ["holiday", "sunday", "weekday"] as const) {
+    for (const k of ["holidayNight", "holiday", "sundayNight", "sunday", "weekdayNight", "weekday"] as const) {
       const take = Math.min(otAfter[k], remainBu); otAfter[k] -= take; remainBu -= take;
     }
     return { workDaysActual, otAfter };

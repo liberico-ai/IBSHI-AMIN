@@ -351,8 +351,8 @@ function PeriodDetailModal({
   onClose: () => void;
 }) {
   const [slipRecord, setSlipRecord] = useState<PayrollRecord | null>(null);
-  const totalGross = period.records.reduce((s, r) => s + r.grossSalary, 0);
-  const totalNet = period.records.reduce((s, r) => s + r.netSalary, 0);
+  const [deptFilter, setDeptFilter] = useState("");
+  const [search, setSearch] = useState("");
 
   // 28 cột bảng lương để ký (chốt 2026-06-22, khớp mẫu HR). t: text|name|num|money|pdf.
   const COLS: { k: string; h: string; t: "text" | "name" | "num" | "money" | "pdf" }[] = [
@@ -413,8 +413,17 @@ function PeriodDetailModal({
   };
 
   const allVals = period.records.map((r) => ({ r, v: rowVals(r) }));
+  // Lọc theo Phòng ban + tìm Mã NV/Họ tên. Số liệu (đếm, tổng, export) đều theo bộ lọc.
+  const deptOptions = Array.from(new Set(period.records.map((r) => r.employee.department?.name).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "vi"));
+  const q = search.trim().toLowerCase();
+  const filteredVals = allVals.filter(({ v }) =>
+    (!deptFilter || v.dept === deptFilter) &&
+    (!q || String(v.code).toLowerCase().includes(q) || String(v.name).toLowerCase().includes(q))
+  );
+  const totalGross = filteredVals.reduce((s, x) => s + x.r.grossSalary, 0);
+  const totalNet = filteredVals.reduce((s, x) => s + x.r.netSalary, 0);
   const totals: Record<string, number> = {};
-  for (const c of COLS) if (c.t === "money") totals[c.k] = allVals.reduce((s, x) => s + (x.v[c.k] || 0), 0);
+  for (const c of COLS) if (c.t === "money") totals[c.k] = filteredVals.reduce((s, x) => s + (x.v[c.k] || 0), 0);
 
   async function exportExcel() {
     const { default: ExcelJS } = await import("exceljs");
@@ -422,7 +431,7 @@ function PeriodDetailModal({
     const ws = wb.addWorksheet(`Lương T${period.month}-${period.year}`);
     ws.columns = COLS.filter((c) => c.t !== "pdf").map((c) => ({ header: c.h, key: c.k, width: c.t === "name" ? 24 : c.t === "text" ? 14 : 16 }));
     ws.getRow(1).font = { bold: true };
-    for (const { v } of allVals) {
+    for (const { v } of filteredVals) {
       const row: Record<string, any> = {};
       // Công/OT (num) GIỮ SỐ THẬT — chỉ tiền (money) mới làm tròn (chốt: chỉ làm tròn lương & thuế).
       for (const c of COLS) if (c.t !== "pdf") row[c.k] = c.t === "num" ? (v[c.k] || 0) : v[c.k];
@@ -467,7 +476,7 @@ function PeriodDetailModal({
                   Số nhân viên
                 </div>
                 <div className="text-[20px] font-extrabold" style={{ color: "var(--ibs-accent)" }}>
-                  {period.records.length}
+                  {filteredVals.length}{filteredVals.length !== period.records.length ? `/${period.records.length}` : ""}
                 </div>
               </div>
               <div className="text-center">
@@ -500,6 +509,22 @@ function PeriodDetailModal({
           </div>
         </div>
 
+        {/* Filter */}
+        {period.records.length > 0 && (
+          <div className="flex items-center gap-3 px-6 py-2.5 border-b flex-shrink-0" style={{ borderColor: "var(--ibs-border)" }}>
+            <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }}>
+              <option value="">Tất cả phòng ban</option>
+              {deptOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm Mã NV / Họ tên..."
+              className="px-3 py-1.5 rounded-lg text-[12px] w-56 outline-none" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }} />
+            {(deptFilter || search) && (
+              <button onClick={() => { setDeptFilter(""); setSearch(""); }} className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Xoá lọc</button>
+            )}
+          </div>
+        )}
+
         {/* Table */}
         <div className="overflow-auto flex-1 p-4">
           {period.records.length === 0 ? (
@@ -519,7 +544,7 @@ function PeriodDetailModal({
                 </tr>
               </thead>
               <tbody>
-                {allVals.map(({ r, v }, i) => (
+                {filteredVals.map(({ r, v }, i) => (
                   <tr key={r.id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)" }}>
                     {COLS.map((c) => {
                       const val = v[c.k];
@@ -535,7 +560,7 @@ function PeriodDetailModal({
               </tbody>
               <tfoot>
                 <tr style={{ background: "rgba(0,180,216,0.04)" }}>
-                  <td colSpan={3} className="px-2 py-2 text-right font-bold border-t" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Tổng cộng ({period.records.length} NV)</td>
+                  <td colSpan={3} className="px-2 py-2 text-right font-bold border-t" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Tổng cộng ({filteredVals.length} NV)</td>
                   {COLS.slice(3).map((c) => (
                     c.t === "money"
                       ? <td key={c.k} className="px-2 py-2 text-right font-bold whitespace-nowrap border-t" style={{ borderColor: "var(--ibs-border)", color: c.k === "thucNhan" ? "var(--ibs-success)" : "var(--ibs-text)" }}>{formatVND(totals[c.k] || 0)}</td>

@@ -84,6 +84,9 @@ const UpdateEmployeeSchema = z.object({
   emergencyContact: z.string().optional(),
   emergencyPhone: z.string().optional(),
   status: z.enum(["ACTIVE", "PROBATION", "ON_LEAVE", "RESIGNED", "TERMINATED"]).optional(),
+  resignedDate: z.string().nullable().optional(),   // ngày bắt đầu nghỉ việc (RESIGNED)
+  suspendedFrom: z.string().nullable().optional(),  // tạm nghỉ từ (ON_LEAVE)
+  suspendedTo: z.string().nullable().optional(),    // tạm nghỉ đến (ON_LEAVE)
 });
 
 export async function PUT(
@@ -121,12 +124,36 @@ export async function PUT(
   }
 
   // Non-HR_ADMIN cannot change status
-  const { dateOfBirth, startDate, ...rest } = parsed.data;
+  const { dateOfBirth, startDate, resignedDate, suspendedFrom, suspendedTo, ...rest } = parsed.data;
   const updateData: any = { ...rest };
   if (dateOfBirth) updateData.dateOfBirth = new Date(dateOfBirth);
   if (startDate) updateData.startDate = new Date(startDate);
   if (!canDo(userRole, "employees", "readAll") && updateData.status) {
     delete updateData.status;
+  }
+  // Ngày nghỉ việc / tạm nghỉ — chỉ gắn khi NGƯỜI CÓ QUYỀN đổi trạng thái (status còn trong updateData).
+  if (updateData.status !== undefined) {
+    if (updateData.status === "ON_LEAVE") {
+      if (!suspendedFrom || !suspendedTo) {
+        return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Tạm nghỉ cần cả ngày bắt đầu và ngày kết thúc" } }, { status: 400 });
+      }
+      const f = new Date(suspendedFrom), t = new Date(suspendedTo);
+      if (t < f) {
+        return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Ngày kết thúc tạm nghỉ phải sau ngày bắt đầu" } }, { status: 400 });
+      }
+      updateData.suspendedFrom = f;
+      updateData.suspendedTo = t;
+      updateData.resignedDate = null;
+    } else if (updateData.status === "RESIGNED" || updateData.status === "TERMINATED") {
+      updateData.resignedDate = resignedDate ? new Date(resignedDate) : null;
+      updateData.suspendedFrom = null;
+      updateData.suspendedTo = null;
+    } else {
+      // ACTIVE / PROBATION → xoá hết ngày nghỉ/tạm nghỉ
+      updateData.resignedDate = null;
+      updateData.suspendedFrom = null;
+      updateData.suspendedTo = null;
+    }
   }
   // Tài khoản ngân hàng (tối đa 5): lọc TK hợp lệ + đồng bộ TK chính vào field cũ.
   if (updateData.bankAccounts !== undefined) {
