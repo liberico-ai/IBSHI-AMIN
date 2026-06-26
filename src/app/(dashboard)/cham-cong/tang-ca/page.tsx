@@ -5,9 +5,10 @@ import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ApprovalWorkflow } from "@/components/shared/approval-workflow";
 import { formatDate, apiError } from "@/lib/utils";
-import { Plus, X, Clock, Calendar, Lock } from "lucide-react";
+import { Plus, X, Clock, Calendar, Lock, Pencil, Trash2 } from "lucide-react";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
 import { canSeeOTTab } from "@/lib/ot-access";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 
 type OTRequest = {
   id: string;
@@ -26,7 +27,7 @@ type OTRequest = {
     id: string;
     code: string;
     fullName: string;
-    department: { name: string };
+    department: { id: string; name: string };
   };
 };
 
@@ -264,12 +265,15 @@ export default function TangCaPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
   const [jobRole, setJobRole] = useState<string | null>(null);
+  const [myDeptId, setMyDeptId] = useState<string | null>(null);
   const [meLoaded, setMeLoaded] = useState(false);
+  const [editTarget, setEditTarget] = useState<OTRequest | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => {
       if (res.role) setUserRole(res.role);
       setJobRole(res.jobRole ?? null);
+      setMyDeptId(res.departmentId ?? null);
     }).catch(() => {}).finally(() => setMeLoaded(true));
   }, []);
 
@@ -298,6 +302,29 @@ export default function TangCaPage() {
       if (res.ok) {
         const json = await res.json();
         setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status: json.data.status } : r)));
+      }
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  // Trưởng phòng (phòng mình) hoặc HC/ADMIN/BOM được SỬA/XOÁ đơn OT CHƯA duyệt.
+  const canManageOT = (r: OTRequest) =>
+    r.status === "PENDING" && (
+      ["HR_ADMIN", "ADMIN", "BOM"].includes(userRole) ||
+      (userRole === "MANAGER" && !!myDeptId && r.employee.department.id === myDeptId)
+    );
+
+  async function handleDelete(r: OTRequest) {
+    if (!(await confirmDialog({ message: `Xoá đơn tăng ca ngày ${formatDate(new Date(r.date))} của ${r.employee.fullName}?`, confirmText: "Xoá", tone: "danger" }))) return;
+    setActionLoading(r.id + "DELETE");
+    try {
+      const res = await fetch(`/api/v1/ot-requests/${r.id}`, { method: "DELETE" });
+      if (res.ok) {
+        setRequests((prev) => prev.filter((x) => x.id !== r.id));
+      } else {
+        const json = await res.json().catch(() => ({}));
+        void alertDialog(apiError(res.status, json?.error) || "Xoá thất bại");
       }
     } finally {
       setActionLoading(null);
@@ -421,14 +448,30 @@ export default function TangCaPage() {
                       <StatusBadge status={r.status} />
                     </td>
                     <td className="px-4 py-3">
-                      {canApprove && (
-                        <ApprovalWorkflow
-                          status={r.status}
-                          loading={actionLoading === r.id + "APPROVE" || actionLoading === r.id + "REJECT"}
-                          onApprove={() => handleAction(r.id, "APPROVE")}
-                          onReject={() => handleAction(r.id, "REJECT")}
-                        />
-                      )}
+                      <div className="flex items-center gap-2">
+                        {canApprove && (
+                          <ApprovalWorkflow
+                            status={r.status}
+                            loading={actionLoading === r.id + "APPROVE" || actionLoading === r.id + "REJECT"}
+                            onApprove={() => handleAction(r.id, "APPROVE")}
+                            onReject={() => handleAction(r.id, "REJECT")}
+                          />
+                        )}
+                        {canManageOT(r) && (
+                          <>
+                            <button type="button" title="Sửa đơn" onClick={() => setEditTarget(r)}
+                              disabled={actionLoading === r.id + "DELETE"}
+                              className="p-1 rounded hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}>
+                              <Pencil size={15} />
+                            </button>
+                            <button type="button" title="Xoá đơn" onClick={() => handleDelete(r)}
+                              disabled={actionLoading === r.id + "DELETE"}
+                              className="p-1 rounded hover:opacity-70" style={{ color: "var(--ibs-danger)" }}>
+                              <Trash2 size={15} />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -452,6 +495,105 @@ export default function TangCaPage() {
           }}
         />
       )}
+
+      {editTarget && (
+        <EditOTDialog
+          target={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSuccess={(item) => {
+            setRequests((prev) => prev.map((r) => (r.id === item.id ? item : r)));
+            setEditTarget(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Edit OT Dialog (Trưởng phòng sửa đơn CHƯA duyệt: ngày / giờ / lý do) ──────────
+function EditOTDialog({ target, onClose, onSuccess }: { target: OTRequest; onClose: () => void; onSuccess: (item: OTRequest) => void }) {
+  const [form, setForm] = useState({
+    date: String(target.date).slice(0, 10),
+    startTime: target.startTime,
+    endTime: target.endTime,
+    reason: target.reason,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: string, v: string) => { setForm((f) => ({ ...f, [k]: v })); setError(null); };
+
+  const durationH = form.startTime && form.endTime
+    ? Math.max(0, (parseInt(form.endTime.split(":")[0]) * 60 + parseInt(form.endTime.split(":")[1]) - parseInt(form.startTime.split(":")[0]) * 60 - parseInt(form.startTime.split(":")[1])) / 60)
+    : 0;
+  const otRate = form.date ? ((): number => { const d = new Date(form.date).getDay(); return d === 0 || d === 6 ? 2.0 : 1.5; })() : target.otRate;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!form.date) { setError("Vui lòng chọn ngày"); return; }
+    if (durationH <= 0) { setError("Giờ kết thúc phải sau giờ bắt đầu"); return; }
+    if (!form.reason.trim()) { setError("Vui lòng nhập lý do"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/v1/ot-requests/${target.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      onSuccess(json.data);
+    } catch {
+      setError("Lỗi kết nối");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls = "w-full px-3 py-2 rounded-lg text-[13px] outline-none";
+  const inputStyle = { background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" };
+  const labelCls = "block text-[12px] font-medium mb-1.5";
+  const labelStyle = { color: "var(--ibs-text-dim)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-5" style={{ background: "var(--ibs-bg-card)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[15px] font-bold">Sửa đơn tăng ca</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-3" style={{ color: "var(--ibs-text-dim)" }}>
+          {target.teamName || target.employee.department.name} · {(target.memberNames?.length || 1)} người
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className={labelCls} style={labelStyle}>Ngày <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+            <DateInput value={form.date} onChange={(e) => set("date", e.target.value)} className={inputCls} style={inputStyle} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls} style={labelStyle}>Từ giờ <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+              <TimeInput value={form.startTime} onChange={(e) => set("startTime", e.target.value)} className={inputCls} style={inputStyle} />
+            </div>
+            <div>
+              <label className={labelCls} style={labelStyle}>Đến giờ <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+              <TimeInput value={form.endTime} onChange={(e) => set("endTime", e.target.value)} className={inputCls} style={inputStyle} />
+            </div>
+          </div>
+          <div className="text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>
+            Thời lượng: <strong style={{ color: "var(--ibs-accent)" }}>{durationH.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}h</strong> · Hệ số: <strong style={{ color: "var(--ibs-accent)" }}>×{otRate}</strong> {otRate === 2 ? "(cuối tuần)" : "(ngày thường)"}
+          </div>
+          <div>
+            <label className={labelCls} style={labelStyle}>Lý do <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+            <textarea value={form.reason} onChange={(e) => set("reason", e.target.value)} rows={2} className={inputCls} style={inputStyle} />
+          </div>
+          {error && <div className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>{error}</div>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ border: "1px solid var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Huỷ</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}>{saving ? "Đang lưu..." : "Lưu"}</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
