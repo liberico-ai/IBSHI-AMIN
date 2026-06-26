@@ -40,6 +40,83 @@ interface Props {
 // Hình thức vận chuyển công văn đi.
 const TRANSPORT_METHODS = ["Bưu điện", "Chuyển phát nhanh", "Giao trực tiếp", "Email / Điện tử", "Khác"];
 
+// Bỏ dấu tiếng Việt để tìm kiếm không phân biệt dấu ("huyen" khớp "Huyền").
+const normVi = (s: string) =>
+  s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
+
+// Combobox TÌM-KIẾM chọn Cá nhân / Phòng ban: gõ tên/mã → gợi ý, khỏi scroll.
+// Value khớp <select> cũ: "emp:<id>" | "dept:<id>" | "".
+function RecipientPicker({ value, onChange, depts, emps, inputStyle, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  depts: { id: string; name: string }[];
+  emps: { id: string; code: string; fullName: string; department?: { name?: string } | null }[];
+  inputStyle: React.CSSProperties;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const boxRef = useRef<HTMLDivElement>(null);
+  const q = normVi(query.trim());
+
+  const selectedLabel = (() => {
+    if (value.startsWith("dept:")) return depts.find((x) => `dept:${x.id}` === value)?.name || "";
+    if (value.startsWith("emp:")) { const e = emps.find((x) => `emp:${x.id}` === value); return e ? `${e.fullName} — ${e.code}${e.department?.name ? " · " + e.department.name : ""}` : ""; }
+    return "";
+  })();
+
+  const fDepts = depts.filter((d) => !q || normVi(d.name).includes(q));
+  const fEmps = emps.filter((e) => !q || normVi(`${e.fullName} ${e.code} ${e.department?.name || ""}`).includes(q)).slice(0, 60);
+
+  useEffect(() => {
+    function onDoc(ev: MouseEvent) { if (boxRef.current && !boxRef.current.contains(ev.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const pick = (v: string) => { onChange(v); setOpen(false); setQuery(""); };
+  const groupStyle: React.CSSProperties = { padding: "6px 10px 2px", fontSize: 11, fontWeight: 700, color: "var(--ibs-text-dim)", textTransform: "uppercase" };
+  const optStyle: React.CSSProperties = { padding: "7px 10px", fontSize: 13, cursor: "pointer", color: "var(--ibs-text)" };
+  const hover = (on: boolean) => (e: React.MouseEvent<HTMLDivElement>) => (e.currentTarget.style.background = on ? "var(--ibs-bg)" : "transparent");
+
+  return (
+    <div ref={boxRef} style={{ position: "relative" }}>
+      <input
+        type="text"
+        value={open ? query : selectedLabel}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        placeholder={placeholder || "Gõ tên / mã NV hoặc phòng ban để tìm..."}
+        className="w-full px-3 py-2 rounded-lg text-[13px]"
+        style={{ ...inputStyle, paddingRight: value ? 28 : undefined }}
+        autoComplete="off"
+      />
+      {value && !open && (
+        <button type="button" aria-label="Xoá lựa chọn" onMouseDown={(e) => { e.preventDefault(); pick(""); }}
+          style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", color: "var(--ibs-text-dim)", fontSize: 16, lineHeight: 1, padding: 2 }}>×</button>
+      )}
+      {open && (
+        <div style={{ position: "absolute", zIndex: 60, top: "calc(100% + 4px)", left: 0, right: 0, maxHeight: 280, overflowY: "auto", background: "var(--ibs-card, #fff)", border: "1px solid var(--ibs-border)", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+          {fDepts.length === 0 && fEmps.length === 0 ? (
+            <div style={{ padding: 12, fontSize: 13, color: "var(--ibs-text-dim)" }}>Không tìm thấy phù hợp</div>
+          ) : (
+            <>
+              {fDepts.length > 0 && <div style={groupStyle}>Phòng ban</div>}
+              {fDepts.map((d) => (
+                <div key={d.id} onMouseDown={(e) => { e.preventDefault(); pick(`dept:${d.id}`); }} style={optStyle} onMouseEnter={hover(true)} onMouseLeave={hover(false)}>{d.name}</div>
+              ))}
+              {fEmps.length > 0 && <div style={groupStyle}>Nhân viên</div>}
+              {fEmps.map((e) => (
+                <div key={e.id} onMouseDown={(ev) => { ev.preventDefault(); pick(`emp:${e.id}`); }} style={optStyle} onMouseEnter={hover(true)} onMouseLeave={hover(false)}>{e.fullName} — {e.code}{e.department?.name ? ` · ${e.department.name}` : ""}</div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DocumentArchive({ kind, title, description, numberRequired }: Props) {
   const apiBase = `/api/v1/documents/${kind}`;
   const folder = kind === "incoming" ? "incoming-docs" : "outgoing-docs";
@@ -531,20 +608,7 @@ function AddModal({
                   <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
                     Người gửi <span style={{ color: "var(--ibs-danger)" }}>*</span>
                   </label>
-                  <select
-                    value={senderSel}
-                    onChange={(e) => setSenderSel(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg text-[13px]"
-                    style={inputStyle}
-                  >
-                    <option value="">Chọn cá nhân / phòng ban...</option>
-                    <optgroup label="Phòng ban">
-                      {depts.map((d) => <option key={d.id} value={`dept:${d.id}`}>{d.name}</option>)}
-                    </optgroup>
-                    <optgroup label="Nhân viên">
-                      {emps.map((e) => <option key={e.id} value={`emp:${e.id}`}>{e.fullName} — {e.code}{e.department?.name ? ` · ${e.department.name}` : ""}</option>)}
-                    </optgroup>
-                  </select>
+                  <RecipientPicker value={senderSel} onChange={setSenderSel} depts={depts} emps={emps} inputStyle={inputStyle} />
                 </div>
               ) : (
                 <div>
@@ -586,20 +650,7 @@ function AddModal({
               <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
                 Nơi nhận <span style={{ color: "var(--ibs-danger)" }}>*</span>
               </label>
-              <select
-                value={routedTo}
-                onChange={(e) => setRoutedTo(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg text-[13px]"
-                style={inputStyle}
-              >
-                <option value="">Chọn cá nhân / phòng ban...</option>
-                <optgroup label="Phòng ban">
-                  {depts.map((d) => <option key={d.id} value={`dept:${d.id}`}>{d.name}</option>)}
-                </optgroup>
-                <optgroup label="Nhân viên">
-                  {emps.map((e) => <option key={e.id} value={`emp:${e.id}`}>{e.fullName} — {e.code}{e.department?.name ? ` · ${e.department.name}` : ""}</option>)}
-                </optgroup>
-              </select>
+              <RecipientPicker value={routedTo} onChange={setRoutedTo} depts={depts} emps={emps} inputStyle={inputStyle} />
             </div>
           ) : (
             <div>
