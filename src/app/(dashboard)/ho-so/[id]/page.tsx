@@ -1031,6 +1031,9 @@ function EditEmployeeDialog({
     emergencyContact: employee.emergencyContact || "",
     emergencyPhone: employee.emergencyPhone || "",
     status: employee.status || "ACTIVE",
+    resignedDate: (employee as any).resignedDate ? String((employee as any).resignedDate).slice(0, 10) : "",
+    suspendedFrom: (employee as any).suspendedFrom ? String((employee as any).suspendedFrom).slice(0, 10) : "",
+    suspendedTo: (employee as any).suspendedTo ? String((employee as any).suspendedTo).slice(0, 10) : "",
     jobRole: employee.jobRole || "",
     jobPosition: employee.jobPosition || "",
     skillLevel: employee.skillLevel || "",
@@ -1073,6 +1076,12 @@ function EditEmployeeDialog({
         body.taxCode = form.taxCode;
         body.insuranceNumber = form.insuranceNumber;
         body.status = form.status;
+        if (form.status === "ON_LEAVE") {
+          body.suspendedFrom = form.suspendedFrom || null;
+          body.suspendedTo = form.suspendedTo || null;
+        } else if (form.status === "RESIGNED") {
+          body.resignedDate = form.resignedDate || null;
+        }
         body.jobRole = form.jobRole;
         body.jobPosition = form.jobPosition;
         body.skillLevel = form.skillLevel;
@@ -1195,6 +1204,30 @@ function EditEmployeeDialog({
                     <option value="RESIGNED">Đã nghỉ việc</option>
                   </select>
                 </div>
+                {form.status === "RESIGNED" && (
+                  <div>
+                    <label className={labelCls} style={labelStyle}>Ngày bắt đầu nghỉ</label>
+                    <input type="date" value={form.resignedDate} onChange={(e) => handleChange("resignedDate", e.target.value)}
+                      className={inputCls} style={inputStyle} />
+                  </div>
+                )}
+                {form.status === "ON_LEAVE" && (
+                  <>
+                    <div>
+                      <label className={labelCls} style={labelStyle}>Tạm nghỉ từ ngày <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+                      <input type="date" value={form.suspendedFrom} onChange={(e) => handleChange("suspendedFrom", e.target.value)}
+                        className={inputCls} style={inputStyle} />
+                    </div>
+                    <div>
+                      <label className={labelCls} style={labelStyle}>Đến ngày <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+                      <input type="date" value={form.suspendedTo} onChange={(e) => handleChange("suspendedTo", e.target.value)}
+                        className={inputCls} style={inputStyle} />
+                    </div>
+                    <div className="col-span-2 text-[11px] leading-snug" style={{ color: "var(--ibs-text-muted)" }}>
+                      Khoảng thời gian tạm nghỉ sẽ <b>KHÔNG được tính lương</b>. Qua ngày kết thúc, hệ thống tự chuyển về &quot;Đang làm việc&quot;.
+                    </div>
+                  </>
+                )}
                 <div className="col-span-2">
                   <label className={labelCls} style={labelStyle}>Tài khoản ngân hàng (tối đa 5)</label>
                   <BankAccountsEditor value={form.bankAccounts} onChange={(v) => handleChange("bankAccounts", v)} />

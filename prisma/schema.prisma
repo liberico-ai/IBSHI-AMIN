@@ -289,6 +289,9 @@ model Employee {
   farAllowance        Int @default(0) // Phụ cấp nhà xa >=20km (200k) — CHỈ hiển thị
   startDate           DateTime
   status              EmployeeStatus @default(ACTIVE)
+  resignedDate        DateTime?      // Ngày bắt đầu nghỉ việc (khi status = RESIGNED)
+  suspendedFrom       DateTime?      // Tạm nghỉ: từ ngày (khi status = ON_LEAVE) — KHÔNG tính lương
+  suspendedTo         DateTime?      // Tạm nghỉ: đến ngày — qua ngày này cron tự chuyển về ACTIVE
   salaryGrade         Int? // 1-7
   salaryCoefficient   Float? // Hệ số lương
   taxCode             String?
