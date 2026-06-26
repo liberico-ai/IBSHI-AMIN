@@ -210,11 +210,11 @@ export async function calculatePayrollForPeriod(periodId: string) {
     }
   }
 
-  // ── TIỀN ĂN TĂNG GIỜ (chốt 2026-06-19; TÁCH ca ngày/đêm 2026-06-25) ──
+  // ── TIỀN ĂN TĂNG GIỜ (chốt 2026-06-19; GỘP OT ngày + đêm 2026-06-26) ──
   // Tự tính từ chấm công, theo GIỜ OT THỰC TẾ (CHƯA bù trừ — dùng giờ gốc, KHÁC lương OT).
-  //   Ngày thường (T2–T7, không lễ): tính RIÊNG suất OT ca NGÀY và suất OT ca ĐÊM —
-  //     mỗi suất: 2h≤OT<4h → 15.000đ; OT≥4h → 20.000đ.
-  //     (vd 1 ngày có 3h OT ngày + 2h OT đêm = 15k + 15k = 30k; 1 ngày chỉ 6h OT đêm = 20k.)
+  //   Ngày thường (T2–T7, không lễ): CỘNG tổng OT ca ngày + OT ca đêm trong NGÀY → 1 suất ăn:
+  //     2h ≤ tổng OT < 4h → 15.000đ; tổng OT ≥ 4h → 20.000đ; < 2h → 0.
+  //     (vd 1 ngày 3h OT ngày + 2h OT đêm = tổng 5h → 20k; 1 ngày chỉ 6h OT đêm → 20k; 2h → 15k.)
   //   Lễ: tổng giờ làm (HC + OT, cả ngày lẫn đêm) ≥ 4h → 20.000đ (1 suất).
   //   Chủ nhật & nghỉ bù: 0 (đi làm CN luôn có nấu cơm → phần cộng & trừ triệt tiêu).
   const mealByOt = (h: number) => (h >= 4 ? 20000 : h >= 2 ? 15000 : 0);
@@ -230,7 +230,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
     } else if (isHoliday(d)) {
       if (wh + oh + onh >= 4) meal = 20000; // ngày lễ → 1 suất
     } else {
-      meal = mealByOt(oh) + mealByOt(onh); // ngày thường: suất ca ngày + suất ca đêm (riêng)
+      meal = mealByOt(oh + onh); // ngày thường: GỘP OT ngày + đêm → 1 suất
     }
     if (meal > 0) mealOTMap[a.employeeId] = (mealOTMap[a.employeeId] || 0) + meal;
   }
