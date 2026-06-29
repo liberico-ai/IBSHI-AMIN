@@ -348,8 +348,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
       pieceRate: 0, adjustment: 0, mealOT: 0, priorOtHours: 0, importedBhxhEmployee: 0, importedBhxhEmployer: 0,
     });
     // Trong KHOÁN: ca đêm tính ở mức 1× (cơ bản) — premium ca đêm (×0.3/1.7/2.9) trả RIÊNG,
-    // KHÔNG trừ vào phần chia khoán (chốt 2026-06-28). nightBase = công đêm × đơn giá ngày.
-    const nightBase = CC > 0 ? nightCong * ((insuranceSalary + allowance) / CC) : 0;
+    // KHÔNG trừ vào phần chia khoán (chốt 2026-06-28). nightBase = công đêm × ĐÚNG đơn giá ngày
+    // (o.dailyRateFull — đã loại phụ cấp trách nhiệm, GIỐNG lương ngày công thường). KHÔNG dùng
+    // (lương+phụ cấp)/CC (cao hơn vì gồm PC trách nhiệm) → trước đây làm lệch rate khoán (chốt 2026-06-29).
+    const nightBase = nightCong * o.dailyRateFull;
     timeInfo[emp.id] = { timeSalary: o.salaryWorkActual + o.salaryOT + nightBase, cong: o.workDaysActual + nightCong + o.otConvertedHours / 8 };
   }
   // Khoán theo tổ kỳ này (cộng dồn nếu nhiều dòng/dự án cùng tổ).
