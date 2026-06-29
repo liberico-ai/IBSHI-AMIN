@@ -160,8 +160,13 @@ export async function POST(request: NextRequest) {
     select: { startDate: true, endDate: true, destination: true, status: true },
   });
   if (conflict) {
-    const p2 = (n: number) => String(n).padStart(2, "0");
-    const fmt = (d: Date) => { const x = new Date(d); return `${p2(x.getHours())}:${p2(x.getMinutes())} ${p2(x.getDate())}/${p2(x.getMonth() + 1)}`; };
+    // Hiển thị giờ VN cố định (Asia/Ho_Chi_Minh) — KHÔNG dùng giờ máy chủ (có thể chạy UTC) → tránh
+    // in sai giờ trong thông báo trùng lịch (vd 14:00 VN bị in thành 07:00 UTC, khiến tưởng không trùng).
+    const fmt = (d: Date) => {
+      const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", hourCycle: "h23" }).formatToParts(new Date(d));
+      const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+      return `${g("hour")}:${g("minute")} ${g("day")}/${g("month")}`;
+    };
     const statusVN = conflict.status === "PENDING" ? "đang chờ duyệt" : "đã duyệt";
     const newStart = new Date(startDate);
     // "Xe chưa về": chuyến đang bận kết thúc SAU thời điểm bắt đầu chuyến mới.

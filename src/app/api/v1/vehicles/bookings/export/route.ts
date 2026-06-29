@@ -3,10 +3,16 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 
 // Xuất lịch sử đặt xe theo xe + khoảng ngày. Trả {title, columns, rows} để client dựng Excel.
-const vnDate = (d: Date | string) => new Date(d).toISOString().slice(0, 10).split("-").reverse().join("/");
-const pad2 = (n: number) => String(n).padStart(2, "0");
-const hm = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-const dm = (d: Date) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
+// Mọi giờ/ngày hiển thị theo GIỜ VN (Asia/Ho_Chi_Minh) — KHÔNG phụ thuộc múi giờ máy chủ (có thể UTC).
+const vnPart = (d: Date | string) => {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(d));
+  const o: Record<string, string> = {};
+  for (const p of parts) o[p.type] = p.value;
+  return o;
+};
+const vnDate = (d: Date | string) => { const p = vnPart(d); return `${p.day}/${p.month}/${p.year}`; };
+const hm = (d: Date) => { const p = vnPart(d); return `${p.hour}:${p.minute}`; };
+const dm = (d: Date) => { const p = vnPart(d); return `${p.day}/${p.month}`; };
 
 const PURPOSE_LABEL: Record<string, string> = {
   DELIVERY: "Giao hàng", CLIENT_PICKUP: "Đón khách", BUSINESS_TRIP: "Công tác", PROCUREMENT: "Mua vật tư", OTHER: "Khác",
