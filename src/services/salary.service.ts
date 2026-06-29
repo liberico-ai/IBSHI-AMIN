@@ -73,7 +73,18 @@ export async function calculatePayrollForPeriod(periodId: string) {
       id: { in: employeeIdsWithAttendance },
     },
     include: {
-      contracts: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 1 },
+      // HĐ có HIỆU LỰC TRONG KỲ tính lương (KHÔNG phải HĐ đang ACTIVE hiện tại) — chốt 2026-06-27.
+      // VD: tính lương T4 cho NV thử việc đến hết T4 rồi ký chính thức T5 → phải lấy HĐ thử việc (T4),
+      // không lấy HĐ chính thức T5. Chọn HĐ phủ khoảng [đầu kỳ, cuối kỳ], mới nhất theo ngày bắt đầu.
+      contracts: {
+        where: {
+          status: { notIn: ["TERMINATED", "REJECTED", "PENDING_APPROVAL"] },
+          startDate: { lte: endDate },
+          OR: [{ endDate: null }, { endDate: { gte: startDate } }],
+        },
+        orderBy: { startDate: "desc" },
+        take: 1,
+      },
       user: { select: { role: true } },
       team: { select: { id: true } },
     },
@@ -235,27 +246,21 @@ export async function calculatePayrollForPeriod(periodId: string) {
     }
   }
 
-  // ── TIỀN ĂN TĂNG GIỜ (chốt 2026-06-19; GỘP OT ngày + đêm 2026-06-26) ──
+  // ── TIỀN ĂN TĂNG GIỜ (chốt 2026-06-19; GỘP OT ngày+đêm 2026-06-26; BỎ tiền ăn lễ 2026-06-28) ──
   // Tự tính từ chấm công, theo GIỜ OT THỰC TẾ (CHƯA bù trừ — dùng giờ gốc, KHÁC lương OT).
-  //   Ngày thường (T2–T7, không lễ): CỘNG tổng OT ca ngày + OT ca đêm trong NGÀY → 1 suất ăn:
+  //   CHỈ NGÀY THƯỜNG (T2–T7, KHÔNG lễ) mới có tiền ăn OT: CỘNG tổng OT ca ngày + OT ca đêm trong NGÀY:
   //     2h ≤ tổng OT < 4h → 15.000đ; tổng OT ≥ 4h → 20.000đ; < 2h → 0.
-  //     (vd 1 ngày 3h OT ngày + 2h OT đêm = tổng 5h → 20k; 1 ngày chỉ 6h OT đêm → 20k; 2h → 15k.)
-  //   Lễ: tổng giờ làm (HC + OT, cả ngày lẫn đêm) ≥ 4h → 20.000đ (1 suất).
-  //   Chủ nhật & nghỉ bù: 0 (đi làm CN luôn có nấu cơm → phần cộng & trừ triệt tiêu).
+  //     (vd 1 ngày 3h OT ngày + 2h OT đêm = tổng 5h → 20k; 1 ngày chỉ 3h OT đêm → 15k.)
+  //   CHỦ NHẬT + NGÀY LỄ (gồm nghỉ bù): 0 — công ty CÓ NẤU CƠM nên không tính tiền ăn OT.
   const mealByOt = (h: number) => (h >= 4 ? 20000 : h >= 2 ? 15000 : 0);
   const mealOTMap: Record<string, number> = {};
   for (const a of attendanceData) {
     const d = new Date(a.date);
-    const wh = a.workHours || 0;
-    const oh = a.otHours || 0;        // OT ca ngày
-    const onh = a.otNightHours || 0;  // OT ca đêm
     let meal = 0;
-    if (d.getUTCDay() === 0 || isCompensatoryHoliday(d)) {
-      meal = 0; // Chủ nhật / nghỉ bù → coi như có nấu cơm
-    } else if (isHoliday(d)) {
-      if (wh + oh + onh >= 4) meal = 20000; // ngày lễ → 1 suất
+    if (d.getUTCDay() === 0 || isHoliday(d)) {
+      meal = 0; // Chủ nhật + lễ (kể cả nghỉ bù) → có nấu cơm → KHÔNG tiền ăn OT
     } else {
-      meal = mealByOt(oh + onh); // ngày thường: GỘP OT ngày + đêm → 1 suất
+      meal = mealByOt((a.otHours || 0) + (a.otNightHours || 0)); // ngày thường: gộp OT ngày + đêm
     }
     if (meal > 0) mealOTMap[a.employeeId] = (mealOTMap[a.employeeId] || 0) + meal;
   }
@@ -331,7 +336,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
       dependentsCount: 0, bonusAllowance: ((emp as any).responsibilityAllowance || 0) + ((emp as any).farAllowance || 0),
       pieceRate: 0, adjustment: 0, mealOT: 0, priorOtHours: 0, importedBhxhEmployee: 0, importedBhxhEmployer: 0,
     });
-    timeInfo[emp.id] = { timeSalary: o.salaryWorkActual + o.salaryOT + o.nightShiftPay, cong: o.workDaysActual + nightCong + o.otConvertedHours / 8 };
+    // Trong KHOÁN: ca đêm tính ở mức 1× (cơ bản) — premium ca đêm (×0.3/1.7/2.9) trả RIÊNG,
+    // KHÔNG trừ vào phần chia khoán (chốt 2026-06-28). nightBase = công đêm × đơn giá ngày.
+    const nightBase = CC > 0 ? nightCong * ((insuranceSalary + allowance) / CC) : 0;
+    timeInfo[emp.id] = { timeSalary: o.salaryWorkActual + o.salaryOT + nightBase, cong: o.workDaysActual + nightCong + o.otConvertedHours / 8 };
   }
   // Khoán theo tổ kỳ này (cộng dồn nếu nhiều dòng/dự án cùng tổ).
   const khoanRecords = await prisma.pieceRateRecord.findMany({ where: { month: period.month, year: period.year } });

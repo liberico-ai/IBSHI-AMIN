@@ -104,25 +104,27 @@ export default function VppPage() {
         })}
       </div>
 
-      {tab === "stock" && <StockTab />}
+      {tab === "stock" && <StockTab canManage={canSeeStockIn} />}
       {tab === "stockIn" && canSeeStockIn && <StockInTab />}
       {tab === "requests" && <RequestsTab me={me} />}
     </div>
   );
 }
 
-function StockTab() {
+function StockTab({ canManage }: { canManage: boolean }) {
   const [items, setItems] = useState<Item[]>([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [showRequest, setShowRequest] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
     setLoading(true);
     fetch(`/api/v1/stationery/items${q ? `?q=${encodeURIComponent(q)}` : ""}`)
       .then((r) => r.json()).then((res) => setItems(res.data || []))
       .finally(() => setLoading(false));
-  }, [q]);
+  };
+  useEffect(() => { load(); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
@@ -134,11 +136,20 @@ function StockTab() {
           style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}
         />
         <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{items.length} mặt hàng</span>
-        <button onClick={() => setShowRequest(true)}
-          className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
-          style={{ background: "var(--ibs-accent)" }}>
-          <Plus size={14} /> Tạo yêu cầu VPP
-        </button>
+        <div className="ml-auto flex gap-2">
+          {canManage && (
+            <button onClick={() => setShowAdd(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
+              style={{ border: "1px solid var(--ibs-accent)", color: "var(--ibs-accent)" }}>
+              <Plus size={14} /> Thêm VPP
+            </button>
+          )}
+          <button onClick={() => setShowRequest(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
+            style={{ background: "var(--ibs-accent)" }}>
+            <Plus size={14} /> Tạo yêu cầu VPP
+          </button>
+        </div>
       </div>
       <div className="rounded-xl border overflow-hidden" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <table className="w-full text-[13px]">
@@ -165,6 +176,65 @@ function StockTab() {
         </table>
       </div>
       {showRequest && <RequestVPPModal onClose={() => setShowRequest(false)} onSuccess={() => setShowRequest(false)} />}
+      {showAdd && <AddVppModal onClose={() => setShowAdd(false)} onSuccess={() => { setShowAdd(false); load(); }} />}
+    </div>
+  );
+}
+
+// Modal THÊM VPP vào danh mục (chỉ whitelist VPP).
+function AddVppModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [form, setForm] = useState({ name: "", unit: "", note: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: string, v: string) => { setForm((f) => ({ ...f, [k]: v })); setError(null); };
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.name.trim() || !form.unit.trim()) { setError("Cần nhập Tên VPP và Đơn vị tính"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/v1/stationery/items", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      onSuccess();
+    } catch { setError("Lỗi kết nối"); }
+    finally { setSaving(false); }
+  }
+
+  const inputCls = "w-full px-3 py-2 rounded-lg text-[13px] outline-none border";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const labelCls = "block text-[12px] font-semibold mb-1.5";
+  const labelStyle = { color: "var(--ibs-text-dim)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-5" style={{ background: "var(--ibs-bg-card)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[15px] font-bold">Thêm mặt hàng VPP</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className={labelCls} style={labelStyle}>Tên VPP <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+            <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="VD: Bút bi xanh Thiên Long" className={inputCls} style={inputStyle} autoFocus />
+          </div>
+          <div>
+            <label className={labelCls} style={labelStyle}>Đơn vị tính <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+            <input value={form.unit} onChange={(e) => set("unit", e.target.value)} placeholder="VD: Hộp, Cái, Cuộn, Ream" className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className={labelCls} style={labelStyle}>Ghi chú</label>
+            <input value={form.note} onChange={(e) => set("note", e.target.value)} placeholder="VD: màu xanh (không bắt buộc)" className={inputCls} style={inputStyle} />
+          </div>
+          {error && <div className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>{error}</div>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Huỷ</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}>{saving ? "Đang lưu..." : "Thêm"}</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -283,6 +353,7 @@ function StockInTab() {
   const [qty, setQty] = useState<Record<string, string>>({});
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [showUsage, setShowUsage] = useState(false);
 
   function load() {
     setLoading(true);
@@ -372,7 +443,10 @@ function StockInTab() {
             <button onClick={() => { setFromDate(""); setToDate(""); }} className="text-[11px]" style={{ color: "var(--ibs-accent)" }}>Xóa lọc</button>
           )}
           <button onClick={exportExcel} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)", background: "var(--ibs-bg)" }}>
-            <Download size={14} /> Export
+            <Download size={14} /> Export phiếu
+          </button>
+          <button onClick={() => setShowUsage(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "var(--ibs-bg)" }}>
+            <Download size={14} /> Tổng hợp sử dụng
           </button>
           {/* Tab này chỉ hiện với người trong whitelist VPP → ai vào được đều có quyền cấp phát. */}
           {agg.length > 0 && (
@@ -433,6 +507,7 @@ function StockInTab() {
           </tbody>
         </table>
       </div>
+      {showUsage && <UsageReportModal onClose={() => setShowUsage(false)} />}
     </div>
   );
 }
@@ -855,6 +930,124 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
       )}
 
       {showNew && <RequestModal onClose={() => setShowNew(false)} onSuccess={() => { setShowNew(false); load(); }} />}
+    </div>
+  );
+}
+
+// Modal EXPORT TỔNG HỢP SỬ DỤNG VPP theo phòng ban + kỳ (tháng/quý/năm).
+function UsageReportModal({ onClose }: { onClose: () => void }) {
+  const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
+  const [departmentId, setDepartmentId] = useState("");
+  const [periodType, setPeriodType] = useState<"month" | "quarter" | "year">("month");
+  const now = new Date();
+  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+  const [quarter, setQuarter] = useState(Math.floor(now.getMonth() / 3) + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepts(res.data || [])).catch(() => {});
+  }, []);
+
+  function range(): { from: string; to: string; label: string } {
+    const p = (n: number) => String(n).padStart(2, "0");
+    const last = (y: number, m: number) => new Date(y, m, 0).getDate(); // số ngày cuối tháng m (1-12)
+    if (periodType === "month") {
+      const [y, m] = month.split("-").map(Number);
+      return { from: `${y}-${p(m)}-01`, to: `${y}-${p(m)}-${p(last(y, m))}`, label: `Tháng ${m}/${y}` };
+    }
+    if (periodType === "quarter") {
+      const m1 = (quarter - 1) * 3 + 1, m3 = m1 + 2;
+      return { from: `${year}-${p(m1)}-01`, to: `${year}-${p(m3)}-${p(last(year, m3))}`, label: `Quý ${quarter}/${year}` };
+    }
+    return { from: `${year}-01-01`, to: `${year}-12-31`, label: `Năm ${year}` };
+  }
+
+  async function doExport() {
+    setError(null); setLoading(true);
+    try {
+      const { from, to, label } = range();
+      const qs = new URLSearchParams({ from, to });
+      if (departmentId) qs.set("departmentId", departmentId);
+      const res = await fetch(`/api/v1/stationery/usage-report?${qs}`);
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      const rows: { name: string; unit: string; total: number }[] = json.data || [];
+      if (rows.length === 0) { setError("Kỳ này phòng ban chưa sử dụng VPP nào."); return; }
+      const { default: ExcelJS } = await import("exceljs");
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet("Tổng hợp VPP");
+      ws.mergeCells("A1:C1");
+      ws.getCell("A1").value = `TỔNG HỢP SỬ DỤNG VPP — ${json.departmentName} — ${label}`;
+      ws.getCell("A1").font = { bold: true, size: 13 };
+      ws.addRow([]);
+      ws.addRow(["STT", "Tên VPP", "Đơn vị tính", "Số lượng đã dùng"]);
+      ws.getRow(3).font = { bold: true };
+      ws.columns = [{ width: 6 }, { width: 36 }, { width: 14 }, { width: 18 }];
+      rows.forEach((r, i) => ws.addRow([i + 1, r.name, r.unit, r.total]));
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `tong-hop-vpp-${label.replace(/[\s/]/g, "")}.xlsx`;
+      a.click(); URL.revokeObjectURL(url);
+      onClose();
+    } catch { setError("Lỗi kết nối"); }
+    finally { setLoading(false); }
+  }
+
+  const inputCls = "w-full px-3 py-2 rounded-lg text-[13px] outline-none border";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const labelCls = "block text-[12px] font-semibold mb-1.5";
+  const labelStyle = { color: "var(--ibs-text-dim)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-5" style={{ background: "var(--ibs-bg-card)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[15px] font-bold">Tổng hợp sử dụng VPP</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className={labelCls} style={labelStyle}>Phòng ban</label>
+            <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className={inputCls} style={inputStyle}>
+              <option value="">Tất cả phòng ban</option>
+              {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls} style={labelStyle}>Kỳ</label>
+            <select value={periodType} onChange={(e) => setPeriodType(e.target.value as any)} className={inputCls} style={inputStyle}>
+              <option value="month">Tháng</option>
+              <option value="quarter">Quý</option>
+              <option value="year">Năm</option>
+            </select>
+          </div>
+          {periodType === "month" && (
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className={inputCls} style={inputStyle} />
+          )}
+          {periodType === "quarter" && (
+            <div className="flex gap-2">
+              <select value={quarter} onChange={(e) => setQuarter(Number(e.target.value))} className={inputCls} style={inputStyle}>
+                {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Quý {q}</option>)}
+              </select>
+              <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} className={inputCls} style={inputStyle} />
+            </div>
+          )}
+          {periodType === "year" && (
+            <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} className={inputCls} style={inputStyle} />
+          )}
+          {error && <div className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>{error}</div>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Huỷ</button>
+            <button onClick={doExport} disabled={loading} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: loading ? 0.6 : 1 }}>
+              <Download size={14} /> {loading ? "Đang xuất..." : "Export Excel"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
