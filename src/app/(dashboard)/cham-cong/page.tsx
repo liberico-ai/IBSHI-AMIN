@@ -231,17 +231,25 @@ function OfficeAttendanceCard({
         }
 
         if (!hasNewLabels) {
-          // FILE CŨ: dòng đầu = công ngày; OT = dòng có nhãn "Thêm giờ" (col 40) hoặc dòng đầu có số; nghỉ = dòng có mã.
-          dayRow = block[0];
-          for (const r of block.slice(1)) { if (norm(r[40]).includes("them gi")) { otDayRow = r; break; } }
-          if (!otDayRow) for (const r of block.slice(1)) {
-            let hasData = false; dayColMap.forEach((c) => { if (numAt(r, c) > 0) hasData = true; });
-            if (hasData) { otDayRow = r; break; }
-          }
-          for (const r of block) {
-            if (r === otDayRow) continue;
-            let hasLeave = false; dayColMap.forEach((c) => { if (isLeaveToken((r as any)?.[c])) hasLeave = true; });
-            if (hasLeave) { leaveRow = r; break; }
+          // File MỚI 5 dòng KHÔNG nhãn nhưng LẶP mã NV mọi dòng → đọc theo ĐÚNG VỊ TRÍ:
+          //   [0]=HC N, [1]=HC Đ, [2]=Thêm giờ N, [3]=Thêm giờ Đ, [4]=Khác.
+          //   (Trước đây heuristic chỉ bắt 1 dòng OT → BỎ SÓT ca đêm + OT đêm.)
+          const repeatedCode = block.filter((r) => codeOfRow(r) === code).length >= 3;
+          if (repeatedCode && block.length >= 4) {
+            dayRow = block[0]; nightRow = block[1]; otDayRow = block[2]; otNightRow = block[3]; leaveRow = block[4];
+          } else {
+            // FILE CŨ: dòng đầu = công ngày; OT = dòng có nhãn "Thêm giờ" (col 40) hoặc dòng đầu có số; nghỉ = dòng có mã.
+            dayRow = block[0];
+            for (const r of block.slice(1)) { if (norm(r[40]).includes("them gi")) { otDayRow = r; break; } }
+            if (!otDayRow) for (const r of block.slice(1)) {
+              let hasData = false; dayColMap.forEach((c) => { if (numAt(r, c) > 0) hasData = true; });
+              if (hasData) { otDayRow = r; break; }
+            }
+            for (const r of block) {
+              if (r === otDayRow) continue;
+              let hasLeave = false; dayColMap.forEach((c) => { if (isLeaveToken((r as any)?.[c])) hasLeave = true; });
+              if (hasLeave) { leaveRow = r; break; }
+            }
           }
         } else if (!leaveRow) {
           // File mới nhưng dòng "Khác" chưa bắt được qua nhãn → dò theo mã nghỉ.
