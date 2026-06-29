@@ -73,22 +73,32 @@ export async function calculatePayrollForPeriod(periodId: string) {
       id: { in: employeeIdsWithAttendance },
     },
     include: {
-      // HĐ có HIỆU LỰC TRONG KỲ tính lương (KHÔNG phải HĐ đang ACTIVE hiện tại) — chốt 2026-06-27.
-      // VD: tính lương T4 cho NV thử việc đến hết T4 rồi ký chính thức T5 → phải lấy HĐ thử việc (T4),
-      // không lấy HĐ chính thức T5. Chọn HĐ phủ khoảng [đầu kỳ, cuối kỳ], mới nhất theo ngày bắt đầu.
+      // Lấy TẤT CẢ HĐ chưa chấm dứt (mới nhất trước) → chọn HĐ áp dụng cho kỳ ở pickContract() (có fallback).
       contracts: {
-        where: {
-          status: { notIn: ["TERMINATED", "REJECTED", "PENDING_APPROVAL"] },
-          startDate: { lte: endDate },
-          OR: [{ endDate: null }, { endDate: { gte: startDate } }],
-        },
+        where: { status: { notIn: ["TERMINATED", "REJECTED", "PENDING_APPROVAL"] } },
         orderBy: { startDate: "desc" },
-        take: 1,
       },
       user: { select: { role: true } },
       team: { select: { id: true } },
     },
   });
+
+  // Chọn HĐ áp dụng cho KỲ tính lương (chốt 2026-06-29). cs đã orderBy startDate DESC + đã loại
+  // TERMINATED/REJECTED/PENDING_APPROVAL (chỉ giữ HĐ có hiệu lực thật).
+  //   (1) Ưu tiên HĐ PHỦ kỳ [đầu kỳ, cuối kỳ] — HĐ có hiệu lực trong chính kỳ tính.
+  //       VD: tăng lương từ T5 (HĐ mới start 01/05) nhưng tính lương T4 → HĐ T5 CHƯA phủ T4
+  //       → tự rơi xuống HĐ cũ phủ T4 (lấy ĐÚNG mức lương cũ, KHÔNG lấy mức mới T5).
+  //   (2) Không có HĐ phủ kỳ (thử việc đã hết / HĐ cũ hết hạn chưa ký tiếp) → HĐ GẦN NHẤT đã BẮT ĐẦU
+  //       trước/trong kỳ. KHÔNG lấy HĐ tương lai → tránh lấy mức lương MỚI để tính cho tháng CŨ.
+  //   (3) NV chưa có HĐ nào bắt đầu trước kỳ (hiếm) → lấy HĐ sớm nhất.
+  const pickContract = (emp: (typeof employees)[number]) => {
+    const cs = emp.contracts;
+    const covering = cs.find((c) => c.startDate <= endDate && (!c.endDate || c.endDate >= startDate));
+    if (covering) return covering;
+    const lastStarted = cs.find((c) => c.startDate <= endDate);
+    if (lastStarted) return lastStarted;
+    return cs[cs.length - 1] ?? null;
+  };
 
   // Đầu vào nhập tay theo kỳ: lương sản phẩm + điều chỉnh
   const manualInputs = await prisma.payrollManualInput.findMany({
@@ -323,8 +333,9 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // PASS 1: tính lương thời gian + công quy đổi từng NV.
   const timeInfo: Record<string, { timeSalary: number; cong: number }> = {};
   for (const emp of employees) {
-    const insuranceSalary = emp.contracts[0]?.insuranceSalary ?? emp.contracts[0]?.baseSalary ?? 0;
-    const allowance = emp.contracts[0]?.allowance ?? 0;
+    const c0 = pickContract(emp);
+    const insuranceSalary = c0?.insuranceSalary ?? c0?.baseSalary ?? 0;
+    const allowance = c0?.allowance ?? 0;
     const { workDaysActual, otAfter } = buildWorkOt(emp.id);
     const nightShift = nightMap[emp.id] || { weekday: 0, sunday: 0, holiday: 0 };
     const nightCong = (nightShift.weekday + nightShift.sunday + nightShift.holiday) / 8;
@@ -369,7 +380,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
   const withContractEmployees: { code: string; fullName: string; baseSalary: number }[] = [];
 
   for (const emp of employees) {
-    const contract = emp.contracts[0];
+    const contract = pickContract(emp);
 
     // Gốc lương từ HĐ: Lương đóng BHXH (lương chính) + Phụ cấp = Tổng thu nhập
     const insuranceSalary = contract?.insuranceSalary ?? contract?.baseSalary ?? 0;

@@ -336,8 +336,8 @@ export default function XePage() {
   function formatDaysOfWeek(days: number[]): string {
     return days.sort().map((d) => DOW_LABELS[d]).join(", ");
   }
-  function pad2(n: number): string { return String(n).padStart(2, "0"); }
-  function formatTimeHM(d: Date): string { return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+  // Giờ HH:mm theo GIỜ VN (Asia/Ho_Chi_Minh) — không lệch theo múi giờ máy xem.
+  function formatTimeHM(d: Date): string { return d.toLocaleTimeString("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }); }
   const availableVehicles = vehicles.filter((v) => v.status === "AVAILABLE").length;
 
   const bookingColumns: Column<VehicleBooking>[] = [
@@ -1163,8 +1163,9 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setSaving(true);
-    const startDate = `${form.startDatePart}T${form.startTimePart}`;
-    const endDate = `${form.endDatePart}T${form.endTimePart}`;
+    // Gắn +07:00 để server LƯU đúng giờ VN bất kể múi giờ server/máy đặt (không lệch giữa các máy).
+    const startDate = `${form.startDatePart}T${form.startTimePart}:00+07:00`;
+    const endDate = `${form.endDatePart}T${form.endTimePart}:00+07:00`;
     // Phải đặt trước tối thiểu 30 phút, không đặt giờ trong quá khứ.
     if (new Date(startDate).getTime() < Date.now() + 30 * 60_000) {
       setError("Phải đặt trước ít nhất 30 phút (không đặt giờ trong quá khứ)."); setSaving(false); return;
