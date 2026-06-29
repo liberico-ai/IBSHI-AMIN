@@ -580,28 +580,43 @@ function AttendanceGridCard({
         if (!code) continue;
         const workRow = rows[i] as unknown[];
 
-        // Gom các dòng nối tiếp (OT ngày/đêm, ca đêm, nghỉ, trống) cho tới dòng NV kế tiếp.
+        // Gom block: các dòng nối tiếp (cùng mã NV hoặc trống) cho tới dòng NV kế tiếp.
         let nightRow: unknown[] | undefined, otRow: unknown[] | undefined, otNightRow: unknown[] | undefined, leaveRow: unknown[] | undefined;
+        const block: unknown[][] = [];
         let j = i + 1;
         for (; j < rows.length; j++) {
           const nextCode = codeOfRow(rows[j] as unknown[]);
-          if (nextCode && nextCode !== code) break; // KHÁC NV → dừng. Cùng mã hoặc không có mã → dòng nối tiếp.
-          const cand = rows[j] as unknown[];
-          const t = shiftOf(cand);
-          if (t === "nightWork" && !nightRow) { nightRow = cand; continue; }   // HC Đ — ca đêm
-          if (t === "otNight" && !otNightRow) { otNightRow = cand; continue; } // Thêm giờ Đ — OT đêm
-          if (t === "otDay" && !otRow) { otRow = cand; continue; }             // Thêm giờ N — OT ngày (theo nhãn)
-          if (t === "leave" && !leaveRow) { leaveRow = cand; continue; }       // Khác — mã nghỉ
-          if (t) continue; // dòng có nhãn khác (vd HC N lặp) → bỏ qua, đã có workRow
-          // FILE CŨ (không nhãn): dò dòng nghỉ + dòng OT theo dữ liệu.
-          if (!leaveRow) { let hasLeave = false; dayColMap.forEach((colIdx) => { if (isLeaveToken(cand?.[colIdx])) hasLeave = true; }); if (hasLeave) leaveRow = cand; }
-          if (!otRow) {
-            let hasData = false;
-            dayColMap.forEach((colIdx) => { const s = String(cand?.[colIdx] ?? "").trim(); if (/^-?\d+(\.\d+)?$/.test(s) && parseFloat(s) > 0) hasData = true; });
-            if (hasData && cand !== leaveRow) otRow = cand;
-          }
+          if (nextCode && nextCode !== code) break; // KHÁC NV → dừng. Cùng mã hoặc không mã → dòng nối tiếp.
+          block.push(rows[j] as unknown[]);
         }
         i = j - 1; // bỏ qua cả block
+
+        const hasLabel = shiftOf(workRow) !== null || block.some((r) => shiftOf(r) !== null);
+        // File MỚI 5 dòng/NV KHÔNG nhãn nhưng LẶP mã NV mọi dòng → đọc theo ĐÚNG VỊ TRÍ:
+        //   workRow = HC N (ca ngày); block = [HC Đ, Thêm giờ N, Thêm giờ Đ, Khác].
+        //   (Trước đây heuristic chỉ bắt 1 dòng OT → BỎ SÓT ca đêm + OT đêm.)
+        const repeatedCode = block.filter((r) => codeOfRow(r) === code).length >= 3;
+        if (hasLabel) {
+          for (const cand of block) {
+            const t = shiftOf(cand);
+            if (t === "nightWork" && !nightRow) nightRow = cand;
+            else if (t === "otNight" && !otNightRow) otNightRow = cand;
+            else if (t === "otDay" && !otRow) otRow = cand;
+            else if (t === "leave" && !leaveRow) leaveRow = cand;
+          }
+        } else if (repeatedCode) {
+          [nightRow, otRow, otNightRow, leaveRow] = [block[0], block[1], block[2], block[3]];
+        } else {
+          // FILE CŨ không nhãn, mã trống ở dòng phụ → dò dòng nghỉ + dòng OT theo dữ liệu.
+          for (const cand of block) {
+            if (!leaveRow) { let hasLeave = false; dayColMap.forEach((colIdx) => { if (isLeaveToken(cand?.[colIdx])) hasLeave = true; }); if (hasLeave) { leaveRow = cand; continue; } }
+            if (!otRow) {
+              let hasData = false;
+              dayColMap.forEach((colIdx) => { const s = String(cand?.[colIdx] ?? "").trim(); if (/^-?\d+(\.\d+)?$/.test(s) && parseFloat(s) > 0) hasData = true; });
+              if (hasData && cand !== leaveRow) otRow = cand;
+            }
+          }
+        }
 
         dayColMap.forEach((colIdx, d) => {
           const { wh, status } = parseGridCell(workRow?.[colIdx]);

@@ -50,19 +50,20 @@ export function formatVND(amount: number): string {
   return new Intl.NumberFormat("vi-VN").format(amount);
 }
 
-/** Format date: dd/MM/yyyy */
+/** Format date: dd/MM/yyyy — theo GIỜ VN (Asia/Ho_Chi_Minh), KHÔNG phụ thuộc múi giờ máy xem. */
 export function formatDate(date: Date | string, fmt?: string): string {
   const d = typeof date === "string" ? new Date(date) : date;
   if (fmt === "relative") {
     return formatDistanceToNow(d, { addSuffix: true, locale: vi });
   }
-  return format(d, fmt || "dd/MM/yyyy");
+  if (fmt) return format(d, fmt); // format tuỳ chỉnh (hiếm, thường date-only) → giữ date-fns
+  return d.toLocaleDateString("en-GB", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-/** Format datetime: dd/MM/yyyy HH:mm */
+/** Format datetime: dd/MM/yyyy HH:mm — cố định theo GIỜ VN (không lệch giữa các máy). */
 export function formatDateTime(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  return format(d, "dd/MM/yyyy HH:mm");
+  return d.toLocaleString("en-GB", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).replace(", ", " ");
 }
 
 /** Get initials: "Le Duy Huyen" → "LH" */
