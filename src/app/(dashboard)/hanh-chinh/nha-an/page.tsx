@@ -16,6 +16,7 @@ type Department = { id: string; code: string; name: string };
 type MealReg = {
   id: string; departmentId: string; date: string;
   lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number; subcontractorName?: string | null; specialNote?: string | null;
+  guestUnitPrice: number;
   department: { id: string; name: string };
 };
 type SupplementaryReq = {
@@ -468,6 +469,7 @@ export default function NhaAnPage() {
             notes: string[];
           };
           const aggMap = new Map<string, AggRow>();
+          const guestPriceTotals = new Map<number, number>(); // tổng số khách theo từng đơn giá (cho mục CHI TIẾT KHÁCH)
           for (const r of registrations) {
             let agg = aggMap.get(r.departmentId);
             if (!agg) {
@@ -477,6 +479,7 @@ export default function NhaAnPage() {
             agg.lunchCount += r.lunchCount;
             agg.dinnerCount += r.dinnerCount;
             agg.guestCount += r.guestCount;
+            if (r.guestCount > 0) guestPriceTotals.set(r.guestUnitPrice, (guestPriceTotals.get(r.guestUnitPrice) || 0) + r.guestCount);
             if (r.specialNote) agg.notes.push(r.specialNote);
           }
           const aggRows = Array.from(aggMap.values()).sort((a, b) => a.departmentName.localeCompare(b.departmentName));
@@ -550,6 +553,17 @@ export default function NhaAnPage() {
               </tbody>
             </table>
             </div>
+            {guestPriceTotals.size > 0 && (
+              <div className="px-5 py-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+                <div className="text-[11px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>CHI TIẾT KHÁCH (THEO ĐƠN GIÁ)</div>
+                {Array.from(guestPriceTotals.entries()).sort((a, b) => b[0] - a[0]).map(([p, c]) => (
+                  <div key={p} className="text-[12px] mb-1 flex items-center justify-between gap-3">
+                    <span className="font-medium" style={{ color: "var(--ibs-warning)" }}>{c} khách × {p.toLocaleString("vi-VN")}đ/suất</span>
+                    <span className="font-semibold whitespace-nowrap">{(c * p).toLocaleString("vi-VN")}đ</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {subAggRows.length > 0 && (
               <div className="px-5 py-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
                 <div className="text-[11px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>CHI TIẾT THẦU PHỤ</div>
