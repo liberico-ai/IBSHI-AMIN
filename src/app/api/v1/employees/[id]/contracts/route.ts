@@ -17,6 +17,9 @@ const createContractSchema = z.object({
   documentHtml: z.string().optional().nullable(),   // nội dung HĐ đã soạn (để tải lại Word/PDF)
   skillLevel: z.string().optional().nullable(),      // bậc thợ — cập nhật vào hồ sơ NV
   fileUrl: z.string().optional().nullable(),
+  // "WAITING_SIGN" = PHÁT HÀNH (đợi NV ký ngoài) → chưa hiệu lực, KHÔNG gia hạn HĐ cũ.
+  // Bỏ trống / "ACTIVE" = tạo HĐ hiệu lực ngay (luồng cũ: gia hạn HĐ cũ).
+  status: z.enum(["ACTIVE", "WAITING_SIGN"]).optional(),
 });
 
 export async function POST(
@@ -50,6 +53,7 @@ export async function POST(
   }
 
   const { contractNumber, contractType, position, startDate, endDate, baseSalary, insuranceSalary, allowance, allowances, documentHtml, skillLevel, fileUrl } = parsed.data;
+  const isPublish = parsed.data.status === "WAITING_SIGN"; // PHÁT HÀNH (đợi ký) — chưa hiệu lực
 
   // Check duplicate contract number
   const existing = await prisma.contract.findFirst({ where: { contractNumber } });
@@ -67,18 +71,23 @@ export async function POST(
     supersedeEnd.setDate(supersedeEnd.getDate() - 1);
 
     const contract = await prisma.$transaction(async (tx) => {
-      // 1 NV chỉ có 1 HĐ đang hiệu lực: HĐ cũ (ACTIVE/EXPIRING_SOON) → RENEWED (lịch sử).
-      const oldActive = await tx.contract.findMany({
-        where: { employeeId, status: { in: ["ACTIVE", "EXPIRING_SOON"] } },
-        select: { id: true, startDate: true, endDate: true },
-      });
-      for (const old of oldActive) {
-        // Chỉ đặt ngày kết thúc nếu hợp lệ (không sớm hơn ngày bắt đầu HĐ cũ) và HĐ cũ chưa có ngày KT, hoặc KT muộn hơn.
-        const setEnd = supersedeEnd >= new Date(old.startDate) && (!old.endDate || new Date(old.endDate) > supersedeEnd);
-        await tx.contract.update({
-          where: { id: old.id },
-          data: { status: "RENEWED", ...(setEnd ? { endDate: supersedeEnd } : {}) },
+      // CHỈ khi tạo HĐ HIỆU LỰC NGAY (không phải phát hành đợi ký): HĐ cũ (ACTIVE/EXPIRING_SOON) → RENEWED.
+      // PHÁT HÀNH (WAITING_SIGN) → GIỮ NGUYÊN HĐ cũ; chỉ gia hạn khi NV xác nhận đã ký (confirm-sign).
+      let supersededCount = 0;
+      if (!isPublish) {
+        const oldActive = await tx.contract.findMany({
+          where: { employeeId, status: { in: ["ACTIVE", "EXPIRING_SOON"] } },
+          select: { id: true, startDate: true, endDate: true },
         });
+        supersededCount = oldActive.length;
+        for (const old of oldActive) {
+          // Chỉ đặt ngày kết thúc nếu hợp lệ (không sớm hơn ngày bắt đầu HĐ cũ) và HĐ cũ chưa có ngày KT, hoặc KT muộn hơn.
+          const setEnd = supersedeEnd >= new Date(old.startDate) && (!old.endDate || new Date(old.endDate) > supersedeEnd);
+          await tx.contract.update({
+            where: { id: old.id },
+            data: { status: "RENEWED", ...(setEnd ? { endDate: supersedeEnd } : {}) },
+          });
+        }
       }
 
       const created = await tx.contract.create({
@@ -95,7 +104,7 @@ export async function POST(
           allowances: (allowances as any) ?? undefined,
           documentHtml: documentHtml || null,
           fileUrl: fileUrl || null,
-          status: "ACTIVE",
+          status: isPublish ? "WAITING_SIGN" : "ACTIVE",
         },
       });
 
@@ -113,7 +122,7 @@ export async function POST(
           action: "CREATE",
           entityType: "Contract",
           entityId: created.id,
-          newValue: JSON.stringify({ contractNumber, contractType, baseSalary, supersededCount: oldActive.length }),
+          newValue: JSON.stringify({ contractNumber, contractType, baseSalary, status: isPublish ? "WAITING_SIGN" : "ACTIVE", supersededCount }),
         },
       });
 

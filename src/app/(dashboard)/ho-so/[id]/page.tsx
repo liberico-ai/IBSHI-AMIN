@@ -253,6 +253,7 @@ function AddContractDialog({
       if (endDate && contractType !== "INDEFINITE") body.endDate = endDate;
       if (position.trim()) body.position = position.trim();
       if (skillLevel.trim()) body.skillLevel = skillLevel.trim();
+      body.status = "WAITING_SIGN"; // PHÁT HÀNH → Đợi ký (chưa hiệu lực, HĐ cũ giữ nguyên cho tới khi xác nhận đã ký)
 
       const res = await fetch(`/api/v1/employees/${employeeId}/contracts`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -279,7 +280,7 @@ function AddContractDialog({
           <button onClick={onClose}><X size={18} /></button>
         </div>
         <div className="text-[12px] mb-3 p-2.5 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
-          ⓘ Thời hạn đã tự nâng <strong>1 bậc</strong> so với HĐ cũ. Anh chỉnh sửa &amp; xác nhận lương / chức vụ / bậc thợ rồi <strong>Lưu &amp; ký</strong>. HĐ cũ sẽ tự chuyển thành "Đã gia hạn".
+          ⓘ Thời hạn đã tự nâng <strong>1 bậc</strong> so với HĐ cũ. Chỉnh sửa lương / chức vụ / bậc thợ rồi <strong>Phát hành</strong> → HĐ ở trạng thái <strong>"Đợi ký"</strong>. Bấm <b>"Xem"</b> để tải PDF cho NV ký. NV ký xong → bấm <strong>"Xác nhận đã ký"</strong> + upload bản scan thì HĐ mới hiệu lực (HĐ cũ chuyển "Đã gia hạn").
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3 p-3 rounded-lg" style={{ background: "var(--ibs-bg)" }}>
@@ -327,7 +328,7 @@ function AddContractDialog({
         <div className="flex gap-2 justify-end mt-4">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
           <button onClick={handleSubmit} disabled={saving || loading} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving || loading ? 0.6 : 1 }}>
-            {saving ? "Đang lưu..." : "Lưu & ký hợp đồng"}
+            {saving ? "Đang phát hành..." : "Phát hành hợp đồng"}
           </button>
         </div>
       </div>
@@ -631,6 +632,54 @@ function SignAddendumDialog({ employeeId, contractId, addendumId, addendumNumber
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
           <button onClick={submit} disabled={saving || !fileUrl} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving || !fileUrl ? 0.6 : 1 }}>
+            {saving ? "Đang xác nhận..." : "Xác nhận đã ký"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Xác nhận đã ký HỢP ĐỒNG (upload bản scan) → HĐ "Đợi ký" thành hiệu lực ─────
+function SignContractDialog({ employeeId, contractId, contractNumber, onClose, onSigned }: {
+  employeeId: string; contractId: string; contractNumber: string; onClose: () => void; onSigned: () => void;
+}) {
+  const [fileUrl, setFileUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!fileUrl) { setError("Cần upload bản scan hợp đồng đã ký"); return; }
+    setSaving(true);
+    const res = await fetch(`/api/v1/employees/${employeeId}/contracts/${contractId}/confirm-sign`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileUrl }),
+    });
+    setSaving(false);
+    if (res.ok) onSigned();
+    else { const d = await res.json(); setError(apiError(res.status, d.error)); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+      <div className="rounded-2xl w-full max-w-md p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[15px] font-semibold">Xác nhận đã ký hợp đồng — {contractNumber}</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-3 p-2.5 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
+          ⓘ Upload bản scan HĐ đã ký tay. Sau khi xác nhận: HĐ chuyển sang <b>hiệu lực (Đang làm)</b> và HĐ cũ tự chuyển <b>"Đã gia hạn"</b>.
+        </div>
+        <div className="mb-3">
+          <FileUpload bucket={BUCKETS.HR_DOCUMENTS} folder="contracts" accept=".pdf,.jpg,.jpeg,.png"
+            label="Upload bản scan hợp đồng đã ký"
+            currentUrl={fileUrl || undefined}
+            onUploaded={(r) => setFileUrl(r.url)}
+            onError={(msg) => void alertDialog(msg)} />
+        </div>
+        {error && <div className="text-[12px] text-red-500 mb-2">{error}</div>}
+        <div className="flex gap-2 justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button onClick={submit} disabled={saving || !fileUrl} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-success)", opacity: saving || !fileUrl ? 0.6 : 1 }}>
             {saving ? "Đang xác nhận..." : "Xác nhận đã ký"}
           </button>
         </div>
@@ -1340,6 +1389,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
   const [viewContract, setViewContract] = useState<{ id: string; number: string; fileUrl?: string | null } | null>(null);
   const [addendumTarget, setAddendumTarget] = useState<{ id: string; number: string } | null>(null);
   const [signAddendum, setSignAddendum] = useState<{ id: string; number: string; contractId: string } | null>(null);
+  const [signContract, setSignContract] = useState<{ id: string; number: string } | null>(null);
   const [viewAddendum, setViewAddendum] = useState<{ id: string; number: string; contractId: string } | null>(null);
   const [showAddCertificate, setShowAddCertificate] = useState(false);
   const [showEditEmployee, setShowEditEmployee] = useState(false);
@@ -1608,6 +1658,15 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
           addendumNumber={signAddendum.number}
           onClose={() => setSignAddendum(null)}
           onSigned={() => { setSignAddendum(null); loadEmployee(); }}
+        />
+      )}
+      {signContract && employee && (
+        <SignContractDialog
+          employeeId={employee.id}
+          contractId={signContract.id}
+          contractNumber={signContract.number}
+          onClose={() => setSignContract(null)}
+          onSigned={() => { setSignContract(null); loadEmployee(); }}
         />
       )}
       {viewAddendum && employee && (
@@ -2001,6 +2060,9 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
                             <StatusBadge status={c.status} />
                             <button onClick={() => setViewContract({ id: c.id, number: c.contractNumber, fileUrl: c.fileUrl })} className="text-[11px] font-medium underline" style={{ color: "var(--ibs-accent)" }}>Xem</button>
                             {c.fileUrl && <span title="HĐ này có bản scan đính kèm" style={{ color: "var(--ibs-success)" }}>📎</span>}
+                            {c.status === "WAITING_SIGN" && isHRUser && (
+                              <button onClick={() => setSignContract({ id: c.id, number: c.contractNumber })} className="text-[11px] px-2 py-0.5 rounded font-semibold text-white" style={{ background: "var(--ibs-success)" }}>✍ Xác nhận đã ký</button>
+                            )}
                             {c.status === "ACTIVE" && (
                               <button onClick={() => setAddendumTarget({ id: c.id, number: c.contractNumber })} className="text-[11px] font-medium underline" style={{ color: "#8b5cf6" }}>+ Phụ lục</button>
                             )}

@@ -52,6 +52,13 @@ type VehicleBooking = {
   vehicle: { licensePlate: string; model: string };
   requester: { id?: string; code: string; fullName: string; department: { name: string } };
 };
+// Chuyến của lái xe (tab "Chuyến của tôi") — từ /api/v1/vehicles/my-trips.
+type MyTrip = {
+  id: string; startDate: string; endDate: string; origin?: string | null; destination: string;
+  purpose: string; passengers: number; status: string; priority?: string; returnTime?: string | null;
+  odoStart?: number | null; odoEnd?: number | null; actualKm?: number | null; completedAt?: string | null; seriesId?: string | null;
+  vehicle: { licensePlate: string; model: string; currentMileage: number };
+};
 
 const VEHICLE_STATUS: Record<string, { label: string; color: string }> = {
   AVAILABLE: { label: "Sẵn sàng", color: "var(--ibs-success)" },
@@ -148,7 +155,7 @@ async function exportVehicleBookings(vehicleId: string, from: string, to: string
 }
 
 export default function XePage() {
-  const [tab, setTab] = useState<"bookings" | "fleet" | "fuel" | "maintenance" | "calendar">("bookings");
+  const [tab, setTab] = useState<"bookings" | "fleet" | "fuel" | "maintenance" | "calendar" | "my-trips">("bookings");
   const [bookings, setBookings] = useState<VehicleBooking[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [fuelLogs, setFuelLogs] = useState<FuelLog[]>([]);
@@ -178,6 +185,17 @@ export default function XePage() {
   const [filterTo, setFilterTo] = useState("");
   const [completingBooking, setCompletingBooking] = useState<VehicleBooking | null>(null);
   const [vehicleHistoryModal, setVehicleHistoryModal] = useState<Vehicle | null>(null);
+  // Lái xe: tab "Chuyến của tôi"
+  const [isDriver, setIsDriver] = useState(false);
+  const [myTrips, setMyTrips] = useState<{ pending: MyTrip[]; completed: MyTrip[] }>({ pending: [], completed: [] });
+  const [confirmTrip, setConfirmTrip] = useState<MyTrip | null>(null);
+
+  function fetchMyTrips() {
+    setLoading(true);
+    fetch("/api/v1/vehicles/my-trips")
+      .then((r) => r.json()).then((res) => setMyTrips({ pending: res.data?.pending || [], completed: res.data?.completed || [] }))
+      .finally(() => setLoading(false));
+  }
 
   function fetchBookings() {
     setLoading(true);
@@ -217,7 +235,7 @@ export default function XePage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/me").then((r) => r.json()).then((res) => { setUserRole(res.role || ""); setEmployeeCode(res.employeeCode || ""); setMyEmployeeId(res.employeeId || null); });
+    fetch("/api/v1/me").then((r) => r.json()).then((res) => { setUserRole(res.role || ""); setEmployeeCode(res.employeeCode || ""); setMyEmployeeId(res.employeeId || null); setIsDriver(!!res.isDriver); });
     // Always fetch vehicles for fuel tab dropdown
     fetch("/api/v1/vehicles").then((r) => r.json()).then((res) => setVehicles(res.data || []));
   }, []);
@@ -225,6 +243,7 @@ export default function XePage() {
   useEffect(() => {
     if (tab === "bookings") fetchBookings();
     else if (tab === "fleet") fetchVehicles();
+    else if (tab === "my-trips") fetchMyTrips();
   }, [tab, filterStatus, filterVehicleId, filterFrom, filterTo]);
 
   useEffect(() => {
@@ -338,6 +357,9 @@ export default function XePage() {
   }
   // Giờ HH:mm theo GIỜ VN (Asia/Ho_Chi_Minh) — không lệch theo múi giờ máy xem.
   function formatTimeHM(d: Date): string { return d.toLocaleTimeString("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }); }
+  // Ngày (theo giờ VN) để xác định buổi quá hạn.
+  const vnDateStr = (d: string | Date) => new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Ho_Chi_Minh" });
+  const todayVNStr = vnDateStr(new Date());
   const availableVehicles = vehicles.filter((v) => v.status === "AVAILABLE").length;
 
   const bookingColumns: Column<VehicleBooking>[] = [
@@ -456,10 +478,10 @@ export default function XePage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
-        {(["bookings", "calendar", "fleet", "fuel", "maintenance"] as const).map((t) => (
+        {(["bookings", "calendar", "fleet", "fuel", "maintenance", "my-trips"] as const).filter((t) => t !== "my-trips" || isDriver).map((t) => (
           <button key={t} onClick={() => setTab(t)} className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
             style={{ background: tab === t ? "var(--ibs-accent)" : "transparent", color: tab === t ? "#fff" : "var(--ibs-text-dim)" }}>
-            {t === "bookings" ? "Đặt xe" : t === "calendar" ? "Lịch" : t === "fleet" ? "Đội xe" : t === "fuel" ? "Nhiên liệu" : "Bảo trì"}
+            {t === "bookings" ? "Đặt xe" : t === "calendar" ? "Lịch" : t === "fleet" ? "Đội xe" : t === "fuel" ? "Nhiên liệu" : t === "maintenance" ? "Bảo trì" : "Chuyến của tôi"}
           </button>
         ))}
       </div>
@@ -709,6 +731,78 @@ export default function XePage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {tab === "my-trips" && (
+        <div className="flex flex-col gap-5">
+          {/* Chuyến CẦN XÁC NHẬN */}
+          <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+            <div className="px-5 py-4 border-b text-[14px] font-semibold flex items-center gap-2" style={{ borderColor: "var(--ibs-border)" }}>
+              🚗 Chuyến cần xác nhận
+              <span className="text-[12px] px-2 py-0.5 rounded-full font-semibold" style={{ background: "rgba(239,68,68,0.12)", color: "var(--ibs-danger)" }}>{myTrips.pending.length}</span>
+            </div>
+            {myTrips.pending.length === 0 ? (
+              <div className="px-5 py-10 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Không có chuyến nào cần xác nhận.</div>
+            ) : myTrips.pending.map((t) => {
+              const overdue = vnDateStr(t.startDate) < todayVNStr;
+              return (
+                <div key={t.id} className="px-5 py-3 border-b last:border-0 flex items-center justify-between gap-4 flex-wrap" style={{ borderColor: "var(--ibs-border)" }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold">{formatDate(t.startDate)}</span>
+                      <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{formatTimeHM(new Date(t.startDate))} → {formatTimeHM(new Date(t.endDate))}</span>
+                      {overdue && <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold" style={{ background: "rgba(245,158,11,0.15)", color: "var(--ibs-warning)" }}>Quá hạn</span>}
+                      {t.seriesId && <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>📅 Lịch cố định</span>}
+                    </div>
+                    <div className="text-[13px] mt-0.5">{t.origin || "Trụ sở Công ty"} → <span className="font-medium">{t.destination}</span></div>
+                    <div className="text-[11px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>{t.vehicle.licensePlate} · {t.vehicle.model} · {t.passengers} khách</div>
+                  </div>
+                  <button onClick={() => setConfirmTrip(t)} className="text-[13px] px-4 py-2 rounded-lg font-semibold text-white whitespace-nowrap" style={{ background: "var(--ibs-danger)" }}>
+                    Xác nhận hoàn thành
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {/* Chuyến ĐÃ HOÀN THÀNH */}
+          <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+            <div className="px-5 py-4 border-b text-[14px] font-semibold" style={{ borderColor: "var(--ibs-border)" }}>✅ Đã hoàn thành</div>
+            {myTrips.completed.length === 0 ? (
+              <div className="px-5 py-10 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có chuyến đã hoàn thành.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
+                      <th className="text-left px-5 py-2.5 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>NGÀY</th>
+                      <th className="text-left px-3 py-2.5 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>HÀNH TRÌNH</th>
+                      <th className="text-left px-3 py-2.5 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>XE</th>
+                      <th className="text-right px-3 py-2.5 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>ODO ĐI → VỀ</th>
+                      <th className="text-right px-5 py-2.5 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>SỐ KM</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {myTrips.completed.map((t) => (
+                      <tr key={t.id} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
+                        <td className="px-5 py-2.5">{formatDate(t.startDate)}</td>
+                        <td className="px-3 py-2.5">{t.origin || "Trụ sở"} → {t.destination}</td>
+                        <td className="px-3 py-2.5 font-mono text-[12px]">{t.vehicle.licensePlate}</td>
+                        <td className="px-3 py-2.5 text-right">{t.odoStart?.toLocaleString("vi-VN")} → {t.odoEnd?.toLocaleString("vi-VN")}</td>
+                        <td className="px-5 py-2.5 text-right font-semibold">{(t.actualKm ?? 0).toLocaleString("vi-VN")} km</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {confirmTrip && (
+        <DriverConfirmModal trip={confirmTrip}
+          onClose={() => setConfirmTrip(null)}
+          onSuccess={() => { setConfirmTrip(null); fetchMyTrips(); }} />
       )}
 
       {showNewBooking && (
@@ -1053,6 +1147,70 @@ function AssignDriverModal({ booking, onClose, onApprove }: {
   );
 }
 
+// Modal LÁI XE xác nhận hoàn thành chuyến — bắt buộc nhập odo lúc đi + lúc về.
+function DriverConfirmModal({ trip, onClose, onSuccess }: {
+  trip: MyTrip; onClose: () => void; onSuccess: () => void;
+}) {
+  const [odoStart, setOdoStart] = useState("");
+  const [odoEnd, setOdoEnd] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    setError(null);
+    if (odoStart.trim() === "" || odoEnd.trim() === "") { setError("Vui lòng nhập đầy đủ số odo lúc đi và lúc về."); return; }
+    const s = parseInt(odoStart, 10), e = parseInt(odoEnd, 10);
+    if (!Number.isFinite(s) || !Number.isFinite(e) || s < 0 || e < 0) { setError("Số odo không hợp lệ."); return; }
+    if (e <= s) { setError("Odo lúc về phải lớn hơn odo lúc đi."); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/v1/vehicles/bookings/${trip.id}/complete-trip`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ odoStart: s, odoEnd: e }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      if (json.warning) await alertDialog(json.warning);
+      onSuccess();
+    } catch { setError("Lỗi kết nối"); }
+    finally { setSaving(false); }
+  }
+
+  const inputCls = "w-full rounded-lg px-3 py-2 text-[13px] border";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const diff = odoStart !== "" && odoEnd !== "" ? parseInt(odoEnd, 10) - parseInt(odoStart, 10) : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="rounded-2xl w-full max-w-sm mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[16px] font-bold">Xác nhận hoàn thành chuyến</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-4 rounded-lg px-3 py-2 space-y-0.5" style={{ background: "var(--ibs-bg)", color: "var(--ibs-text-dim)" }}>
+          <div><b style={{ color: "var(--ibs-text)" }}>{trip.vehicle.licensePlate}</b> · {trip.destination}</div>
+          <div>{formatDate(trip.startDate)} · {trip.vehicle.model}</div>
+          <div>Số km hiện tại của xe: <b style={{ color: "var(--ibs-text)" }}>{trip.vehicle.currentMileage.toLocaleString("vi-VN")} km</b></div>
+        </div>
+        <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Số odo lúc đi (km) *</label>
+        <input type="number" inputMode="numeric" value={odoStart} onChange={(e) => setOdoStart(e.target.value)} placeholder="VD: 125000" className={inputCls} style={inputStyle} />
+        <label className="text-[12px] font-medium mb-1 mt-3 block" style={{ color: "var(--ibs-text-dim)" }}>Số odo lúc về (km) *</label>
+        <input type="number" inputMode="numeric" value={odoEnd} onChange={(e) => setOdoEnd(e.target.value)} placeholder="VD: 125042" className={inputCls} style={inputStyle} />
+        {diff != null && diff > 0 && (
+          <div className="text-[12px] mt-2" style={{ color: "var(--ibs-text-dim)" }}>Quãng đường: <b style={{ color: "var(--ibs-accent)" }}>{diff.toLocaleString("vi-VN")} km</b></div>
+        )}
+        {error && <div className="text-[12px] text-red-500 mt-2">{error}</div>}
+        <div className="flex gap-2 justify-end mt-5">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button type="button" onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold flex items-center gap-1 text-white" style={{ background: "var(--ibs-success)", opacity: saving ? 0.6 : 1 }}>
+            <Check size={14} /> {saving ? "Đang lưu..." : "Xác nhận hoàn thành"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ExportVehicleBookingsModal({ onClose }: { onClose: () => void }) {
   const [vehicles, setVehicles] = useState<{ id: string; licensePlate: string; model: string }[]>([]);
   const today = new Date().toISOString().slice(0, 10);
@@ -1166,6 +1324,10 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
     // Gắn +07:00 để server LƯU đúng giờ VN bất kể múi giờ server/máy đặt (không lệch giữa các máy).
     const startDate = `${form.startDatePart}T${form.startTimePart}:00+07:00`;
     const endDate = `${form.endDatePart}T${form.endTimePart}:00+07:00`;
+    // Ngày/giờ VỀ phải SAU ngày/giờ ĐI (chặn nhập ngược).
+    if (new Date(endDate).getTime() <= new Date(startDate).getTime()) {
+      setError("Ngày/giờ về phải sau ngày/giờ đi."); setSaving(false); return;
+    }
     // Phải đặt trước tối thiểu 30 phút, không đặt giờ trong quá khứ.
     if (new Date(startDate).getTime() < Date.now() + 30 * 60_000) {
       setError("Phải đặt trước ít nhất 30 phút (không đặt giờ trong quá khứ)."); setSaving(false); return;

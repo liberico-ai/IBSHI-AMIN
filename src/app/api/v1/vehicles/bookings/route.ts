@@ -87,6 +87,11 @@ export async function POST(request: NextRequest) {
   const startDate = new Date(parsed.data.startDate);
   const endDate = new Date(parsed.data.endDate);
 
+  // Ngày/giờ VỀ phải SAU ngày/giờ ĐI (chặn nhập ngược, vd đi 30/07 mà về 30/06).
+  if (endDate.getTime() <= startDate.getTime()) {
+    return NextResponse.json({ error: { code: "INVALID_RANGE", message: "Ngày/giờ về phải sau ngày/giờ đi." } }, { status: 400 });
+  }
+
   // Phải đặt trước tối thiểu 30 phút, không đặt giờ trong quá khứ.
   const minStart = new Date(Date.now() + 30 * 60_000);
   if (startDate.getTime() < minStart.getTime()) {
