@@ -16,6 +16,7 @@ type Department = { id: string; code: string; name: string };
 type MealReg = {
   id: string; departmentId: string; date: string;
   lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number; subcontractorName?: string | null; specialNote?: string | null;
+  guestUnitPrice: number;
   department: { id: string; name: string };
 };
 type SupplementaryReq = {
@@ -465,21 +466,34 @@ export default function NhaAnPage() {
             departmentId: string;
             departmentName: string;
             lunchCount: number; dinnerCount: number; guestCount: number;
+            guestByPrice: Map<number, number>; // đơn giá khách → số khách (tách 60k/20k...)
             notes: string[];
           };
           const aggMap = new Map<string, AggRow>();
+          const guestPriceTotals = new Map<number, number>(); // tổng số khách theo từng đơn giá
           for (const r of registrations) {
             let agg = aggMap.get(r.departmentId);
             if (!agg) {
-              agg = { departmentId: r.departmentId, departmentName: r.department.name, lunchCount: 0, dinnerCount: 0, guestCount: 0, notes: [] };
+              agg = { departmentId: r.departmentId, departmentName: r.department.name, lunchCount: 0, dinnerCount: 0, guestCount: 0, guestByPrice: new Map(), notes: [] };
               aggMap.set(r.departmentId, agg);
             }
             agg.lunchCount += r.lunchCount;
             agg.dinnerCount += r.dinnerCount;
             agg.guestCount += r.guestCount;
+            if (r.guestCount > 0) {
+              agg.guestByPrice.set(r.guestUnitPrice, (agg.guestByPrice.get(r.guestUnitPrice) || 0) + r.guestCount);
+              guestPriceTotals.set(r.guestUnitPrice, (guestPriceTotals.get(r.guestUnitPrice) || 0) + r.guestCount);
+            }
             if (r.specialNote) agg.notes.push(r.specialNote);
           }
           const aggRows = Array.from(aggMap.values()).sort((a, b) => a.departmentName.localeCompare(b.departmentName));
+          // Nhãn giá ngắn cho cột KHÁCH: 1 giá → "60k"; nhiều giá → "6×60k 5×20k".
+          const shortPrice = (m: Map<number, number>) => {
+            const e = Array.from(m.entries()).filter(([, c]) => c > 0).sort((a, b) => b[0] - a[0]);
+            if (e.length === 0) return "";
+            if (e.length === 1) return `${e[0][0] / 1000}k`;
+            return e.map(([p, c]) => `${c}×${p / 1000}k`).join(" ");
+          };
 
           // Gom suất ăn thầu phụ theo TỪNG nhà thầu (để diễn giải chi tiết bên dưới).
           const subAggMap = new Map<string, { id: string; name: string; companyName: string; lunch: number; dinner: number }>();
@@ -516,7 +530,9 @@ export default function NhaAnPage() {
                     <td className="px-5 py-2.5 font-medium">{r.departmentName}</td>
                     <td className="px-4 py-2.5 text-right" style={{ color: "var(--ibs-accent)" }}>{r.lunchCount}</td>
                     <td className="px-4 py-2.5 text-right" style={{ color: "#8b5cf6" }}>{r.dinnerCount}</td>
-                    <td className="px-4 py-2.5 text-right" style={{ color: "var(--ibs-warning)" }}>{r.guestCount}</td>
+                    <td className="px-4 py-2.5 text-right" style={{ color: "var(--ibs-warning)" }}>
+                      {r.guestCount > 0 ? (<>{r.guestCount}<span className="text-[10px]" style={{ color: "var(--ibs-text-dim)" }}> ({shortPrice(r.guestByPrice)})</span></>) : 0}
+                    </td>
                     <td className="px-4 py-2.5 text-right font-semibold">{r.lunchCount + r.dinnerCount + r.guestCount}</td>
                     {isHRAdmin && !isRange && (
                       <td className="px-5 py-2.5 text-right">
@@ -550,6 +566,17 @@ export default function NhaAnPage() {
               </tbody>
             </table>
             </div>
+            {guestPriceTotals.size > 0 && (
+              <div className="px-5 py-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+                <div className="text-[11px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>CHI TIẾT KHÁCH (THEO ĐƠN GIÁ)</div>
+                {Array.from(guestPriceTotals.entries()).sort((a, b) => b[0] - a[0]).map(([p, c]) => (
+                  <div key={p} className="text-[12px] mb-1 flex items-center justify-between gap-3">
+                    <span className="font-medium" style={{ color: "var(--ibs-warning)" }}>{c} khách × {p.toLocaleString("vi-VN")}đ/suất</span>
+                    <span className="font-semibold whitespace-nowrap">{(c * p).toLocaleString("vi-VN")}đ</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {subAggRows.length > 0 && (
               <div className="px-5 py-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
                 <div className="text-[11px] font-semibold mb-2" style={{ color: "var(--ibs-text-dim)" }}>CHI TIẾT THẦU PHỤ</div>
