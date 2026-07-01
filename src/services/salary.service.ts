@@ -73,9 +73,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
       id: { in: employeeIdsWithAttendance },
     },
     include: {
-      // Lấy TẤT CẢ HĐ chưa chấm dứt (mới nhất trước) → chọn HĐ áp dụng cho kỳ ở pickContract() (có fallback).
+      // Lấy TẤT CẢ HĐ ĐÃ CÓ HIỆU LỰC (mới nhất trước) → chọn HĐ áp dụng cho kỳ ở pickContract() (có fallback).
+      // Loại HĐ chấm dứt/từ chối/chờ duyệt + WAITING_SIGN (đợi ký — CHƯA hiệu lực, vẫn dùng HĐ cũ tính lương).
       contracts: {
-        where: { status: { notIn: ["TERMINATED", "REJECTED", "PENDING_APPROVAL"] } },
+        where: { status: { notIn: ["TERMINATED", "REJECTED", "PENDING_APPROVAL", "WAITING_SIGN"] } },
         orderBy: { startDate: "desc" },
       },
       user: { select: { role: true } },

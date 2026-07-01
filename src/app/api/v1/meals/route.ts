@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
-import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR } from "@/lib/constants";
+import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR, guestMealCost } from "@/lib/constants";
 import { computeFifo } from "@/lib/food-inventory";
 import { isAfterMealCutoff } from "@/services/meal.service";
 
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const [regs, supps, allPurchases, visitorMeals, subMeals, allIssues] = await Promise.all([
       prisma.mealRegistration.findMany({
         where: { date: { gte: startOfMonth, lte: endOfMonth }, department: { isActive: true } },
-        select: { date: true, lunchCount: true, dinnerCount: true, guestCount: true, subcontractorCount: true, guestUnitPrice: true },
+        select: { date: true, lunchCount: true, dinnerCount: true, guestCount: true, subcontractorCount: true, guestUnitPrice: true, guestByPrice: true },
       }),
       prisma.mealSupplementaryRequest.findMany({
         where: { status: "APPROVED", date: { gte: startOfMonth, lte: endOfMonth } },
@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
       row.subcontractorCount += r.subcontractorCount;
       row.mealCost += (r.lunchCount + r.dinnerCount) * MEAL_PRICE_EMPLOYEE
                    + r.subcontractorCount * MEAL_PRICE_SUBCONTRACTOR
-                   + r.guestCount * (r.guestUnitPrice || MEAL_UNIT_PRICE);
+                   + guestMealCost(r);
     }
     for (const s of supps) {
       const row = ensure(keyOf(s.date));
@@ -148,7 +148,7 @@ export async function GET(request: NextRequest) {
       d.subcontractorCount += r.subcontractorCount;
       d.cost += (r.lunchCount + r.dinnerCount) * MEAL_PRICE_EMPLOYEE
               + r.subcontractorCount * MEAL_PRICE_SUBCONTRACTOR
-              + r.guestCount * (r.guestUnitPrice || MEAL_UNIT_PRICE);
+              + guestMealCost(r);
     }
 
     // Cộng thêm các phiếu ĐĂNG KÝ BỔ SUNG đã được duyệt (APPROVED) trong tháng.
@@ -215,9 +215,9 @@ export async function GET(request: NextRequest) {
       }),
     ]);
     const guestMeals = guestMealResult._sum.mealCount ?? 0;
-    const guestMealCost = guestMeals * MEAL_UNIT_PRICE;
+    const visitorMealCost = guestMeals * MEAL_UNIT_PRICE;
 
-    const grandTotal = data.reduce((s, d) => s + d.totalCost, 0) + guestMealCost;
+    const grandTotal = data.reduce((s, d) => s + d.totalCost, 0) + visitorMealCost;
     const avgFeedbackRating = feedbackAgg._avg.rating ?? null;
     const feedbackCount = feedbackAgg._count.id;
 
@@ -229,7 +229,7 @@ export async function GET(request: NextRequest) {
         month,
         year,
         guestMeals,
-        guestMealCost,
+        guestMealCost: visitorMealCost,
         feedback: { avgRating: avgFeedbackRating ? Math.round(avgFeedbackRating * 10) / 10 : null, count: feedbackCount },
       },
     });
@@ -295,20 +295,34 @@ export async function POST(request: NextRequest) {
 
   const registeredBy = userId;
 
-  // Mỗi lần đăng ký là MỘT đối tượng (trưa / tối OT / khách / thầu phụ) → CỘNG DỒN
-  // vào phiếu của phòng ban trong ngày, KHÔNG ghi đè. Nếu ghi đè thì đăng ký khách
-  // (guest) sẽ xoá mất suất CBNV (lunch) đã đăng ký trước đó.
-  // Các trường phụ (đơn giá khách, tên thầu phụ, ghi chú) chỉ cập nhật khi liên quan
-  // đến lần đăng ký này, để không xoá thông tin đã có của đối tượng khác.
+  // Mỗi lần đăng ký là MỘT đối tượng (trưa / tối OT / khách / thầu phụ) → CỘNG DỒN vào phiếu của
+  // phòng ban trong ngày, KHÔNG ghi đè. KHÁCH: cộng dồn theo TỪNG ĐƠN GIÁ vào guestByPrice
+  // (vd 5 khách 20k rồi 6 khách 60k → {"20000":5,"60000":6}), KHÔNG để đơn giá sau đè đơn giá trước.
+  const existing = await prisma.mealRegistration.findUnique({
+    where: { departmentId_date: { departmentId, date: new Date(date) } },
+    select: { guestByPrice: true, guestCount: true, guestUnitPrice: true },
+  });
+  const gbp: Record<string, number> = {};
+  if (existing?.guestByPrice && typeof existing.guestByPrice === "object" && Object.keys(existing.guestByPrice as object).length > 0) {
+    Object.assign(gbp, existing.guestByPrice as Record<string, number>);
+  } else if (existing && (existing.guestCount || 0) > 0 && existing.guestUnitPrice > 0) {
+    gbp[String(existing.guestUnitPrice)] = existing.guestCount; // bản ghi CŨ chưa tách giá → khởi tạo tier
+  }
+  if (guestCount > 0 && guestUnitPrice > 0) {
+    gbp[String(guestUnitPrice)] = (gbp[String(guestUnitPrice)] || 0) + guestCount;
+  }
+  const totalGuest = Object.values(gbp).reduce((s, c) => s + Number(c), 0);
+  const hasGuests = Object.keys(gbp).length > 0;
+
   const reg = await prisma.mealRegistration.upsert({
     where: { departmentId_date: { departmentId, date: new Date(date) } },
-    create: { departmentId, date: new Date(date), lunchCount, dinnerCount, guestCount, subcontractorCount, subcontractorName: subcontractorName || null, guestUnitPrice, specialNote, registeredBy },
+    create: { departmentId, date: new Date(date), lunchCount, dinnerCount, guestCount: totalGuest, subcontractorCount, subcontractorName: subcontractorName || null, guestUnitPrice, guestByPrice: hasGuests ? gbp : undefined, specialNote, registeredBy },
     update: {
       lunchCount: { increment: lunchCount },
       dinnerCount: { increment: dinnerCount },
-      guestCount: { increment: guestCount },
       subcontractorCount: { increment: subcontractorCount },
-      ...(guestCount > 0 && guestUnitPrice ? { guestUnitPrice } : {}),
+      // Chỉ đụng vào khách khi lần đăng ký này CÓ khách → set lại theo guestByPrice đã gộp.
+      ...(guestCount > 0 ? { guestCount: totalGuest, guestByPrice: gbp, ...(guestUnitPrice ? { guestUnitPrice } : {}) } : {}),
       ...(subcontractorCount > 0 && subcontractorName ? { subcontractorName } : {}),
       ...(specialNote ? { specialNote } : {}),
     },

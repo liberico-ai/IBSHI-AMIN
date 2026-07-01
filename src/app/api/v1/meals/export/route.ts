@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR } from "@/lib/constants";
+import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR, guestMealCost } from "@/lib/constants";
 import { computeFifo } from "@/lib/food-inventory";
 
 // Xuất dữ liệu module Nhà ăn theo khoảng ngày. Trả {title, columns, rows} để client dựng Excel.
@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
   // ── Chi phí ăn theo ngày (suất ăn vs thực phẩm thực xuất) ───────────────────
   if (type === "cost") {
     const [regs, supps, subMeals, visitorMeals, allPurchases, allIssues] = await Promise.all([
-      prisma.mealRegistration.findMany({ where: { date: { gte: from, lte: to }, department: { isActive: true } }, select: { date: true, lunchCount: true, dinnerCount: true, guestCount: true, guestUnitPrice: true } }),
+      prisma.mealRegistration.findMany({ where: { date: { gte: from, lte: to }, department: { isActive: true } }, select: { date: true, lunchCount: true, dinnerCount: true, guestCount: true, guestUnitPrice: true, guestByPrice: true } }),
       prisma.mealSupplementaryRequest.findMany({ where: { status: "APPROVED", date: { gte: from, lte: to } }, select: { date: true, mealType: true, personType: true, quantity: true, guestUnitPrice: true } }),
       prisma.subcontractorMeal.findMany({ where: { date: { gte: from, lte: to } }, select: { date: true, lunchCount: true, dinnerCount: true } }),
       prisma.visitorRequest.findMany({ where: { needsMeal: true, checkedInAt: { gte: from, lte: to } }, select: { checkedInAt: true, mealCount: true } }),
@@ -149,7 +149,7 @@ export async function GET(request: NextRequest) {
     type Row = { date: string; lunch: number; dinner: number; guest: number; sub: number; totalMeals: number; mealCost: number; foodCost: number; diff: number };
     const byDay = new Map<string, Row>();
     const ens = (d: Date | string): Row => { const k = vnDate(d); let r = byDay.get(k); if (!r) { r = { date: k, lunch: 0, dinner: 0, guest: 0, sub: 0, totalMeals: 0, mealCost: 0, foodCost: 0, diff: 0 }; byDay.set(k, r); } return r; };
-    for (const r of regs) { const row = ens(r.date); row.lunch += r.lunchCount; row.dinner += r.dinnerCount; row.guest += r.guestCount; row.mealCost += (r.lunchCount + r.dinnerCount) * MEAL_PRICE_EMPLOYEE + r.guestCount * (r.guestUnitPrice || MEAL_UNIT_PRICE); }
+    for (const r of regs) { const row = ens(r.date); row.lunch += r.lunchCount; row.dinner += r.dinnerCount; row.guest += r.guestCount; row.mealCost += (r.lunchCount + r.dinnerCount) * MEAL_PRICE_EMPLOYEE + guestMealCost(r); }
     for (const s of supps) { const row = ens(s.date); if (s.personType === "GUEST") { row.guest += s.quantity; row.mealCost += s.quantity * (s.guestUnitPrice || MEAL_UNIT_PRICE); } else if (s.personType === "SUBCONTRACTOR") { row.sub += s.quantity; row.mealCost += s.quantity * MEAL_PRICE_SUBCONTRACTOR; } else { if (s.mealType === "DINNER") row.dinner += s.quantity; else row.lunch += s.quantity; row.mealCost += s.quantity * MEAL_PRICE_EMPLOYEE; } }
     for (const m of subMeals) { const row = ens(m.date); row.sub += m.lunchCount + m.dinnerCount; row.mealCost += (m.lunchCount + m.dinnerCount) * MEAL_PRICE_SUBCONTRACTOR; }
     for (const v of visitorMeals) { if (!v.checkedInAt) continue; const row = ens(v.checkedInAt); row.guest += v.mealCount; row.mealCost += v.mealCount * MEAL_UNIT_PRICE; }

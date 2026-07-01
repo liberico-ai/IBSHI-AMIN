@@ -59,6 +59,17 @@ export const MEAL_PRICE_EMPLOYEE = 20000;      // Cán bộ nhân viên
 export const MEAL_PRICE_SUBCONTRACTOR = 20000; // Thầu phụ
 // Khách: nhập tay đơn giá khi đăng ký (guestUnitPrice trên từng phiếu)
 
+// Chi phí suất ăn KHÁCH của 1 bản ghi đăng ký thường (MealRegistration).
+// Ưu tiên guestByPrice (khách theo TỪNG đơn giá: {"20000":5,"60000":6}); nếu chưa có (bản ghi
+// cũ) → fallback guestCount × guestUnitPrice.
+export function guestMealCost(r: { guestCount: number; guestUnitPrice: number; guestByPrice?: unknown }): number {
+  const gbp = r.guestByPrice as Record<string, number> | null | undefined;
+  if (gbp && typeof gbp === "object" && Object.keys(gbp).length > 0) {
+    return Object.entries(gbp).reduce((s, [price, count]) => s + Number(price) * Number(count), 0);
+  }
+  return (r.guestCount || 0) * (r.guestUnitPrice || MEAL_UNIT_PRICE);
+}
+
 // Chốt giờ đăng ký suất ăn (giờ VN). Thường: trước 9h. Bổ sung: trước 10h30 —
 // sau mốc này (và các ngày đã qua) chỉ P. HCNS (HR_ADMIN/BOM) được thêm/sửa.
 export const MEAL_CUTOFF_HOUR = 9;

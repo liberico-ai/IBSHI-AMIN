@@ -67,6 +67,7 @@ enum ContractStatus {
   RENEWED
   PENDING_APPROVAL
   REJECTED
+  WAITING_SIGN
 }
 
 enum CertificateStatus {
@@ -1121,9 +1122,12 @@ model VehicleBooking {
   approvedBy     String?
   approvedAt     DateTime?
   rejectedReason String?
-  actualKm       Int?          // Số km thực tế sau chuyến đi
+  actualKm       Int?          // Số km thực tế sau chuyến đi (= odoEnd - odoStart)
   returnTime     String?       // Giờ về thực tế "17:30"
   driverName     String?       // Lái xe được người duyệt CHỈ ĐỊNH khi duyệt phiếu
+  odoStart       Int?          // Số odo (đồng hồ km) lúc đi — lái xe nhập khi xác nhận hoàn thành
+  odoEnd         Int?          // Số odo lúc về — lái xe nhập khi xác nhận hoàn thành
+  completedAt    DateTime?     // Thời điểm lái xe xác nhận hoàn thành chuyến
   priority       String        @default("NORMAL") // NONE | NORMAL | PRIORITY (Không / Bình thường / Ưu tiên)
   notes          String?
   seriesId       String?       // Nếu là phần của series lặp lại — chung seriesId
@@ -1148,6 +1152,7 @@ model MealRegistration {
   subcontractorCount Int  @default(0)
   subcontractorName String?
   guestUnitPrice Int      @default(0)
+  guestByPrice   Json?    // Khách theo TỪNG đơn giá trong 1 phòng/ngày: { "20000": 5, "60000": 6 }
   specialNote  String?
   registeredBy String
   createdAt    DateTime  @default(now())

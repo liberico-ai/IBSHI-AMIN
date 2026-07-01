@@ -15,7 +15,7 @@ const STATUS_LABEL_MAP: Record<string, string> = {
   ACTIVE: "Đang làm", PROBATION: "Thử việc", ON_LEAVE: "Tạm nghỉ",
   RESIGNED: "Đã nghỉ", TERMINATED: "Sa thải",
   // Contract
-  EXPIRING_SOON: "Sắp hết hạn", EXPIRED: "Hết hạn", RENEWED: "Đã gia hạn",
+  EXPIRING_SOON: "Sắp hết hạn", EXPIRED: "Hết hạn", RENEWED: "Đã gia hạn", WAITING_SIGN: "Đợi ký",
   INDEFINITE: "Không thời hạn", DEFINITE_12M: "12 tháng",
   DEFINITE_24M: "24 tháng", DEFINITE_36M: "36 tháng", PROBATION_CONTRACT: "Thử việc",
   // Certificate
@@ -32,7 +32,7 @@ const STATUS_VARIANT_MAP: Record<string, BadgeVariant> = {
   ACTIVE: "green", VALID: "green", PRESENT: "green", APPROVED: "green",
   COMPLETED: "green", RESOLVED: "green", CLOSED: "green",
   PROBATION: "yellow", EXPIRING_SOON: "yellow", PENDING: "yellow",
-  IN_PROGRESS: "yellow", LATE: "yellow", HALF_DAY: "yellow",
+  IN_PROGRESS: "yellow", LATE: "yellow", HALF_DAY: "yellow", WAITING_SIGN: "yellow",
   RESIGNED: "red", TERMINATED: "red", EXPIRED: "red", REJECTED: "red",
   ABSENT_UNAPPROVED: "red", OVERDUE: "red", REVOKED: "red",
   DRAFT: "blue", ON_LEAVE: "blue", BUSINESS_TRIP: "blue", NEW: "blue",
