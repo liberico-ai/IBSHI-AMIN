@@ -1016,6 +1016,42 @@ export default function LuongPage() {
     fetchPeriods();
   }, [fetchPeriods]);
 
+  // Export bảng BHXH (giống mẫu HCNS): danh sách NV đóng BHXH + NLĐ 10.5% / Cty 21.5% / Tổng 32%.
+  async function exportBhxh(row: PayrollPeriod) {
+    try {
+      const res = await fetch(`/api/v1/payroll/${row.id}/bhxh-report`);
+      const json = await res.json();
+      if (!res.ok) { alert(apiError(res.status, json?.error)); return; }
+      const rows: any[] = json.data || [];
+      if (rows.length === 0) { alert("Kỳ này chưa có NV nào đóng BHXH (hoặc chưa tính lương)."); return; }
+      const { default: ExcelJS } = await import("exceljs");
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet(`BHXH T${row.month}`);
+      const headers = ["STT", "Mã NV", "Họ và tên", "Mã số BHXH", "Bộ phận", "Phân loại", "Mức cũ", "Mức mới", "Mức hiện tại", "BHXH 8%", "BHYT 1.5%", "BHTN 1%", "Cộng NLĐ (10.5%)", "BHXH 17.5%", "BHYT 3%", "BHTN 1%", "Cộng Cty (21.5%)", "Tổng (32%)"];
+      ws.mergeCells(1, 1, 1, headers.length);
+      ws.getCell(1, 1).value = `DANH SÁCH LAO ĐỘNG ĐÓNG BHXH THÁNG ${row.month}/${row.year}`;
+      ws.getCell(1, 1).font = { bold: true, size: 13 };
+      ws.getCell(1, 1).alignment = { horizontal: "center" };
+      ws.addRow([]);
+      const hRow = ws.addRow(headers);
+      hRow.font = { bold: true };
+      hRow.alignment = { horizontal: "center", wrapText: true };
+      const sums: Record<string, number> = { mucHienTai: 0, bhxh8: 0, bhyt15: 0, bhtn1: 0, congNLD: 0, empSocial: 0, empHealth: 0, empUnemp: 0, congCty: 0, tong: 0 };
+      rows.forEach((r, i) => {
+        ws.addRow([i + 1, r.code, r.fullName, r.insuranceNumber, r.department, r.phanLoai, r.mucCu ?? "", r.mucMoi ?? "", r.mucHienTai, r.bhxh8, r.bhyt15, r.bhtn1, r.congNLD, r.empSocial, r.empHealth, r.empUnemp, r.congCty, r.tong]);
+        for (const k in sums) sums[k] += r[k] || 0;
+      });
+      const totalRow = ws.addRow(["", "", "TỔNG CỘNG", "", "", "", "", "", sums.mucHienTai, sums.bhxh8, sums.bhyt15, sums.bhtn1, sums.congNLD, sums.empSocial, sums.empHealth, sums.empUnemp, sums.congCty, sums.tong]);
+      totalRow.font = { bold: true };
+      ws.columns.forEach((c, i) => { c.width = i === 2 ? 24 : i === 3 ? 16 : i === 4 ? 18 : i < 6 ? 12 : 13; });
+      ws.eachRow((r, n) => { if (n >= 4) for (let c = 7; c <= 18; c++) r.getCell(c).numFmt = "#,##0"; });
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `BHXH-T${row.month}-${row.year}.xlsx`; a.click(); URL.revokeObjectURL(url);
+    } catch { alert("Lỗi export BHXH"); }
+  }
+
   async function handleCalculate(id: string) {
     setCalculatingId(id);
     const res = await fetch(`/api/v1/payroll/${id}`, {
@@ -1305,7 +1341,7 @@ export default function LuongPage() {
                   {item(`⬇ ${row.pieceRateImported ? "Import lại khoán (tổ)" : "Import khoán (tổ)"}`, () => setImportPeriod(row), "#818cf8")}
                   {item("⬇ Import bổ sung lương", () => setImportAdjPeriod(row), "var(--ibs-warning)")}
                   {item("⬇ Import bổ sung tiền ăn", () => setImportMealPeriod(row), "#f59e0b")}
-                  {item("⬇ Import file BHXH", () => setImportBhxhPeriod(row), "#22c55e")}
+                  {item("⬆ Export BHXH", () => exportBhxh(row), "#22c55e")}
                 </>
               )}
               {isBOM && row.status === "PROCESSING" && item("✓ Duyệt kỳ lương", () => handleApprove(row.id), "var(--ibs-success)")}

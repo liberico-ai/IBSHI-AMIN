@@ -48,10 +48,32 @@ export const INSURANCE_RATES = {
   SOCIAL: 0.08,       // BHXH 8%
   HEALTH: 0.015,      // BHYT 1.5%
   UNEMPLOYMENT: 0.01, // BHTN 1%
+  // Phần CÔNG TY đóng (tổng 21.5%) — chi tiết
+  EMPLOYER_SOCIAL: 0.175,      // BHXH 17.5% (17% hưu trí + 0.5% TNLĐ-BNN)
+  EMPLOYER_HEALTH: 0.03,       // BHYT 3%
+  EMPLOYER_UNEMPLOYMENT: 0.01, // BHTN 1%
   // Tổng hợp theo spec IBSHI
   EMPLOYEE_TOTAL: 0.105, // BHXH NLĐ tổng = 10.5% × Lương chính
   EMPLOYER_TOTAL: 0.215, // BHXH cty đóng = 21.5% × Lương chính
 } as const;
+
+// Trần đóng BHXH = 36 triệu (Lương đóng BHXH tối đa).
+export const BHXH_SALARY_CAP = 36000000;
+
+// Tự tính BHXH theo LƯƠNG ĐÓNG BHXH (áp trần 36tr). Trả breakdown NLĐ + Cty + tổng.
+export function computeBhxh(insuranceSalary: number) {
+  const base = Math.min(Math.max(0, insuranceSalary || 0), BHXH_SALARY_CAP);
+  const r = INSURANCE_RATES;
+  const bhxh8 = Math.round(base * r.SOCIAL);
+  const bhyt15 = Math.round(base * r.HEALTH);
+  const bhtn1 = Math.round(base * r.UNEMPLOYMENT);
+  const empSocial = Math.round(base * r.EMPLOYER_SOCIAL);
+  const empHealth = Math.round(base * r.EMPLOYER_HEALTH);
+  const empUnemp = Math.round(base * r.EMPLOYER_UNEMPLOYMENT);
+  const employee = bhxh8 + bhyt15 + bhtn1;          // 10.5%
+  const employer = empSocial + empHealth + empUnemp; // 21.5%
+  return { base, bhxh8, bhyt15, bhtn1, employee, empSocial, empHealth, empUnemp, employer, total: employee + employer };
+}
 
 export const MEAL_UNIT_PRICE = 35000; // VND/suất (mặc định cũ, dùng fallback)
 // Đơn giá suất ăn theo đối tượng
