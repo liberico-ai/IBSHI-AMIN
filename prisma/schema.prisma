@@ -1152,6 +1152,7 @@ model MealRegistration {
   subcontractorCount Int  @default(0)
   subcontractorName String?
   guestUnitPrice Int      @default(0)
+  guestByPrice   Json?    // Khách theo TỪNG đơn giá trong 1 phòng/ngày: { "20000": 5, "60000": 6 }
   specialNote  String?
   registeredBy String
   createdAt    DateTime  @default(now())

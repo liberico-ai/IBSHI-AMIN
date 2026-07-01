@@ -17,6 +17,7 @@ type MealReg = {
   id: string; departmentId: string; date: string;
   lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number; subcontractorName?: string | null; specialNote?: string | null;
   guestUnitPrice: number;
+  guestByPrice?: Record<string, number> | null; // khách theo từng đơn giá
   department: { id: string; name: string };
 };
 type SupplementaryReq = {
@@ -479,7 +480,14 @@ export default function NhaAnPage() {
             agg.lunchCount += r.lunchCount;
             agg.dinnerCount += r.dinnerCount;
             agg.guestCount += r.guestCount;
-            if (r.guestCount > 0) guestPriceTotals.set(r.guestUnitPrice, (guestPriceTotals.get(r.guestUnitPrice) || 0) + r.guestCount);
+            if (r.guestCount > 0) {
+              const gbp = r.guestByPrice;
+              if (gbp && typeof gbp === "object" && Object.keys(gbp).length > 0) {
+                for (const [price, count] of Object.entries(gbp)) guestPriceTotals.set(Number(price), (guestPriceTotals.get(Number(price)) || 0) + Number(count));
+              } else {
+                guestPriceTotals.set(r.guestUnitPrice, (guestPriceTotals.get(r.guestUnitPrice) || 0) + r.guestCount);
+              }
+            }
             if (r.specialNote) agg.notes.push(r.specialNote);
           }
           const aggRows = Array.from(aggMap.values()).sort((a, b) => a.departmentName.localeCompare(b.departmentName));
