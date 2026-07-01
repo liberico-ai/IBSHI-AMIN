@@ -2,6 +2,7 @@ import prisma from "@/lib/prisma";
 import { calculateSalary, type SalaryInput } from "@/lib/salary-calc";
 import { leaveCodeBase, leaveQty, COMPANY_PAID_LEAVE, BHXH_LEAVE } from "@/lib/attendance-codes";
 import { standardWorkDays, isHoliday, isCompensatoryHoliday } from "@/lib/holidays";
+import { computeBhxh } from "@/lib/constants";
 
 // ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
 
@@ -109,12 +110,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
   const manualMap: Record<string, { pieceRate: number; adjustment: number; mealBonus: number; note: string | null }> = {};
   for (const m of manualInputs) manualMap[m.employeeId] = { pieceRate: m.pieceRate, adjustment: m.adjustment, mealBonus: m.mealBonus, note: m.note };
 
-  // BHXH HCNS tính NGOÀI rồi import (hệ thống KHÔNG tự tính). NLĐ = 8%+1.5%+1% (khoản trừ); employer = 21.5% (báo cáo).
-  const bhxhInputs = await prisma.payrollBhxhInput.findMany({ where: { month: period.month, year: period.year } });
-  const bhxhMap: Record<string, { bhxh8: number; bhyt15: number; bhtn1: number; employer: number; employee: number }> = {};
-  for (const b of bhxhInputs) {
-    bhxhMap[b.employeeId] = { bhxh8: b.bhxh8, bhyt15: b.bhyt15, bhtn1: b.bhtn1, employer: b.bhxhEmployer, employee: b.bhxh8 + b.bhyt15 + b.bhtn1 };
-  }
+  // BHXH: hệ thống TỰ TÍNH theo Lương đóng BHXH (chốt 2026-07-01) — KHÔNG còn import.
+  // Xem computeBhxh + điều kiện đóng (chính thức + ngày không lương ≤ 13) trong vòng tính từng NV.
 
   // M3: OT đã được duyệt
   const otData = await prisma.oTRequest.findMany({
@@ -418,6 +415,15 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const bonusPaid = respAllow + farPaid;          // thực trả → cộng vào Gross
     const bonusFull = respAllow + farAllow;         // đầy đủ → trừ khỏi đơn giá ngày
 
+    // ── BHXH TỰ TÍNH (chốt 2026-07-01, thay import) ──
+    //   Đóng ĐỦ THÁNG khi: NV CHÍNH THỨC (HĐ ≠ Thử việc) VÀ số NGÀY KHÔNG LƯƠNG ≤ 13.
+    //   Ngày không lương = CC − (công + phép/lễ) → tự gồm KL + ngày trước khi vào + sau khi nghỉ việc.
+    const bhxhUnpaid = Math.max(0, Math.round(CC - (totalCong + leaveDays)));
+    const payBhxh = !isProbation && bhxhUnpaid <= 13;
+    const bh = payBhxh
+      ? computeBhxh(insuranceSalary)
+      : { base: 0, bhxh8: 0, bhyt15: 0, bhtn1: 0, employee: 0, empSocial: 0, empHealth: 0, empUnemp: 0, employer: 0, total: 0 };
+
     const input: SalaryInput = {
       totalIncome,
       insuranceSalary,
@@ -442,16 +448,16 @@ export async function calculatePayrollForPeriod(periodId: string) {
       adjustment: manualMap[emp.id]?.adjustment || 0,
       mealOT: (mealOTMap[emp.id] || 0) + (manualMap[emp.id]?.mealBonus || 0), // tiền ăn tăng giờ: tự tính + bổ sung import (chịu thuế)
       priorOtHours: priorOtMap[emp.id] || 0, // OT cộng dồn từ đầu năm → cap 200h miễn thuế
-      importedBhxhEmployee: bhxhMap[emp.id]?.employee || 0, // BHXH NLĐ import (khoản trừ)
-      importedBhxhEmployer: bhxhMap[emp.id]?.employer || 0, // BHXH công ty 21.5% import (báo cáo)
+      importedBhxhEmployee: bh.employee, // BHXH NLĐ 10.5% (tự tính) — khoản trừ
+      importedBhxhEmployer: bh.employer, // BHXH công ty 21.5% (tự tính) — báo cáo chi phí
     };
 
     const out = calculateSalary(input);
 
-    // Map → PayrollRecord. BHXH NLĐ tách 8% / 1.5% / 1% — LẤY TỪ FILE IMPORT (không tự tính).
-    const bhxh8 = bhxhMap[emp.id]?.bhxh8 || 0;
-    const bhyt15 = bhxhMap[emp.id]?.bhyt15 || 0;
-    const bhtn1 = bhxhMap[emp.id]?.bhtn1 || 0;
+    // BHXH NLĐ tách 8% / 1.5% / 1% — TỰ TÍNH theo Lương đóng BHXH (0 nếu không thuộc diện đóng).
+    const bhxh8 = bh.bhxh8;
+    const bhyt15 = bh.bhyt15;
+    const bhtn1 = bh.bhtn1;
 
     // Snapshot chi tiết cho phiếu lương — khớp tuyệt đối với số đã tính kỳ này
     const detail = {

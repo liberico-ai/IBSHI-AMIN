@@ -46,8 +46,8 @@ export async function GET(request: NextRequest) {
       }),
     ]);
     const rows = [
-      ...regs.map((r) => ({ date: vnDate(r.date), target: r.department.name, lunch: r.lunchCount, dinner: r.dinnerCount, guest: r.guestCount, total: r.lunchCount + r.dinnerCount + r.guestCount })),
-      ...subMeals.map((m) => ({ date: vnDate(m.date), target: `Thầu phụ: ${m.subcontractor.name}`, lunch: m.lunchCount, dinner: m.dinnerCount, guest: 0, total: m.lunchCount + m.dinnerCount })),
+      ...regs.map((r) => ({ date: vnDate(r.date), target: r.department.name, lunch: r.lunchCount, dinner: r.dinnerCount, guest: r.guestCount, guestUnitPrice: r.guestUnitPrice, guestByPrice: r.guestByPrice as Record<string, number> | null, total: r.lunchCount + r.dinnerCount + r.guestCount })),
+      ...subMeals.map((m) => ({ date: vnDate(m.date), target: `Thầu phụ: ${m.subcontractor.name}`, lunch: m.lunchCount, dinner: m.dinnerCount, guest: 0, guestUnitPrice: 0, guestByPrice: null as Record<string, number> | null, total: m.lunchCount + m.dinnerCount })),
     ].sort((a, b) => a.date.localeCompare(b.date));
     return NextResponse.json({ data: {
       title: `${empOnly ? "ĐĂNG KÝ SUẤT ĂN NHÂN VIÊN (KHÔNG THẦU PHỤ)" : "ĐĂNG KÝ SUẤT ĂN"} — ${rangeLabel}`,

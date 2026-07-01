@@ -81,6 +81,7 @@ async function exportMealData(type: string, from: string, to: string, subId?: st
     const toSortKey = (d: string) => { const [dd, mm, yy] = d.split("/"); return `${yy}${mm}${dd}`; };
     const dates = Array.from(new Set(rows.map((r) => String(r.date)))).sort((a, b) => toSortKey(a).localeCompare(toSortKey(b)));
     let gEmp = 0, gGuest = 0, gSub = 0;
+    const guestPriceTotals = new Map<number, number>(); // tổng khách theo từng đơn giá
     for (const date of dates) {
       const drows = rows.filter((r) => String(r.date) === date);
       const sr = ws.addRow([`Ngày ${date}`]);
@@ -94,6 +95,15 @@ async function exportMealData(type: string, from: string, to: string, subId?: st
         dL += lunch; dD += dinner; dG += guest; dT += total;
         if (String(r.target ?? "").startsWith("Thầu phụ")) gSub += lunch + dinner; else gEmp += lunch + dinner;
         gGuest += guest;
+        if (guest > 0) {
+          const gbp = r.guestByPrice as Record<string, number> | null | undefined;
+          if (gbp && typeof gbp === "object" && Object.keys(gbp).length > 0) {
+            for (const [pr, ct] of Object.entries(gbp)) guestPriceTotals.set(Number(pr), (guestPriceTotals.get(Number(pr)) || 0) + Number(ct));
+          } else {
+            const up = Number(r.guestUnitPrice) || 0;
+            guestPriceTotals.set(up, (guestPriceTotals.get(up) || 0) + guest);
+          }
+        }
       }
       const subRow = ws.addRow([`Tổng ngày ${date}`, dL, dD, dG, dT]);
       subRow.font = { bold: true };
@@ -105,6 +115,15 @@ async function exportMealData(type: string, from: string, to: string, subId?: st
       const r = ws.addRow([lbl, val]); r.getCell(1).font = { bold: true };
     }
     const tr = ws.addRow(["TỔNG CỘNG", gEmp + gGuest + gSub]); tr.font = { bold: true };
+    // Chi tiết KHÁCH theo từng đơn giá (giống mục "CHI TIẾT KHÁCH" trên UI).
+    if (guestPriceTotals.size > 0) {
+      ws.addRow([]);
+      const ch = ws.addRow(["CHI TIẾT KHÁCH (THEO ĐƠN GIÁ)"]); ch.font = { bold: true, size: 12 };
+      for (const [price, count] of Array.from(guestPriceTotals.entries()).sort((a, b) => b[0] - a[0])) {
+        const r = ws.addRow([`${count} khách × ${price.toLocaleString("vi-VN")}đ`, count, "", "", count * price]);
+        r.getCell(1).font = { bold: true }; r.getCell(5).numFmt = "#,##0";
+      }
+    }
     COLS.forEach((c, i) => { ws.getColumn(i + 1).width = c.width; });
 
     const buf = await wb.xlsx.writeBuffer();
@@ -1956,12 +1975,13 @@ function FoodIssueModal({ inventory, defaultDate, onClose, onSuccess }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="rounded-2xl w-full max-w-2xl mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
-        <div className="flex items-center justify-between mb-4">
+      <div className="rounded-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between p-6 pb-3">
           <div className="text-[16px] font-bold">Thực xuất thực phẩm (bếp nấu)</div>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
 
+        <div className="px-6 overflow-y-auto flex-1 min-h-0">
         {inventory.length === 0 ? (
           <div className="text-[13px] rounded-lg px-3 py-3 mb-2" style={{ background: "rgba(234,179,8,0.1)", color: "var(--ibs-warning)" }}>
             Kho đang trống — cần "Thêm danh sách thực phẩm" (nhập kho) trước khi thực xuất.
@@ -1973,15 +1993,16 @@ function FoodIssueModal({ inventory, defaultDate, onClose, onSuccess }: {
               <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={ic + " max-w-[200px]"} style={is} />
             </div>
             <div className="flex flex-col gap-2 mb-2">
-              <div className="grid grid-cols-[1fr_140px_32px] gap-2 text-[11px] font-semibold px-1" style={{ color: "var(--ibs-text-dim)" }}>
-                <span>MÓN (TỒN KHO)</span><span>THỰC XUẤT</span><span />
+              <div className="grid grid-cols-[28px_1fr_140px_32px] gap-2 text-[11px] font-semibold px-1" style={{ color: "var(--ibs-text-dim)" }}>
+                <span>STT</span><span>Thực phẩm (Tồn kho)</span><span>THỰC XUẤT</span><span />
               </div>
               {rows.map((r, i) => {
                 const inv = findInv(r.key);
                 return (
-                  <div key={i} className="grid grid-cols-[1fr_140px_32px] gap-2 items-center">
+                  <div key={i} className="grid grid-cols-[28px_1fr_140px_32px] gap-2 items-center">
+                    <span className="text-[12px] text-center font-medium" style={{ color: "var(--ibs-text-dim)" }}>{i + 1}</span>
                     <select value={r.key} onChange={(e) => updateRow(i, "key", e.target.value)} className={ic} style={is}>
-                      <option value="">Chọn món...</option>
+                      <option value="">Chọn thực phẩm...</option>
                       {inventory.map((it) => (
                         <option key={invKey(it.name, it.unit)} value={invKey(it.name, it.unit)}>{it.name} (tồn {fmtNum(it.quantity)} {it.unit})</option>
                       ))}
@@ -1997,12 +2018,15 @@ function FoodIssueModal({ inventory, defaultDate, onClose, onSuccess }: {
           </>
         )}
 
-        {error && <div className="text-[12px] text-red-500 mb-2">{error}</div>}
-        <div className="flex gap-2 justify-end mt-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
-          <button type="button" onClick={submit} disabled={saving || inventory.length === 0} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: (saving || inventory.length === 0) ? 0.5 : 1 }}>
-            {saving ? "Đang lưu..." : "Lưu thực xuất"}
-          </button>
+        </div>
+        <div className="p-6 pt-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+          {error && <div className="text-[12px] text-red-500 mb-2">{error}</div>}
+          <div className="flex gap-2 justify-end">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+            <button type="button" onClick={submit} disabled={saving || inventory.length === 0} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: (saving || inventory.length === 0) ? 0.5 : 1 }}>
+              {saving ? "Đang lưu..." : "Lưu thực xuất"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
