@@ -221,6 +221,7 @@ export default function NhaAnPage() {
   type InventoryItem = { name: string; unit: string; quantity: number; value: number };
   type FoodIssueRow = { id: string; date: string; name: string; unit: string; quantity: number; cost: number };
   const [foodInventory, setFoodInventory] = useState<InventoryItem[]>([]);
+  const [foodEndInvValue, setFoodEndInvValue] = useState(0); // giá trị tồn kho tới cuối tháng đã chọn
   const [foodIssueCostTotal, setFoodIssueCostTotal] = useState(0);
   const [foodIssues, setFoodIssues] = useState<FoodIssueRow[]>([]);
   const [showIssueForm, setShowIssueForm] = useState(false);
@@ -243,6 +244,7 @@ export default function NhaAnPage() {
       .then(([buy, issue]) => {
         setFoodRows(buy.data || []); setFoodTotal(buy.meta?.total || 0); setFoodCanManage(!!buy.meta?.canManage);
         setFoodInventory(buy.meta?.inventory || []);
+        setFoodEndInvValue(buy.meta?.endOfMonthInventoryValue || 0);
         setFoodIssueCostTotal(issue.meta?.total || 0);
         setFoodIssues(issue.data || []);
       })
@@ -1071,21 +1073,32 @@ export default function NhaAnPage() {
             )}
           </div>
 
-          {/* 3 thẻ: tiền MUA · giá vốn THỰC XUẤT (FIFO) · giá trị TỒN KHO */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-              <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>TIỀN MUA THÁNG {foodMonth}/{foodYear}</div>
-              <div className="text-[22px] font-bold" style={{ color: "var(--ibs-accent)" }}>{fmtNum(foodTotal)}đ</div>
-            </div>
-            <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-              <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>THỰC XUẤT (FIFO) THÁNG {foodMonth}/{foodYear}</div>
-              <div className="text-[22px] font-bold" style={{ color: "#f59e0b" }}>{fmtNum(foodIssueCostTotal)}đ</div>
-            </div>
-            <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-              <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>GIÁ TRỊ TỒN KHO HIỆN TẠI</div>
-              <div className="text-[22px] font-bold" style={{ color: "#10b981" }}>{fmtNum(foodInventory.reduce((s, r) => s + r.value, 0))}đ</div>
-            </div>
-          </div>
+          {/* Thẻ: tiền MUA · THỰC XUẤT (FIFO) · TỒN KHO HIỆN TẠI (+ TỒN CUỐI THÁNG khi xem tháng quá khứ) */}
+          {(() => {
+            const isPastMonth = foodYear * 12 + foodMonth < now.getFullYear() * 12 + (now.getMonth() + 1);
+            return (
+              <div className={`grid grid-cols-1 gap-4 mb-4 ${isPastMonth ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
+                <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                  <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>TIỀN MUA THÁNG {foodMonth}/{foodYear}</div>
+                  <div className="text-[22px] font-bold" style={{ color: "var(--ibs-accent)" }}>{fmtNum(foodTotal)}đ</div>
+                </div>
+                <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                  <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>THỰC XUẤT (FIFO) THÁNG {foodMonth}/{foodYear}</div>
+                  <div className="text-[22px] font-bold" style={{ color: "#f59e0b" }}>{fmtNum(foodIssueCostTotal)}đ</div>
+                </div>
+                <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                  <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>GIÁ TRỊ TỒN KHO HIỆN TẠI</div>
+                  <div className="text-[22px] font-bold" style={{ color: "#10b981" }}>{fmtNum(foodInventory.reduce((s, r) => s + r.value, 0))}đ</div>
+                </div>
+                {isPastMonth && (
+                  <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                    <div className="text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>GIÁ TRỊ TỒN KHO CUỐI THÁNG {foodMonth}/{foodYear}</div>
+                    <div className="text-[22px] font-bold" style={{ color: "#0ea5e9" }}>{fmtNum(foodEndInvValue)}đ</div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {foodLoading ? (
             <div className="rounded-xl border py-12 text-center text-[13px]" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Đang tải...</div>
