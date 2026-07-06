@@ -13,12 +13,13 @@ type Dept = {
   directorateId: string | null;
 };
 
-type Directorate = { id: string; name: string; nameVi: string };
+type Director = { code: string; fullName: string; jobRole: string | null; deptName: string | null };
+type Directorate = { id: string; name: string; nameVi: string; directors: Director[] };
 
 const DIR_COLORS: Record<string, string> = {
-  "Commercial Director": "#00B4D8",
-  COO: "#22c55e",
-  "Production Director": "#f59e0b",
+  "Khối Trực tiếp": "#f59e0b",
+  "Khối Gián tiếp": "#00B4D8",
+  "Khối Chuyển đổi và Quản trị": "#22c55e",
 };
 
 function ConnectorLine({ vertical = false }: { vertical?: boolean }) {
@@ -70,6 +71,7 @@ export function OrgChartTabs({
   const [activeTab, setActiveTab] = useState<"chart" | "headcount">("chart");
   const [selectedDept, setSelectedDept] = useState<Dept | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<{ id: string; name: string; memberCount: number; actual: number } | null>(null);
+  const [selectedDir, setSelectedDir] = useState<Directorate | null>(null);
 
   // Snapshot theo tháng
   const [period, setPeriod] = useState("");                 // "" = hiện tại (live)
@@ -125,10 +127,12 @@ export function OrgChartTabs({
     const sorted = [...departments].sort((a, b) => (a.directorateName || "").localeCompare(b.directorateName || "", "vi"));
     sorted.forEach((d) => ws.addRow([d.directorateName || "Ban Giám đốc", d.name, d.actual]));
     ws.addRow(["", "TỔNG CỘNG", departments.reduce((s, d) => s + d.actual, 0)]).font = { bold: true };
-    ws.addRow([]);
-    const h2 = ws.addRow(["Tổ sản xuất", "", "Số NV đang làm"]);
-    h2.font = { bold: true };
-    productionTeams.forEach((t) => ws.addRow([t.name, "", t.actual]));
+    if (productionTeams.length > 0) {
+      ws.addRow([]);
+      const h2 = ws.addRow(["Tổ sản xuất", "", "Số NV đang làm"]);
+      h2.font = { bold: true };
+      productionTeams.forEach((t) => ws.addRow([t.name, "", t.actual]));
+    }
     ws.getColumn(1).width = 22; ws.getColumn(2).width = 28; ws.getColumn(3).width = 16;
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -243,11 +247,14 @@ export function OrgChartTabs({
                 return (
                   <div key={dir.id} className="flex flex-col items-center">
                     <ConnectorLine vertical />
-                    <div className="rounded-xl px-4 py-3 border text-center"
-                      style={{ background: "var(--ibs-bg-card)", borderColor: color, minWidth: "160px" }}>
+                    <button onClick={() => setSelectedDir(dir)}
+                      className="rounded-xl px-4 py-3 border text-center transition-all hover:-translate-y-0.5"
+                      style={{ background: "var(--ibs-bg-card)", borderColor: color, minWidth: "160px", cursor: "pointer" }}>
                       <div className="text-[13px] font-semibold" style={{ color }}>{dir.nameVi}</div>
-                      <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{dir.name}</div>
-                    </div>
+                      <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
+                        {dir.directors.length} Giám đốc
+                      </div>
+                    </button>
                   </div>
                 );
               })}
@@ -277,24 +284,26 @@ export function OrgChartTabs({
               })}
             </div>
 
-            {/* Production teams */}
-            <div className="mt-4 pt-4 border-t" style={{ borderColor: "var(--ibs-border)" }}>
-              <div className="text-center text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--ibs-text-dim)" }}>
-                {productionTeams.length} Tổ sản xuất — P. Sản xuất
+            {/* Production teams — chỉ hiện khi còn tổ đang hoạt động (Xưởng nay là phòng ban riêng). */}
+            {productionTeams.length > 0 && (
+              <div className="mt-4 pt-4 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+                <div className="text-center text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--ibs-text-dim)" }}>
+                  {productionTeams.length} Tổ sản xuất
+                </div>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {productionTeams.map((team) => (
+                    <button key={team.id} onClick={() => setSelectedTeam(team)}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all hover:-translate-y-0.5 flex items-center gap-1.5"
+                      style={{ background: "rgba(245,158,11,0.08)", borderColor: "rgba(245,158,11,0.3)", color: "#f59e0b", cursor: "pointer" }}>
+                      {team.name}
+                      <span className="px-1.5 rounded-full text-[10px] font-bold" style={{ background: "rgba(245,158,11,0.2)" }}>
+                        {team.actual}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                {productionTeams.map((team) => (
-                  <button key={team.id} onClick={() => setSelectedTeam(team)}
-                    className="px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all hover:-translate-y-0.5 flex items-center gap-1.5"
-                    style={{ background: "rgba(245,158,11,0.08)", borderColor: "rgba(245,158,11,0.3)", color: "#f59e0b", cursor: "pointer" }}>
-                    {team.name}
-                    <span className="px-1.5 rounded-full text-[10px] font-bold" style={{ background: "rgba(245,158,11,0.2)" }}>
-                      {team.actual}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -307,6 +316,11 @@ export function OrgChartTabs({
       {/* Dept employees modal */}
       {selectedDept && (
         <DeptEmployeesModal dept={selectedDept} onClose={() => setSelectedDept(null)} />
+      )}
+
+      {/* Directors modal — danh sách Giám đốc trong khối */}
+      {selectedDir && (
+        <DirectorsModal dir={selectedDir} onClose={() => setSelectedDir(null)} />
       )}
 
       {/* Tab: Headcount */}
@@ -474,6 +488,50 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
                         {emp.status === "PROBATION" ? "Thử việc" : "Đang làm"}
                       </span>
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── DirectorsModal — danh sách Giám đốc trong 1 khối ──────────────────────────
+function DirectorsModal({ dir, onClose }: { dir: Directorate; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div className="rounded-2xl border w-full max-w-xl max-h-[80vh] flex flex-col"
+        style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <div>
+            <h3 className="text-[15px] font-semibold">{dir.nameVi}</h3>
+            <p className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>{dir.directors.length} Giám đốc phụ trách</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"><X size={18} /></button>
+        </div>
+        <div className="overflow-y-auto flex-1">
+          {dir.directors.length === 0 ? (
+            <p className="text-center py-10 text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa gán giám đốc cho khối này</p>
+          ) : (
+            <table className="w-full border-collapse">
+              <thead>
+                <tr>
+                  {["Mã NV", "Họ và tên", "Chức vụ", "Phòng ban"].map((h) => (
+                    <th key={h} className="text-left px-4 py-2.5 text-[11px] uppercase tracking-[0.8px] font-semibold border-b"
+                      style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {dir.directors.map((d) => (
+                  <tr key={d.code} className="border-b hover:bg-white/2 transition-colors" style={{ borderColor: "rgba(51,65,85,0.4)" }}>
+                    <td className="px-4 py-3 text-[12px] font-mono" style={{ color: "var(--ibs-accent)" }}>{d.code}</td>
+                    <td className="px-4 py-3 text-[13px] font-medium">{d.fullName}</td>
+                    <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>{d.jobRole || "—"}</td>
+                    <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>{d.deptName || "—"}</td>
                   </tr>
                 ))}
               </tbody>

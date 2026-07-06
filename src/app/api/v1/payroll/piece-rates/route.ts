@@ -6,14 +6,15 @@ import { canViewPayroll } from "@/lib/access";
 import { z } from "zod";
 
 const CreateSchema = z.object({
-  teamId: z.string().uuid(),
+  teamId: z.string().uuid().optional(),          // khoán theo TỔ (lịch sử)
+  departmentId: z.string().uuid().optional(),    // khoán theo XƯỞNG (phòng ban) — từ T7/2026
   month: z.number().int().min(1).max(12),
   year: z.number().int().min(2020).max(2100),
   projectCode: z.string().min(1),
   totalHours: z.number().min(0),
   unitPrice: z.number().int().min(0),
   completionRate: z.number().min(0).max(1).default(1.0),
-});
+}).refine((d) => d.teamId || d.departmentId, { message: "Cần chọn Xưởng (departmentId) hoặc Tổ (teamId)" });
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest) {
     where,
     include: {
       team: { select: { id: true, name: true, teamType: true } },
+      department: { select: { id: true, name: true } },
       members: { select: { id: true, code: true, fullName: true } },
     },
     orderBy: [{ year: "desc" }, { month: "desc" }],
@@ -61,21 +63,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
   }
 
-  const { teamId, month, year, projectCode, totalHours, unitPrice, completionRate } = parsed.data;
+  const { teamId, departmentId, month, year, projectCode, totalHours, unitPrice, completionRate } = parsed.data;
 
-  // Verify team exists
-  const team = await prisma.productionTeam.findUnique({
-    where: { id: teamId },
-    include: { employees: { where: { status: { in: ["ACTIVE", "PROBATION"] } }, select: { id: true } } },
-  });
-  if (!team) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Tổ sản xuất không tồn tại" } }, { status: 404 });
+  // Thành viên nhận khoán: theo XƯỞNG (department) hoặc TỔ (team).
+  let memberIds: string[];
+  if (departmentId) {
+    const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true } });
+    if (!dept) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Xưởng/Phòng ban không tồn tại" } }, { status: 404 });
+    const emps = await prisma.employee.findMany({ where: { departmentId, status: { in: ["ACTIVE", "PROBATION"] } }, select: { id: true } });
+    memberIds = emps.map((e) => e.id);
+  } else {
+    const team = await prisma.productionTeam.findUnique({
+      where: { id: teamId! },
+      include: { employees: { where: { status: { in: ["ACTIVE", "PROBATION"] } }, select: { id: true } } },
+    });
+    if (!team) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Tổ sản xuất không tồn tại" } }, { status: 404 });
+    memberIds = team.employees.map((e) => e.id);
+  }
 
-  const memberCount = team.employees.length || 1;
+  const memberCount = memberIds.length || 1;
   const totalAmount = Math.round(totalHours * unitPrice * completionRate);
 
   const record = await prisma.pieceRateRecord.create({
     data: {
-      teamId,
+      teamId: teamId ?? null,
+      departmentId: departmentId ?? null,
       month,
       year,
       projectCode,
@@ -84,10 +96,11 @@ export async function POST(request: NextRequest) {
       completionRate,
       totalAmount,
       memberCount,
-      members: { connect: team.employees.map((e) => ({ id: e.id })) },
+      members: { connect: memberIds.map((id) => ({ id })) },
     },
     include: {
       team: { select: { id: true, name: true } },
+      department: { select: { id: true, name: true } },
     },
   });
 

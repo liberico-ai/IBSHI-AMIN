@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { isInPast } from "@/lib/validation";
+import { getDirectedKhoiIds, departmentIdsOfKhois, directorsOfDepartment } from "@/lib/ot-khoi";
 
 const CreateOTSchema = z.object({
   date: z.string().transform((s) => new Date(s)),
@@ -40,6 +41,14 @@ export async function GET(request: NextRequest) {
   } else if (userRole === "MANAGER") {
     const emp = await prisma.employee.findFirst({ where: { userId } });
     if (emp) where.employee = { departmentId: emp.departmentId };
+  } else {
+    // BOM/HR_ADMIN/ADMIN: nếu là GIÁM ĐỐC KHỐI → CHỈ thấy đơn của phòng ban thuộc (các) khối mình.
+    const khoiIds = await getDirectedKhoiIds(userId);
+    if (khoiIds.length) {
+      const deptIds = await departmentIdsOfKhois(khoiIds);
+      where.employee = { departmentId: { in: deptIds } };
+    }
+    // ADMIN/HC không phải giám đốc khối → xem tất cả (phục vụ vận hành/lương).
   }
 
   if (statusFilter) where.status = statusFilter;
@@ -135,22 +144,23 @@ export async function POST(request: NextRequest) {
     include: { employee: { include: { department: true } } },
   });
 
-  // Notify manager
-  const manager = await prisma.employee.findFirst({
-    where: { departmentId: employee.departmentId, position: { level: "MANAGER" } },
-    include: { user: true },
-  });
-  if (manager?.user) {
-    await prisma.notification.create({
-      data: {
-        userId: manager.user.id,
-        title: "Đề xuất OT chờ duyệt",
-        message: `${employee.fullName} đề xuất OT ${hours.toFixed(1)} giờ ngày ${date.toLocaleDateString("vi-VN")}`,
-        type: "APPROVAL_REQUIRED",
-        referenceType: "ot_request",
-        referenceId: otRequest.id,
-      },
-    });
+  // Báo TẤT CẢ giám đốc của khối phụ trách phòng ban người đề xuất (luồng A — GĐ khối duyệt thẳng).
+  const directors = await directorsOfDepartment(employee.departmentId);
+  if (directors) {
+    await Promise.all(
+      directors.directorUserIds.map((uid) =>
+        prisma.notification.create({
+          data: {
+            userId: uid,
+            title: "Đề xuất OT chờ duyệt",
+            message: `${employee.fullName} (${employee.department?.name || ""}) đề xuất OT ${hours.toFixed(1)} giờ ngày ${date.toLocaleDateString("vi-VN")}`,
+            type: "APPROVAL_REQUIRED",
+            referenceType: "ot_request",
+            referenceId: otRequest.id,
+          },
+        })
+      )
+    );
   }
 
   return NextResponse.json({ data: otRequest }, { status: 201 });

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
+import { isDirectorOfDepartment } from "@/lib/ot-khoi";
 
 export async function PUT(
   request: NextRequest,
@@ -16,15 +17,10 @@ export async function PUT(
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
 
-  // Minimum role: TEAM_LEAD (can approve for their own team)
-  if (!canDo(userRole, "otRequests", "approveTeam")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-  }
-
   const { id } = await params;
   const otRequest = await prisma.oTRequest.findUnique({
     where: { id },
-    include: { employee: { include: { user: true } } },
+    include: { employee: { include: { user: true, department: true } } },
   });
 
   if (!otRequest) {
@@ -34,11 +30,28 @@ export async function PUT(
   const body = await request.json();
   const { action, note } = body as { action: "APPROVE" | "REJECT"; note?: string };
 
+  // ── Luồng A (chốt 2026-07-06): CHỈ Giám đốc KHỐI phụ trách phòng ban của đơn (hoặc ADMIN) mới duyệt/từ chối.
+  //    Tổ trưởng/TP chỉ ĐỀ XUẤT, không duyệt nữa. Đơn duyệt 1 bước: PENDING → APPROVED.
+  //    1 khối có thể nhiều GĐ → BẤT KỲ GĐ nào của khối đều duyệt được.
+  const isKhoiDirector = await isDirectorOfDepartment(userId, otRequest.employee.departmentId);
+  if (!isKhoiDirector && userRole !== "ADMIN") {
+    return NextResponse.json(
+      { error: { code: "FORBIDDEN", message: "Chỉ Giám đốc khối phụ trách mới được duyệt/từ chối đơn tăng ca này." } },
+      { status: 403 }
+    );
+  }
+
+  if (otRequest.status !== "PENDING") {
+    return NextResponse.json(
+      { error: { code: "INVALID_STATE", message: "Đơn tăng ca không ở trạng thái chờ duyệt." } },
+      { status: 400 }
+    );
+  }
+
+  const dayStr = new Date(otRequest.date).toLocaleDateString("vi-VN");
+
   // ── REJECT ───────────────────────────────────────────────────────────────
   if (action === "REJECT") {
-    if (otRequest.status !== "PENDING" && otRequest.status !== "PENDING_HR") {
-      return NextResponse.json({ error: { code: "INVALID_STATE" } }, { status: 400 });
-    }
     const updated = await prisma.oTRequest.update({
       where: { id },
       data: { status: "REJECTED", approvedBy: userId },
@@ -47,7 +60,7 @@ export async function PUT(
       data: {
         userId: otRequest.employee.userId,
         title: "Đề xuất OT bị từ chối",
-        message: `Đề xuất OT của bạn bị từ chối${note ? `: ${note}` : "."}`,
+        message: `Đề xuất OT ngày ${dayStr} bị Giám đốc khối từ chối${note ? `: ${note}` : "."}`,
         type: "REJECTED",
         referenceType: "ot_request",
         referenceId: id,
@@ -59,104 +72,22 @@ export async function PUT(
 
   // ── APPROVE ──────────────────────────────────────────────────────────────
   if (action === "APPROVE") {
-    const isHrOrAbove = canDo(userRole, "otRequests", "approve2");
-
-    // ── Level-1: TEAM_LEAD / MANAGER approve PENDING → PENDING_HR ──────
-    if (otRequest.status === "PENDING" && !isHrOrAbove) {
-      // Scope checks
-      if (userRole === "TEAM_LEAD") {
-        // TEAM_LEAD: only their team
-        const approver = await prisma.employee.findFirst({ where: { userId }, select: { teamId: true } });
-        if (!approver?.teamId || approver.teamId !== otRequest.employee.teamId) {
-          return NextResponse.json(
-            { error: { code: "FORBIDDEN", message: "Tổ trưởng chỉ có thể duyệt OT cho thành viên trong tổ mình" } },
-            { status: 403 }
-          );
-        }
-      } else if (userRole === "MANAGER") {
-        // MANAGER: only their department
-        const approver = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
-        if (!approver || approver.departmentId !== otRequest.employee.departmentId) {
-          return NextResponse.json(
-            { error: { code: "FORBIDDEN", message: "Trưởng phòng chỉ có thể duyệt OT cho nhân viên phòng mình" } },
-            { status: 403 }
-          );
-        }
-      }
-
-      const hrAdmins = await prisma.user.findMany({
-        where: { role: "HR_ADMIN", isActive: true },
-        select: { id: true },
-      });
-
-      const updated = await prisma.oTRequest.update({
-        where: { id },
-        data: { status: "PENDING_HR", approvedBy: userId },
-      });
-
-      await Promise.all(
-        hrAdmins.map((u) =>
-          prisma.notification.create({
-            data: {
-              userId: u.id,
-              title: "Đề xuất OT chờ HC duyệt",
-              message: `${otRequest.employee.fullName} đề xuất OT ${otRequest.hours.toFixed(1)}h ngày ${new Date(otRequest.date).toLocaleDateString("vi-VN")} — Tổ trưởng/TP đã duyệt.`,
-              type: "APPROVAL_REQUIRED",
-              referenceType: "ot_request",
-              referenceId: id,
-            },
-          })
-        )
-      );
-
-      logAudit({ userId, action: "APPROVE", entityType: "OTRequest", entityId: id, newValue: { status: "PENDING_HR" } });
-      return NextResponse.json({ data: updated, message: "Đã chuyển HC duyệt cấp 2" });
-    }
-
-    // ── Level-2: HR_ADMIN finalizes PENDING_HR → APPROVED ──────────────
-    if (otRequest.status === "PENDING_HR" && isHrOrAbove) {
-      const updated = await prisma.oTRequest.update({
-        where: { id },
-        data: { status: "APPROVED", approvedBy: userId },
-      });
-      await prisma.notification.create({
-        data: {
-          userId: otRequest.employee.userId,
-          title: "Đề xuất OT được duyệt",
-          message: `Đề xuất OT ${otRequest.hours.toFixed(1)} giờ ngày ${new Date(otRequest.date).toLocaleDateString("vi-VN")} đã được HC phê duyệt.`,
-          type: "APPROVED",
-          referenceType: "ot_request",
-          referenceId: id,
-        },
-      });
-      logAudit({ userId, action: "APPROVE", entityType: "OTRequest", entityId: id, newValue: { status: "APPROVED" } });
-      return NextResponse.json({ data: updated, message: "Đề xuất OT đã được duyệt hoàn tất" });
-    }
-
-    // HR can also directly approve PENDING in one step (for urgent cases)
-    if (otRequest.status === "PENDING" && isHrOrAbove) {
-      const updated = await prisma.oTRequest.update({
-        where: { id },
-        data: { status: "APPROVED", approvedBy: userId },
-      });
-      await prisma.notification.create({
-        data: {
-          userId: otRequest.employee.userId,
-          title: "Đề xuất OT được duyệt",
-          message: `Đề xuất OT ${otRequest.hours.toFixed(1)} giờ của bạn đã được phê duyệt.`,
-          type: "APPROVED",
-          referenceType: "ot_request",
-          referenceId: id,
-        },
-      });
-      logAudit({ userId, action: "APPROVE", entityType: "OTRequest", entityId: id, newValue: { status: "APPROVED" } });
-      return NextResponse.json({ data: updated, message: "Đề xuất OT đã được duyệt" });
-    }
-
-    return NextResponse.json(
-      { error: { code: "INVALID_STATE", message: "Trạng thái không hợp lệ để duyệt" } },
-      { status: 400 }
-    );
+    const updated = await prisma.oTRequest.update({
+      where: { id },
+      data: { status: "APPROVED", approvedBy: userId },
+    });
+    await prisma.notification.create({
+      data: {
+        userId: otRequest.employee.userId,
+        title: "Đề xuất OT được duyệt",
+        message: `Đề xuất OT ${otRequest.hours.toFixed(1)} giờ ngày ${dayStr} đã được Giám đốc khối phê duyệt.`,
+        type: "APPROVED",
+        referenceType: "ot_request",
+        referenceId: id,
+      },
+    });
+    logAudit({ userId, action: "APPROVE", entityType: "OTRequest", entityId: id, newValue: { status: "APPROVED" } });
+    return NextResponse.json({ data: updated, message: "Đề xuất OT đã được duyệt" });
   }
 
   return NextResponse.json({ error: { code: "BAD_REQUEST" } }, { status: 400 });

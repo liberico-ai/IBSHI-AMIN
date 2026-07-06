@@ -617,14 +617,14 @@ function ImportPieceRateModal({
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
       <div className="rounded-2xl w-full max-w-md p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-4">
-          <div className="text-[16px] font-bold">Import Lương khoán theo Tổ — T{period.month}/{period.year}</div>
+          <div className="text-[16px] font-bold">Import Lương khoán theo Xưởng — T{period.month}/{period.year}</div>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
 
         {!result ? (
           <div className="flex flex-col gap-4">
             <p className="text-[12.5px]" style={{ color: "var(--ibs-text-dim)" }}>
-              File Excel cần có cột <b>Tổ</b> và <b>Lương khoán</b> (tiền khoán cả tổ). Khi bấm <b>"Tính lại"</b>, hệ thống tự chia cho từng NV theo công thức: (khoán tổ − lương thời gian tổ) ÷ tổng công tổ × công cá nhân. Tải template có sẵn danh sách tổ:
+              File Excel cần có cột <b>Xưởng</b> và <b>Lương khoán</b> (tiền khoán cả Xưởng). Khi bấm <b>"Tính lại"</b>, hệ thống tự chia cho từng NV theo công thức: (khoán Xưởng − lương thời gian Xưởng) ÷ tổng công Xưởng × công cá nhân. Tải template có sẵn danh sách Xưởng:
             </p>
             <a
               href={`/api/v1/payroll/${period.id}/piece-rate`}
@@ -654,10 +654,10 @@ function ImportPieceRateModal({
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <div className="text-[13px]">✅ Đã import khoán cho <b>{result.imported}</b> tổ.</div>
+            <div className="text-[13px]">✅ Đã import khoán cho <b>{result.imported}</b> Xưởng.</div>
             {result.notFound > 0 && (
               <div className="text-[12px]" style={{ color: "var(--ibs-warning)" }}>
-                ⚠️ {result.notFound} tên Tổ không khớp hệ thống (bỏ qua){result.notFoundNames.length ? `: ${result.notFoundNames.join(", ")}` : ""}
+                ⚠️ {result.notFound} tên Xưởng/Tổ không khớp hệ thống (bỏ qua){result.notFoundNames.length ? `: ${result.notFoundNames.join(", ")}` : ""}
               </div>
             )}
             <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Giờ bấm <b>"Tính lại"</b> để hệ thống chia khoán ra lương SP từng NV.</div>
@@ -1338,7 +1338,7 @@ export default function LuongPage() {
               </div>
               {canManage && draft && (
                 <>
-                  {item(`⬇ ${row.pieceRateImported ? "Import lại khoán (tổ)" : "Import khoán (tổ)"}`, () => setImportPeriod(row), "#818cf8")}
+                  {item(`⬇ ${row.pieceRateImported ? "Import lại khoán (Xưởng)" : "Import khoán (Xưởng)"}`, () => setImportPeriod(row), "#818cf8")}
                   {item("⬇ Import bổ sung lương", () => setImportAdjPeriod(row), "var(--ibs-warning)")}
                   {item("⬇ Import bổ sung tiền ăn", () => setImportMealPeriod(row), "#f59e0b")}
                   {item("⬆ Export BHXH", () => exportBhxh(row), "#22c55e")}

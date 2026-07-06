@@ -15,6 +15,7 @@ export async function GET() {
   });
 
   const teams = await prisma.productionTeam.findMany({
+    where: { isActive: true },
     orderBy: { name: "asc" },
     select: { id: true, name: true, departmentId: true },
   });

@@ -5,13 +5,13 @@ export const DEPARTMENTS = [
   { code: "BOM", name: "Ban Giám đốc", nameEn: "Board of Management", headcount: 5, sortOrder: 0 },
   { code: "SX", name: "P. Sản xuất", nameEn: "Production Dept.", headcount: 80, sortOrder: 1 },
   { code: "QLDA", name: "P. QLDA", nameEn: "Project Management Dept.", headcount: 12, sortOrder: 2 },
-  { code: "KT", name: "P. Kỹ thuật", nameEn: "Engineering Dept.", headcount: 15, sortOrder: 3 },
+  { code: "TK", name: "P. Thiết kế", nameEn: "Design Dept.", headcount: 15, sortOrder: 3 },
   { code: "QAQC", name: "P. QAQC", nameEn: "QAQC Dept.", headcount: 8, sortOrder: 4 },
   { code: "HCNS", name: "P. HCNS", nameEn: "HR & Admin Dept.", headcount: 5, sortOrder: 5 },
-  { code: "KETOAN", name: "P. Kế toán", nameEn: "Accounting Dept.", headcount: 6, sortOrder: 6 },
+  { code: "TCKT", name: "P. Tài chính kế toán", nameEn: "Finance & Accounting Dept.", headcount: 6, sortOrder: 6 },
   { code: "KD", name: "P. Kinh doanh", nameEn: "Sales Dept.", headcount: 10, sortOrder: 7 },
   { code: "TM", name: "P. Thương mại", nameEn: "Commercial Dept.", headcount: 8, sortOrder: 8 },
-  { code: "TB", name: "P. Thiết bị", nameEn: "Equipment Dept.", headcount: 6, sortOrder: 9 },
+  { code: "TB", name: "P. Trang thiết bị", nameEn: "Equipment Dept.", headcount: 6, sortOrder: 9 },
 ] as const;
 
 export const PRODUCTION_TEAMS = [
@@ -30,9 +30,9 @@ export const PRODUCTION_TEAMS = [
 ] as const;
 
 export const DIRECTORATES = [
-  { name: "Commercial Director", nameVi: "Giám đốc Thương mại", departments: ["KD", "TM", "KETOAN"] },
+  { name: "Commercial Director", nameVi: "Giám đốc Thương mại", departments: ["KD", "TM", "TCKT"] },
   { name: "COO", nameVi: "Giám đốc Vận hành", departments: ["QAQC", "QLDA", "HCNS"] },
-  { name: "Production Director", nameVi: "Giám đốc Sản xuất", departments: ["SX", "KT", "TB"] },
+  { name: "Production Director", nameVi: "Giám đốc Sản xuất", departments: ["SX", "TK", "TB"] },
 ] as const;
 
 export const LEAVE_QUOTA = {
@@ -95,6 +95,9 @@ export function guestMealCost(r: { guestCount: number; guestUnitPrice: number; g
 // Chốt giờ đăng ký suất ăn (giờ VN). Thường: trước 9h. Bổ sung: trước 10h30 —
 // sau mốc này (và các ngày đã qua) chỉ P. HCNS (HR_ADMIN/BOM) được thêm/sửa.
 export const MEAL_CUTOFF_HOUR = 9;
+// Đăng ký thường được BỔ SUNG cho ngày quá khứ tối đa 2 ngày trước (cửa sổ 3 ngày: hôm nay + 2 ngày trước).
+//   VD: Thứ 4 đăng ký được tới Thứ 2. Ngày hôm nay vẫn chốt sau 9h sáng.
+export const MEAL_MAX_PAST_DAYS = 2;
 export const MEAL_SUPP_CUTOFF_HOUR = 10;
 export const MEAL_SUPP_CUTOFF_MINUTE = 30;
 

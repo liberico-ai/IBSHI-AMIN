@@ -128,6 +128,7 @@ export async function POST(request: NextRequest) {
   });
   const pieceRateByTeam: Record<string, number[]> = {};
   for (const pr of pieceRateRecords) {
+    if (!pr.teamId) continue; // khoán theo Xưởng (departmentId) — không gắn tổ, bỏ qua KPI-theo-tổ
     if (!pieceRateByTeam[pr.teamId]) pieceRateByTeam[pr.teamId] = [];
     pieceRateByTeam[pr.teamId].push(pr.completionRate);
   }

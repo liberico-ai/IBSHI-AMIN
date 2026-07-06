@@ -40,6 +40,7 @@ export interface SalaryInput {
   adjustment?: number;       // Điều chỉnh/bổ sung tay theo kỳ (có thể âm) — chịu thuế
   mealOT?: number;           // Tiền ăn tăng giờ (tự tính từ chấm công) — số phẳng, cộng vào Gross, CHỊU thuế
   priorOtHours?: number;     // Tổng giờ OT đã cộng dồn từ tháng 1 → hết tháng TRƯỚC kỳ này (cho cap 200h miễn thuế)
+  otTaxExemptRatio?: number; // Tỉ lệ tiền OT được MIỄN thuế (tính theo THỨ TỰ NGÀY + đúng hệ số ở service). Có → dùng thẳng; không → fallback tỉ lệ giờ thô.
   importedBhxhEmployee?: number; // BHXH NLĐ (8%+1.5%+1%) HCNS tính NGOÀI rồi import — khoản TRỪ (hệ thống không tự tính)
   importedBhxhEmployer?: number; // BHXH công ty 21.5% (import — chỉ để báo cáo chi phí)
 }
@@ -180,15 +181,19 @@ export function calculateSalary(input: SalaryInput): SalaryOutput {
   // TNCN — MIỄN THUẾ tiền OT theo cap 200h CỘNG DỒN cả năm (chốt 2026-06-17, theo HR):
   //   - Tổng giờ OT (cộng dồn từ T1) ≤ 200h → MIỄN TOÀN BỘ tiền OT của phần giờ trong 200h.
   //   - Phần giờ OT VƯỢT 200h → tiền OT của phần đó CHỊU thuế.
-  //   - Trong tháng vượt ngưỡng: tách theo tỉ lệ giờ trong/ngoài 200h.
+  //   - Trong tháng vượt ngưỡng: miễn theo THỨ TỰ NGÀY + ĐÚNG hệ số từng giờ (tỉ lệ tính ở service, chốt 2026-07-03).
+  //     Fallback (khi không truyền ratio): tách theo tỉ lệ giờ THÔ trong/ngoài 200h.
   const priorOt = Math.max(0, input.priorOtHours || 0);
-  const withinCapHours = Math.max(0, Math.min(otHoursTotal, SALARY_CONFIG.OT_TAX_FREE_HOURS_YEAR - priorOt));
-  const otExemptRatio = otHoursTotal > 0 ? withinCapHours / otHoursTotal : 0;
+  const otExemptRatio = input.otTaxExemptRatio !== undefined
+    ? input.otTaxExemptRatio
+    : (otHoursTotal > 0 ? Math.max(0, Math.min(otHoursTotal, SALARY_CONFIG.OT_TAX_FREE_HOURS_YEAR - priorOt)) / otHoursTotal : 0);
   const otTaxExempt = salaryOT * otExemptRatio; // tiền OT của số giờ trong 200h → miễn (số thật)
   const taxableIncome = Math.max(0, grossSalary - otTaxExempt);
   const personalDeduction =
     SALARY_CONFIG.PERSONAL_DEDUCTION + input.dependentsCount * SALARY_CONFIG.DEPENDENT_DEDUCTION;
-  const taxableIncomeAfter = Math.max(0, taxableIncome - personalDeduction - bhxhEmployee);
+  // Làm tròn thu nhập tính thuế về ĐỒNG trước khi tính TNCN — triệt tiêu sai số dấu phẩy động
+  //   (vd 1.179.989,9999999963 thay vì 1.179.990) khiến thuế 58.999,5 bị rơi xuống 58.999 khi Math.round.
+  const taxableIncomeAfter = Math.round(Math.max(0, taxableIncome - personalDeduction - bhxhEmployee));
   const tncn = calcTNCN(taxableIncomeAfter);
 
   // Net = làm tròn CHUẨN về số nguyên đồng (≥0.5 lên, <0.5 xuống).

@@ -986,8 +986,10 @@ function AttendancePageInner() {
     });
   }, [attendanceRecords]);
 
-  const officeEmployees = useMemo(() => gridEmployees.filter((e) => !e.teamId), [gridEmployees]);
-  const productionEmployees = useMemo(() => gridEmployees.filter((e) => !!e.teamId), [gridEmployees]);
+  // "Sản xuất" nay = NV thuộc XƯỞNG (phòng ban tên "Xưởng ..."); giữ !!teamId cho tương thích (sub-tổ tương lai).
+  const isProduction = (e: GridEmployee) => (e.dept || "").startsWith("Xưởng") || !!e.teamId;
+  const officeEmployees = useMemo(() => gridEmployees.filter((e) => !isProduction(e)), [gridEmployees]);
+  const productionEmployees = useMemo(() => gridEmployees.filter((e) => isProduction(e)), [gridEmployees]);
 
   async function handleLeaveAction(id: string, action: "APPROVE" | "REJECT") {
     const res = await fetch(`/api/v1/leave-requests/${id}`, {

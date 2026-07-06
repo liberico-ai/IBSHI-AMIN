@@ -280,9 +280,9 @@ export async function POST(request: NextRequest) {
 
   const { departmentId, date, lunchCount, dinnerCount, guestCount, subcontractorCount, subcontractorName, guestUnitPrice, specialNote } = parsed.data;
 
-  // Chốt 9h: sau 9h (hoặc ngày đã qua) KHÓA đăng ký thường với TẤT CẢ → dùng Đăng ký bổ sung.
+  // Đăng ký thường: cho bổ sung quá khứ tối đa 2 ngày (cửa sổ 3 ngày); hôm nay chốt 9h; xa hơn → dùng Đăng ký bổ sung.
   if (isAfterMealCutoff(date)) {
-    return NextResponse.json({ error: { code: "MEAL_CUTOFF", message: "Đã quá giờ đăng ký suất ăn (chốt 9h sáng). Sau 9h vui lòng dùng Đăng ký bổ sung." } }, { status: 403 });
+    return NextResponse.json({ error: { code: "MEAL_CUTOFF", message: "Ngoài hạn đăng ký suất ăn (chỉ đăng ký trong 3 ngày gần nhất; hôm nay chốt trước 9h sáng). Vui lòng dùng Đăng ký bổ sung." } }, { status: 403 });
   }
 
   // MANAGER can only register for their own department

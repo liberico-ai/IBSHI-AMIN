@@ -203,10 +203,11 @@ model User {
 }
 
 model Directorate {
-  id         String  @id @default(uuid())
-  name       String // "Commercial Director", "COO", "Production Director"
-  nameVi     String // "Giám đốc Thương mại"
-  directorId String?
+  id          String   @id @default(uuid())
+  name        String // "Khối Trực tiếp", "Khối Gián tiếp", ...
+  nameVi      String
+  directorId  String?  // (legacy) 1 giám đốc — giữ để tương thích
+  directorIds String[] @default([]) // Employee.id của các GIÁM ĐỐC phụ trách khối (1 khối có thể nhiều GĐ)
 
   departments Department[]
   createdAt   DateTime     @default(now())
@@ -227,6 +228,7 @@ model Department {
   employees           Employee[]
   positions           Position[]
   productionTeams     ProductionTeam[]
+  pieceRateRecords    PieceRateRecord[] // khoán theo Xưởng (department) từ T7/2026
   trainingPlans       TrainingPlan[]
   recruitmentRequests RecruitmentRequest[]
   kpiTemplates        KPITemplate[]
@@ -257,6 +259,7 @@ model ProductionTeam {
   leaderId     String?
   memberCount  Int      @default(0)
   departmentId String
+  isActive     Boolean  @default(true) // false = tổ cũ đã ẩn (giữ để xem lịch sử khoán)
 
   department       Department       @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   employees        Employee[]
@@ -989,7 +992,8 @@ model PayrollKpiOverride {
 
 model PieceRateRecord {
   id             String   @id @default(uuid())
-  teamId         String
+  teamId         String?  // Khoán theo TỔ (lịch sử ≤ T6/2026). null khi khoán theo Xưởng.
+  departmentId   String?  // Khoán theo XƯỞNG (cấp phòng ban) từ T7/2026. null khi khoán theo tổ cũ.
   month          Int
   year           Int
   projectCode    String
@@ -1000,10 +1004,12 @@ model PieceRateRecord {
   memberCount    Int      @default(1)  // Số thành viên để chia lương
   createdAt      DateTime @default(now())
 
-  team    ProductionTeam @relation(fields: [teamId], references: [id], onDelete: Restrict)
-  members Employee[]     @relation("teamMembers")
+  team       ProductionTeam? @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  department Department?     @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  members    Employee[]      @relation("teamMembers")
 
   @@index([teamId])
+  @@index([departmentId])
   @@index([month, year])
 }
 
