@@ -48,9 +48,16 @@ export async function GET(request: NextRequest) {
     .reduce((s, i) => s + (issueCost.get(i.id) ?? 0), 0);
   const inventoryValue = inventory.reduce((s, r) => s + r.value, 0);
 
+  // Giá trị tồn kho tính TỚI CUỐI THÁNG đã chọn (FIFO chỉ tính giao dịch <= end). Tháng hiện tại = tồn hiện tại.
+  const invAtEnd = computeFifo(
+    allPurchases.filter((p) => p.date <= end) as any,
+    allIssues.filter((i) => i.date <= end) as any,
+  ).inventory;
+  const endOfMonthInventoryValue = invAtEnd.reduce((s, r) => s + r.value, 0);
+
   return NextResponse.json({
     data,
-    meta: { month, year, total, issueCostTotal, inventory, inventoryValue, canManage: canManage((session.user as any).role, (session.user as any).employeeCode) },
+    meta: { month, year, total, issueCostTotal, inventory, inventoryValue, endOfMonthInventoryValue, canManage: canManage((session.user as any).role, (session.user as any).employeeCode) },
   });
 }
 
