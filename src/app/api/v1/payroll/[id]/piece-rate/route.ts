@@ -32,27 +32,38 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const period = await prisma.payrollPeriod.findUnique({ where: { id } });
   if (!period) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
-  const teams = await prisma.productionTeam.findMany({
-    select: { id: true, name: true, department: { select: { name: true } } },
-    orderBy: { name: "asc" },
+  const existing = await prisma.pieceRateRecord.findMany({ where: { month: period.month, year: period.year }, select: { teamId: true, departmentId: true, totalAmount: true } });
+  const exMap = new Map<string, number>(); // key: "dept:<id>" | "team:<id>"
+  const exDeptIds = new Set<string>(), exTeamIds = new Set<string>();
+  for (const e of existing) {
+    const key = e.departmentId ? `dept:${e.departmentId}` : e.teamId ? `team:${e.teamId}` : null;
+    if (!key) continue;
+    exMap.set(key, (exMap.get(key) || 0) + e.totalAmount);
+    if (e.departmentId) exDeptIds.add(e.departmentId); else if (e.teamId) exTeamIds.add(e.teamId);
+  }
+  // Khoán từ T7/2026 tính theo XƯỞNG (phòng ban tên "Xưởng ..."). Kèm tổ/xưởng CŨ có khoán kỳ này (xem lịch sử).
+  const xuong = await prisma.department.findMany({
+    where: { OR: [{ name: { startsWith: "Xưởng" }, isActive: true }, { id: { in: Array.from(exDeptIds) } }] },
+    select: { id: true, name: true }, orderBy: { name: "asc" },
   });
-  const existing = await prisma.pieceRateRecord.findMany({ where: { month: period.month, year: period.year }, select: { teamId: true, totalAmount: true } });
-  const exMap = new Map<string, number>();
-  for (const e of existing) exMap.set(e.teamId, (exMap.get(e.teamId) || 0) + e.totalAmount);
+  const oldTeams = exTeamIds.size
+    ? await prisma.productionTeam.findMany({ where: { id: { in: Array.from(exTeamIds) } }, select: { id: true, name: true }, orderBy: { name: "asc" } })
+    : [];
 
-  const aoa: any[][] = [["Tổ", "Phòng ban", "Lương khoán"]];
-  for (const t of teams) aoa.push([t.name, t.department?.name || "", exMap.get(t.id) || 0]);
+  const aoa: any[][] = [["Xưởng", "Lương khoán"]];
+  for (const x of xuong) aoa.push([x.name, exMap.get(`dept:${x.id}`) || 0]);
+  for (const t of oldTeams) aoa.push([t.name, exMap.get(`team:${t.id}`) || 0]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 24 }, { wch: 20 }, { wch: 18 }];
+  ws["!cols"] = [{ wch: 26 }, { wch: 18 }];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "KhoanTheoTo");
+  XLSX.utils.book_append_sheet(wb, ws, "KhoanTheoXuong");
   const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
 
   return new NextResponse(new Uint8Array(buf), {
     status: 200,
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="khoan-theo-to-T${period.month}-${period.year}.xlsx"`,
+      "Content-Disposition": `attachment; filename="khoan-theo-xuong-T${period.month}-${period.year}.xlsx"`,
     },
   });
 }
@@ -82,42 +93,57 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" }) as any[][];
+  const NAME_KW = ["xuong", "to", "team", "tổ"]; // cột tên nhóm: Xưởng (T7+) hoặc Tổ (cũ)
   let hi = -1;
   for (let i = 0; i < Math.min(rows.length, 15); i++) {
-    if (findCol(rows[i], ["to", "team", "tổ"]) >= 0 && findCol(rows[i], ["khoan", "so tien", "amount"]) >= 0) { hi = i; break; }
+    if (findCol(rows[i], NAME_KW) >= 0 && findCol(rows[i], ["khoan", "so tien", "amount"]) >= 0) { hi = i; break; }
   }
-  if (hi < 0) return NextResponse.json({ error: { code: "BAD_FORMAT", message: "Không tìm thấy cột 'Tổ' và 'Lương khoán'" } }, { status: 422 });
-  const teamCol = findCol(rows[hi], ["to", "team", "tổ"]);
+  if (hi < 0) return NextResponse.json({ error: { code: "BAD_FORMAT", message: "Không tìm thấy cột 'Xưởng/Tổ' và 'Lương khoán'" } }, { status: 422 });
+  const nameCol = findCol(rows[hi], NAME_KW);
   const khoanCol = findCol(rows[hi], ["khoan", "so tien", "amount"]);
 
+  // Khớp tên: ưu tiên XƯỞNG (phòng ban) → rồi TỔ cũ (để re-import kỳ lịch sử vẫn được).
+  const xuong = await prisma.department.findMany({ where: { name: { startsWith: "Xưởng" }, isActive: true }, select: { id: true, name: true } });
   const teams = await prisma.productionTeam.findMany({ select: { id: true, name: true } });
-  const nameToId = new Map(teams.map((t) => [norm(t.name), t.id]));
+  const deptByName = new Map(xuong.map((d) => [norm(d.name), d.id]));
+  const teamByName = new Map(teams.map((t) => [norm(t.name), t.id]));
 
-  const byTeam: Record<string, number> = {};
+  const byDept: Record<string, number> = {}, byTeam: Record<string, number> = {};
   const notFound: string[] = [];
   for (let i = hi + 1; i < rows.length; i++) {
-    const teamName = String(rows[i][teamCol] ?? "").trim();
-    if (!teamName) continue;
+    const name = String(rows[i][nameCol] ?? "").trim();
+    if (!name) continue;
     const khoan = toInt(rows[i][khoanCol]);
-    const teamId = nameToId.get(norm(teamName));
-    if (!teamId) { notFound.push(teamName); continue; }
-    byTeam[teamId] = (byTeam[teamId] || 0) + khoan;
+    const dId = deptByName.get(norm(name));
+    if (dId) { byDept[dId] = (byDept[dId] || 0) + khoan; continue; }
+    const tId = teamByName.get(norm(name));
+    if (tId) { byTeam[tId] = (byTeam[tId] || 0) + khoan; continue; }
+    notFound.push(name);
   }
 
-  // memberCount cho từng tổ (để hiển thị) — số NV thuộc tổ.
-  const counts = await prisma.employee.groupBy({ by: ["teamId"], _count: { _all: true } });
-  const countMap = new Map(counts.map((c) => [c.teamId, c._count._all]));
+  // memberCount (hiển thị) — số NV thuộc Xưởng / Tổ.
+  const dCounts = await prisma.employee.groupBy({ by: ["departmentId"], _count: { _all: true } });
+  const dCountMap = new Map(dCounts.map((c) => [c.departmentId, c._count._all]));
+  const tCounts = await prisma.employee.groupBy({ by: ["teamId"], _count: { _all: true } });
+  const tCountMap = new Map(tCounts.map((c) => [c.teamId, c._count._all]));
 
   await prisma.$transaction([
     prisma.pieceRateRecord.deleteMany({ where: { month: period.month, year: period.year } }),
     prisma.pieceRateRecord.createMany({
-      data: Object.entries(byTeam).map(([teamId, amount]) => ({
-        teamId, month: period.month, year: period.year,
-        projectCode: "IMPORT-KHOAN", totalHours: 0, unitPrice: 0, completionRate: 1,
-        totalAmount: amount, memberCount: countMap.get(teamId) || 0,
-      })),
+      data: [
+        ...Object.entries(byDept).map(([departmentId, amount]) => ({
+          departmentId, teamId: null, month: period.month, year: period.year,
+          projectCode: "IMPORT-KHOAN", totalHours: 0, unitPrice: 0, completionRate: 1,
+          totalAmount: amount, memberCount: dCountMap.get(departmentId) || 0,
+        })),
+        ...Object.entries(byTeam).map(([teamId, amount]) => ({
+          teamId, month: period.month, year: period.year,
+          projectCode: "IMPORT-KHOAN", totalHours: 0, unitPrice: 0, completionRate: 1,
+          totalAmount: amount, memberCount: tCountMap.get(teamId) || 0,
+        })),
+      ],
     }),
   ]);
 
-  return NextResponse.json({ data: { imported: Object.keys(byTeam).length, notFound: notFound.length, notFoundNames: notFound.slice(0, 20) } });
+  return NextResponse.json({ data: { imported: Object.keys(byDept).length + Object.keys(byTeam).length, notFound: notFound.length, notFoundNames: notFound.slice(0, 20) } });
 }

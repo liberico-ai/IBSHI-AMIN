@@ -19,7 +19,7 @@ type Employee = {
   insuranceNumber?: string | null; dateOfBirth?: string | null;
   dependents?: number; // số NPT đang hiệu lực
   children?: { dateOfBirth?: string | null }[];
-  department: { id: string; name: string };
+  department: { id: string; name: string; isActive?: boolean };
   position: { name: string };
   jobRole?: string | null;
   salaryGrade?: number | null;
@@ -135,14 +135,17 @@ export default function EmployeesPage() {
 
   useEffect(() => { fetchEmployees(); }, []);
 
+  // Tùy chọn filter chỉ lấy từ NV ĐANG LÀM → bỏ phòng ban/tổ đã ẩn (P. Sản xuất, 12 tổ cũ) mà chỉ NV nghỉ việc còn trỏ tới.
+  const activeEmps = useMemo(() => allEmployees.filter((e) => ["ACTIVE", "PROBATION", "ON_LEAVE"].includes(e.status)), [allEmployees]);
+  // Chỉ liệt kê phòng ban ĐANG HOẠT ĐỘNG → bỏ ngách ẩn (Quản trị hệ thống, Site Manager) + phòng đã sáp nhập.
   const deptOptions = useMemo(
-    () => Array.from(new Set(allEmployees.map((e) => e.department?.name).filter(Boolean))) as string[],
-    [allEmployees]
+    () => Array.from(new Set(activeEmps.filter((e) => e.department?.isActive !== false).map((e) => e.department?.name).filter(Boolean))) as string[],
+    [activeEmps]
   );
   const uniq = (vals: (string | null | undefined)[]) => Array.from(new Set(vals.filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "vi"));
-  const jobRoleOptions = useMemo(() => uniq(allEmployees.map((e) => e.jobRole)), [allEmployees]);
-  const positionOptions = useMemo(() => uniq(allEmployees.map((e) => e.position?.name)), [allEmployees]);
-  const teamOptions = useMemo(() => uniq(allEmployees.map((e) => e.team?.name)), [allEmployees]);
+  const jobRoleOptions = useMemo(() => uniq(activeEmps.map((e) => e.jobRole)), [activeEmps]);
+  const positionOptions = useMemo(() => uniq(activeEmps.map((e) => e.position?.name)), [activeEmps]);
+  const teamOptions = useMemo(() => uniq(activeEmps.map((e) => e.team?.name)), [activeEmps]);
   const gradeOptions = useMemo(() => Array.from(new Set(allEmployees.map((e) => e.salaryGrade).filter((g): g is number => typeof g === "number"))).sort((a, b) => a - b), [allEmployees]);
 
   // Đếm NV chưa cập nhật thông tin cơ bản (chỉ tính NV đang làm/thử việc)
@@ -602,13 +605,15 @@ export default function EmployeesPage() {
                 <option value="FEMALE">Nữ</option>
               </select>
             </div>
-            <div>
-              <label className={lCls} style={lSt}>Tổ / Đội / Bộ phận</label>
-              <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className={fCls} style={fSt}>
-                <option value="">Tất cả</option>
-                {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
+            {teamOptions.length > 0 && (
+              <div>
+                <label className={lCls} style={lSt}>Tổ / Đội / Bộ phận</label>
+                <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className={fCls} style={fSt}>
+                  <option value="">Tất cả</option>
+                  {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label className={lCls} style={lSt}>Chức vụ</label>
               <select value={jobRoleFilter} onChange={(e) => setJobRoleFilter(e.target.value)} className={fCls} style={fSt}>

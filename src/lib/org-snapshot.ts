@@ -12,7 +12,7 @@ export function currentPeriod(): string {
 export async function captureOrgSnapshot(period: string) {
   const [depts, teams, deptCounts, teamCounts] = await Promise.all([
     prisma.department.findMany({ where: { isActive: true }, select: { id: true, code: true, name: true } }),
-    prisma.productionTeam.findMany({ select: { id: true, name: true } }),
+    prisma.productionTeam.findMany({ where: { isActive: true }, select: { id: true, name: true } }),
     prisma.employee.groupBy({ by: ["departmentId"], where: { status: { in: [...WORKING] } }, _count: { id: true } }),
     prisma.employee.groupBy({ by: ["teamId"], where: { status: { in: [...WORKING] }, teamId: { not: null } }, _count: { id: true } }),
   ]);

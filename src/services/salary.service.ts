@@ -2,7 +2,7 @@ import prisma from "@/lib/prisma";
 import { calculateSalary, type SalaryInput } from "@/lib/salary-calc";
 import { leaveCodeBase, leaveQty, COMPANY_PAID_LEAVE, BHXH_LEAVE } from "@/lib/attendance-codes";
 import { standardWorkDays, isHoliday, isCompensatoryHoliday } from "@/lib/holidays";
-import { computeBhxh } from "@/lib/constants";
+import { computeBhxh, SALARY_CONFIG } from "@/lib/constants";
 
 // ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
 
@@ -281,10 +281,62 @@ export async function calculatePayrollForPeriod(periodId: string) {
     else otMap[o.employeeId].weekday += o.hours;
   }
 
+  // ── MIỄN THUẾ OT theo THỨ TỰ NGÀY (chốt 2026-07-03, theo HR) ───────────────
+  // Cộng dồn giờ OT (THÔ, chưa nhân hệ số) từ ĐẦU THÁNG tới khi chạm mốc 200h/năm (đã trừ OT cộng dồn tháng trước).
+  //   Phần giờ NẰM TRONG mốc → miễn thuế theo ĐÚNG hệ số của từng giờ (×1.5/×2/×2.7/×3…), KHÔNG chia đều tỉ lệ trung bình.
+  //   Trả về TỈ LỆ miễn = Σ(giờ miễn × hệ số) / Σ(tất cả giờ OT × hệ số) → nhân với tiền OT để ra phần miễn.
+  const OT_COEF = {
+    weekday: SALARY_CONFIG.OT_RATE_WEEKDAY, weekdayNight: SALARY_CONFIG.OT_RATE_WEEKDAY_NIGHT,
+    sunday: SALARY_CONFIG.OT_RATE_SUNDAY, sundayNight: SALARY_CONFIG.OT_RATE_SUNDAY_NIGHT,
+    holiday: SALARY_CONFIG.OT_RATE_HOLIDAY, holidayNight: SALARY_CONFIG.OT_RATE_HOLIDAY_NIGHT,
+  };
+  const otEntries: Record<string, { t: number; raw: number; coef: number }[]> = {};
+  const pushOt = (id: string, t: number, raw: number, coef: number) => {
+    if (raw > 0) (otEntries[id] ||= []).push({ t, raw, coef });
+  };
+  for (const a of attendanceData) {
+    const d = new Date(a.date); const t = d.getTime();
+    const wh = a.workHours || 0, oh = a.otHours || 0, onh = (a as any).otNightHours || 0;
+    if (isHoliday(d)) {
+      const compH = isCompensatoryHoliday(d);
+      pushOt(a.employeeId, t, wh + oh, compH ? OT_COEF.sunday : OT_COEF.holiday);
+      pushOt(a.employeeId, t, onh, compH ? OT_COEF.sundayNight : OT_COEF.holidayNight);
+    } else if (d.getUTCDay() === 0) {
+      pushOt(a.employeeId, t, wh + oh, OT_COEF.sunday);
+      pushOt(a.employeeId, t, onh, OT_COEF.sundayNight);
+    } else {
+      pushOt(a.employeeId, t, oh, OT_COEF.weekday);
+      pushOt(a.employeeId, t, onh, OT_COEF.weekdayNight);
+    }
+  }
+  for (const o of otData) {
+    const coef = o.otRate >= OT_COEF.holiday ? OT_COEF.holiday : o.otRate >= OT_COEF.sunday ? OT_COEF.sunday : OT_COEF.weekday;
+    pushOt(o.employeeId, new Date(o.date).getTime(), o.hours || 0, coef);
+  }
+  const otExemptRatioMap: Record<string, number> = {};
+  for (const [id, entries] of Object.entries(otEntries)) {
+    entries.sort((x, y) => x.t - y.t); // theo thứ tự NGÀY
+    const totalConv = entries.reduce((s, e) => s + e.raw * e.coef, 0);
+    let capRaw = Math.max(0, SALARY_CONFIG.OT_TAX_FREE_HOURS_YEAR - (priorOtMap[id] || 0)); // giờ OT còn được miễn trong năm
+    let exemptConv = 0;
+    for (const e of entries) {
+      if (capRaw <= 0) break;
+      const take = Math.min(e.raw, capRaw);  // phần giờ (thô) của mục này còn nằm trong mốc
+      exemptConv += take * e.coef;           // quy đổi phần miễn theo ĐÚNG hệ số của mục
+      capRaw -= take;
+    }
+    otExemptRatioMap[id] = totalConv > 0 ? exemptConv / totalConv : 0;
+  }
+
   // 6 — Nghỉ phép có lương (LeaveRequest + mã AL bảng công) → hưởng theo Lương BHXH/CC
   const leavePaidMap: Record<string, number> = {};
+  // SICK (ốm) + MATERNITY/PATERNITY (thai sản) qua ĐƠN NGHỈ — BHXH chi trả → chỉ hiển thị (bhxhLeaveDays),
+  //   KHÔNG vào leaveDays (công ty trả). Đồng bộ với path mã chấm công SL/MT ở trên.
+  const BHXH_LEAVE_TYPES = new Set(["SICK", "MATERNITY", "PATERNITY"]);
   for (const l of leaveData) {
-    if (l.leaveType !== "UNPAID") leavePaidMap[l.employeeId] = (leavePaidMap[l.employeeId] || 0) + l.totalDays;
+    if (l.leaveType === "UNPAID") continue;
+    if (BHXH_LEAVE_TYPES.has(l.leaveType)) bhxhLeaveDaysMap[l.employeeId] = (bhxhLeaveDaysMap[l.employeeId] || 0) + l.totalDays;
+    else leavePaidMap[l.employeeId] = (leavePaidMap[l.employeeId] || 0) + l.totalDays;
   }
   for (const [empId, days] of Object.entries(alDaysFromAttendance)) {
     leavePaidMap[empId] = (leavePaidMap[empId] || 0) + days;
@@ -352,14 +404,22 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const nightBase = nightCong * o.dailyRateFull;
     timeInfo[emp.id] = { timeSalary: o.salaryWorkActual + o.salaryOT + nightBase, cong: o.workDaysActual + nightCong + o.otConvertedHours / 8 };
   }
-  // Khoán theo tổ kỳ này (cộng dồn nếu nhiều dòng/dự án cùng tổ).
+  // Khoán kỳ này — cộng dồn nếu nhiều dòng/dự án cùng nhóm.
+  //   • Theo TỔ (teamId): lịch sử ≤ T6/2026 (tổ SX cũ).
+  //   • Theo XƯỞNG (departmentId): từ T7/2026 — Xưởng nay là phòng ban, NV không còn tổ (teamId=null).
   const khoanRecords = await prisma.pieceRateRecord.findMany({ where: { month: period.month, year: period.year } });
-  const khoanByTeam: Record<string, number> = {};
-  for (const r of khoanRecords) khoanByTeam[r.teamId] = (khoanByTeam[r.teamId] || 0) + r.totalAmount;
-  // PASS 2: chia khoán cho từng NV trong tổ.
+  const khoanByGroup: Record<string, number> = {}; // key: "dept:<id>" | "team:<id>"
+  for (const r of khoanRecords) {
+    const key = r.departmentId ? `dept:${r.departmentId}` : r.teamId ? `team:${r.teamId}` : null;
+    if (!key) continue;
+    khoanByGroup[key] = (khoanByGroup[key] || 0) + r.totalAmount;
+  }
+  // PASS 2: chia khoán cho từng NV trong nhóm (Xưởng hoặc Tổ).
   const luongKhoanMap: Record<string, number> = {};
-  for (const [teamId, khoan] of Object.entries(khoanByTeam)) {
-    const members = employees.filter((e) => (e as any).team?.id === teamId && timeInfo[e.id]);
+  for (const [key, khoan] of Object.entries(khoanByGroup)) {
+    const [type, gid] = [key.slice(0, 4), key.slice(5)];
+    const members = employees.filter((e) =>
+      (type === "dept" ? (e as any).departmentId === gid : (e as any).team?.id === gid) && timeInfo[e.id]);
     const sumTime = members.reduce((s, e) => s + timeInfo[e.id].timeSalary, 0);
     const sumCong = members.reduce((s, e) => s + timeInfo[e.id].cong, 0);
     if (sumCong <= 0) continue;
@@ -448,6 +508,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       adjustment: manualMap[emp.id]?.adjustment || 0,
       mealOT: (mealOTMap[emp.id] || 0) + (manualMap[emp.id]?.mealBonus || 0), // tiền ăn tăng giờ: tự tính + bổ sung import (chịu thuế)
       priorOtHours: priorOtMap[emp.id] || 0, // OT cộng dồn từ đầu năm → cap 200h miễn thuế
+      otTaxExemptRatio: otExemptRatioMap[emp.id], // tỉ lệ tiền OT miễn thuế (tính theo thứ tự ngày + đúng hệ số)
       importedBhxhEmployee: bh.employee, // BHXH NLĐ 10.5% (tự tính) — khoản trừ
       importedBhxhEmployer: bh.employer, // BHXH công ty 21.5% (tự tính) — báo cáo chi phí
     };

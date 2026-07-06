@@ -10,7 +10,7 @@ export default async function OrgChartPage() {
       orderBy: { sortOrder: "asc" },
     }),
     prisma.directorate.findMany({ orderBy: { name: "asc" } }),
-    prisma.productionTeam.findMany({ orderBy: { name: "asc" } }),
+    prisma.productionTeam.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
     prisma.employee.groupBy({
       by: ["departmentId"],
       where: { status: { in: ["ACTIVE", "PROBATION"] } },
@@ -26,6 +26,18 @@ export default async function OrgChartPage() {
   });
   const teamCountMap: Record<string, number> = {};
   for (const c of teamCounts) if (c.teamId) teamCountMap[c.teamId] = c._count.id;
+
+  // Giám đốc của từng khối (Directorate.directorIds = Employee.id[]).
+  const dirEmpIds = Array.from(
+    new Set(directorates.flatMap((d) => d.directorIds ?? []))
+  ).filter((x): x is string => !!x);
+  const directorEmps = dirEmpIds.length
+    ? await prisma.employee.findMany({
+        where: { id: { in: dirEmpIds } },
+        select: { id: true, code: true, fullName: true, jobRole: true, department: { select: { name: true } } },
+      })
+    : [];
+  const dirEmpMap = new Map(directorEmps.map((e) => [e.id, e]));
 
   const countMap: Record<string, number> = {};
   for (const c of employeeCounts) {
@@ -56,7 +68,8 @@ export default async function OrgChartPage() {
         {[
           { label: "Tổng CBNV", value: totalActive },
           { label: "Phòng ban", value: departments.length },
-          { label: "Tổ sản xuất", value: productionTeams.length },
+          // Tổ sản xuất: ẩn nếu không còn tổ nào đang hoạt động (Xưởng nay là phòng ban).
+          ...(productionTeams.length > 0 ? [{ label: "Tổ sản xuất", value: productionTeams.length }] : []),
           { label: "Cấp quản lý", value: 4 },
         ].map((s) => (
           <div
@@ -76,7 +89,15 @@ export default async function OrgChartPage() {
 
       <OrgChartTabs
         departments={deptWithCounts}
-        directorates={directorates.map((d) => ({ id: d.id, name: d.name, nameVi: d.nameVi }))}
+        directorates={directorates.map((d) => ({
+          id: d.id,
+          name: d.name,
+          nameVi: d.nameVi,
+          directors: (d.directorIds ?? [])
+            .map((eid) => dirEmpMap.get(eid))
+            .filter((e): e is NonNullable<typeof e> => !!e)
+            .map((e) => ({ code: e.code, fullName: e.fullName, jobRole: e.jobRole, deptName: e.department?.name ?? null })),
+        }))}
         productionTeams={productionTeams.map((t) => ({ id: t.id, name: t.name, memberCount: t.memberCount, actual: teamCountMap[t.id] ?? 0 }))}
       />
 
@@ -84,9 +105,9 @@ export default async function OrgChartPage() {
       <div className="flex gap-4 mt-4 flex-wrap">
         {[
           { color: "var(--ibs-accent)", label: "Ban lãnh đạo" },
-          { color: "#00B4D8", label: "Khối Thương mại" },
-          { color: "#22c55e", label: "Khối Vận hành" },
-          { color: "#f59e0b", label: "Khối Sản xuất" },
+          { color: "#f59e0b", label: "Khối Trực tiếp" },
+          { color: "#00B4D8", label: "Khối Gián tiếp" },
+          { color: "#22c55e", label: "Khối Chuyển đổi & Quản trị" },
         ].map((l) => (
           <div key={l.label} className="flex items-center gap-2 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>
             <div className="w-3 h-3 rounded-sm" style={{ background: l.color }} />

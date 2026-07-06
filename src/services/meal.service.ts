@@ -1,17 +1,20 @@
 import prisma from "@/lib/prisma";
-import { MEAL_UNIT_PRICE, MEAL_CUTOFF_HOUR } from "@/lib/constants";
+import { MEAL_UNIT_PRICE, MEAL_CUTOFF_HOUR, MEAL_MAX_PAST_DAYS } from "@/lib/constants";
 
-// Chốt giờ đăng ký suất ăn THƯỜNG: trước 9h (giờ VN) ai cũng đăng ký được; từ 9h (cùng ngày)
-// hoặc ngày đã qua → KHÓA với TẤT CẢ (kể cả HCNS), phải chuyển sang Đăng ký bổ sung.
-// Tính theo UTC+7 để đúng giờ VN bất kể múi giờ server. Ngày tương lai vẫn cho đăng ký.
+// Chốt đăng ký suất ăn THƯỜNG (giờ VN, UTC+7 để đúng bất kể múi giờ server):
+//   - Ngày tương lai: cho đăng ký.
+//   - Hôm nay: trước 9h ai cũng đăng ký được; từ 9h trở đi KHÓA.
+//   - Quá khứ: CHO PHÉP bổ sung tối đa MEAL_MAX_PAST_DAYS ngày trước (vd Thứ 4 → tới Thứ 2);
+//     xa hơn → KHÓA, phải chuyển sang Đăng ký bổ sung.
 export function isAfterMealCutoff(dateStr: string): boolean {
   const nowVN = new Date(Date.now() + 7 * 3600 * 1000);
-  const todayNum = nowVN.getUTCFullYear() * 10000 + nowVN.getUTCMonth() * 100 + nowVN.getUTCDate();
+  const todayVN = Date.UTC(nowVN.getUTCFullYear(), nowVN.getUTCMonth(), nowVN.getUTCDate());
   const target = new Date(dateStr);
-  const targetNum = target.getUTCFullYear() * 10000 + target.getUTCMonth() * 100 + target.getUTCDate();
-  if (targetNum < todayNum) return true;   // ngày đã qua
-  if (targetNum > todayNum) return false;  // ngày tương lai → cho phép
-  return nowVN.getUTCHours() >= MEAL_CUTOFF_HOUR; // hôm nay: từ 9h trở đi
+  const targetVN = Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate());
+  const diffDays = Math.round((targetVN - todayVN) / 86400000); // <0 quá khứ, 0 hôm nay, >0 tương lai
+  if (diffDays > 0) return false;                                  // tương lai → cho phép
+  if (diffDays === 0) return nowVN.getUTCHours() >= MEAL_CUTOFF_HOUR; // hôm nay: từ 9h khóa
+  return diffDays < -MEAL_MAX_PAST_DAYS;                            // quá khứ: -1..-2 cho phép; ≤ -3 khóa
 }
 
 // Sentinel dùng ở dropdown "Phòng ban" của form đăng ký suất ăn: chọn "Thầu phụ"

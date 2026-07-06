@@ -1630,7 +1630,9 @@ function RegisterMealModal({ departments, subcontractors = [], selectedDate, onC
   // Chốt giờ đăng ký. Thường: chốt 9h. Bổ sung: chốt 10h30 — sau đó (và ngày đã qua)
   // chỉ P. HCNS (canManageMeals) được thêm/sửa. HCNS không bị giới hạn giờ với bổ sung.
   const MEAL_CUTOFF_HOUR = 9;
+  const MEAL_MAX_PAST_DAYS = 2; // đăng ký thường bổ sung cho quá khứ tối đa 2 ngày (cửa sổ 3 ngày)
   const SUPP_CUTOFF_HOUR = 10, SUPP_CUTOFF_MIN = 30;
+  const dayNum = (s: string) => { const [y, m, d] = s.split("-").map(Number); return Date.UTC(y, m - 1, d); };
   function isAfterCutoff(dateStr: string): boolean {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -1641,15 +1643,16 @@ function RegisterMealModal({ departments, subcontractors = [], selectedDate, onC
       const mins = now.getHours() * 60 + now.getMinutes();
       return mins >= SUPP_CUTOFF_HOUR * 60 + SUPP_CUTOFF_MIN; // hôm nay: sau 10h30
     }
-    // đăng ký thường: chốt 9h
-    if (dateStr < today) return true;
-    if (dateStr === today && now.getHours() >= MEAL_CUTOFF_HOUR) return true;
-    return false;
+    // đăng ký thường: quá khứ cho bổ sung tối đa MEAL_MAX_PAST_DAYS ngày; hôm nay chốt 9h; tương lai mở.
+    const diffDays = Math.round((dayNum(dateStr) - dayNum(today)) / 86400000);
+    if (diffDays > 0) return false;                              // tương lai
+    if (diffDays === 0) return now.getHours() >= MEAL_CUTOFF_HOUR; // hôm nay: từ 9h khóa
+    return diffDays < -MEAL_MAX_PAST_DAYS;                        // quá khứ: -1,-2 cho phép; ≤ -3 khóa
   }
   const cutoffPassed = isAfterCutoff(form.date);
   const cutoffMsg = supplementary
     ? "Đã quá giờ đăng ký bổ sung (10h30). Sau 10h30 chỉ P. HCNS được thêm/cập nhật."
-    : `Đã quá giờ đăng ký suất ăn (chốt trước ${MEAL_CUTOFF_HOUR}h sáng).`;
+    : `Ngoài hạn đăng ký (chỉ đăng ký trong 3 ngày gần nhất; hôm nay chốt trước ${MEAL_CUTOFF_HOUR}h sáng).`;
 
   // "Thầu phụ" là một mục trong dropdown Phòng ban (sentinel). Khi chọn nó, đối tượng
   // đăng ký = thầu phụ; chọn nhà thầu cụ thể (form.subcontractorName lúc này GIỮ ID nhà thầu).
