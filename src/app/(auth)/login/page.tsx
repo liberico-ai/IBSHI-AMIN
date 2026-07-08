@@ -24,7 +24,7 @@ export default function LoginPage() {
       });
 
       if (result?.error) {
-        setError("Email hoặc mật khẩu không đúng");
+        setError("Số điện thoại hoặc mật khẩu không đúng");
       } else {
         router.push("/");
         router.refresh();
@@ -69,13 +69,15 @@ export default function LoginPage() {
               className="block text-xs font-medium mb-1.5"
               style={{ color: "var(--ibs-text-dim)" }}
             >
-              Tên đăng nhập
+              Số điện thoại
             </label>
             <input
-              type="text"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="toannd"
+              placeholder="0912 345 678"
               required
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-colors"
               style={{
