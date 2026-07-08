@@ -4,13 +4,28 @@ import { compare } from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 
+// Sinh các biến thể SĐT để tra cứu (dữ liệu có thể lưu "0912...", "+84912...", "84912...").
+function phoneCandidates(raw: string): string[] {
+  const trimmed = raw.trim();
+  const digits = trimmed.replace(/\D/g, ""); // chỉ giữ chữ số
+  let local = digits;
+  if (local.startsWith("84")) local = "0" + local.slice(2); // +84xxx / 84xxx -> 0xxx
+  else if (!local.startsWith("0") && local.length === 9) local = "0" + local; // thiếu số 0 đầu
+  const set = new Set<string>([trimmed, digits, local]);
+  if (local.startsWith("0")) {
+    set.add("84" + local.slice(1));
+    set.add("+84" + local.slice(1));
+  }
+  return Array.from(set).filter((s) => s.length > 0);
+}
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
   providers: [
     Credentials({
       name: "credentials",
       credentials: {
-        username: { label: "Tên đăng nhập", type: "text" },
+        username: { label: "Số điện thoại", type: "text" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials, request) {
@@ -18,18 +33,22 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           return null;
         }
 
-        const login = (credentials.username as string).trim().toLowerCase();
+        // Đăng nhập bằng SỐ ĐIỆN THOẠI (Employee.phone). Không còn dùng mã NV / email.
+        const candidates = phoneCandidates(credentials.username as string);
+        if (candidates.length === 0) return null;
 
-        // Look up by employeeCode (username) first, fallback to email
-        const user = await prisma.user.findFirst({
-          where: {
-            OR: [
-              { employeeCode: { equals: login, mode: "insensitive" } },
-              { email: { equals: login, mode: "insensitive" } },
-            ],
-          },
-          include: { employee: true },
+        const employees = await prisma.employee.findMany({
+          where: { phone: { in: candidates } },
+          include: { user: true },
         });
+
+        // Chỉ tính các tài khoản đang hoạt động. Nếu 0 hoặc >1 → không xác định
+        // được người dùng (SĐT trùng) → từ chối an toàn, không đăng nhập nhầm.
+        const matches = employees.filter((e) => e.user && e.user.isActive);
+        if (matches.length !== 1) return null;
+
+        const employee = matches[0];
+        const user = { ...employee.user, employee };
 
         if (!user || !user.isActive) return null;
 
