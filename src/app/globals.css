@@ -107,6 +107,58 @@
     --sidebar-ring: #e63946;
   }
 
+  /* === Dark Theme (bật khi <html data-theme="dark">) === */
+  [data-theme="dark"] {
+    --ibs-primary: #1c3d5e;
+    --ibs-primary-light: #2a4d70;
+    --ibs-primary-dark: #0a2540;
+    --ibs-accent: #f0555f;
+    --ibs-success: #34d399;
+    --ibs-warning: #fbbf24;
+    --ibs-danger: #f87171;
+    --ibs-info: #60a5fa;
+
+    --ibs-bg: #0b1220;
+    --ibs-bg-card: #131c2e;
+    --ibs-bg-card-hover: #1b2740;
+    --ibs-bg-sidebar: #070d17;
+
+    --ibs-text: #e6edf5;
+    --ibs-text-muted: #9fb0c3;
+    --ibs-text-dim: #6f8098;
+
+    --ibs-border: #22304a;
+
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
+    --info: #60a5fa;
+    --accent: #f0555f;
+
+    /* shadcn compatibility — dark */
+    --background: #0b1220;
+    --foreground: #e6edf5;
+    --card: #131c2e;
+    --card-foreground: #e6edf5;
+    --popover: #131c2e;
+    --popover-foreground: #e6edf5;
+    --primary: #e6edf5;
+    --primary-foreground: #0b1220;
+    --secondary: #1b2740;
+    --secondary-foreground: #e6edf5;
+    --muted: #1b2740;
+    --muted-foreground: #9fb0c3;
+    --accent-foreground: #ffffff;
+    --destructive: #f87171;
+    --border: #22304a;
+    --input: #22304a;
+    --ring: #f0555f;
+
+    --sidebar: #070d17;
+    --sidebar-foreground: #cbd5e1;
+    --sidebar-border: rgba(255, 255, 255, 0.06);
+  }
+
   * {
     @apply border-border;
   }
