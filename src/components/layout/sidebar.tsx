@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { getInitials } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 
 const iconMap: Record<string, LucideIcon> = {
   LayoutDashboard, User, Building2, CalendarDays, Users, GraduationCap,
@@ -23,6 +24,7 @@ const iconMap: Record<string, LucideIcon> = {
 type NavItem = {
   icon: string;
   label: string;
+  labelEn?: string;
   href: string;
   badge: number | null;
   badgeType?: "warn";
@@ -30,6 +32,7 @@ type NavItem = {
 
 type NavSection = {
   section: string;
+  sectionEn?: string;
   items: readonly NavItem[];
   subItems?: readonly NavItem[];
 };
@@ -37,47 +40,51 @@ type NavSection = {
 const NAV_SECTIONS: NavSection[] = [
   {
     section: "Tổng quan",
+    sectionEn: "Overview",
     items: [
-      { icon: "LayoutDashboard", label: "Dashboard", href: "/", badge: null },
+      { icon: "LayoutDashboard", label: "Dashboard", labelEn: "Dashboard", href: "/", badge: null },
     ],
   },
   {
     section: "Nhân sự (HR)",
+    sectionEn: "Human Resources",
     items: [
-      { icon: "User", label: "M1 - Hồ sơ nhân sự", href: "/ho-so", badge: null },
-      { icon: "Building2", label: "M2 - Sơ đồ tổ chức", href: "/so-do", badge: null },
-      { icon: "CalendarDays", label: "M3 - Chấm công", href: "/cham-cong", badge: 2 },
-      { icon: "Users", label: "M4 - Tuyển dụng", href: "/tuyen-dung", badge: 3, badgeType: "warn" },
-      { icon: "GraduationCap", label: "M5 - Đào tạo", href: "/dao-tao", badge: null },
-      { icon: "Trophy", label: "M6 - Đánh giá & KPI", href: "/kpi", badge: null },
-      { icon: "Banknote", label: "M7 - Lương & BHXH", href: "/luong", badge: null },
+      { icon: "User", label: "M1 - Hồ sơ nhân sự", labelEn: "M1 - Employee Records", href: "/ho-so", badge: null },
+      { icon: "Building2", label: "M2 - Sơ đồ tổ chức", labelEn: "M2 - Org Chart", href: "/so-do", badge: null },
+      { icon: "CalendarDays", label: "M3 - Chấm công", labelEn: "M3 - Attendance", href: "/cham-cong", badge: 2 },
+      { icon: "Users", label: "M4 - Tuyển dụng", labelEn: "M4 - Recruitment", href: "/tuyen-dung", badge: 3, badgeType: "warn" },
+      { icon: "GraduationCap", label: "M5 - Đào tạo", labelEn: "M5 - Training", href: "/dao-tao", badge: null },
+      { icon: "Trophy", label: "M6 - Đánh giá & KPI", labelEn: "M6 - Evaluation & KPI", href: "/kpi", badge: null },
+      { icon: "Banknote", label: "M7 - Lương & BHXH", labelEn: "M7 - Payroll & Insurance", href: "/luong", badge: null },
     ],
   },
   {
     section: "Quản trị",
+    sectionEn: "Administration",
     items: [
-      { icon: "FileText", label: "M8 - Kỷ luật & Quy định", href: "/ky-luat", badge: null },
-      { icon: "AlertTriangle", label: "M9 - HSE An toàn", href: "/hse", badge: 1 },
-      { icon: "Briefcase", label: "M10 - Hành chính", href: "/hanh-chinh", badge: null },
+      { icon: "FileText", label: "M8 - Kỷ luật & Quy định", labelEn: "M8 - Discipline & Policies", href: "/ky-luat", badge: null },
+      { icon: "AlertTriangle", label: "M9 - HSE An toàn", labelEn: "M9 - HSE Safety", href: "/hse", badge: 1 },
+      { icon: "Briefcase", label: "M10 - Hành chính", labelEn: "M10 - Administration", href: "/hanh-chinh", badge: null },
     ],
     subItems: [
-      { icon: "DoorOpen", label: "Đặt phòng họp", href: "/hanh-chinh/phong-hop", badge: null },
-      { icon: "Car", label: "Quản lý xe", href: "/hanh-chinh/xe", badge: null },
-      { icon: "Wrench", label: "Yêu cầu cấp phát, sửa chữa thiết bị VP", href: "/hanh-chinh/sua-chua", badge: null },
-      { icon: "Package", label: "Văn phòng phẩm", href: "/hanh-chinh/vpp", badge: null },
-      { icon: "UtensilsCrossed", label: "Nhà ăn", href: "/hanh-chinh/nha-an", badge: null },
-      { icon: "Sparkles", label: "Vệ sinh", href: "/hanh-chinh/ve-sinh", badge: null },
-      { icon: "UserPlus", label: "Đăng ký khách", href: "/hanh-chinh/khach", badge: 2, badgeType: "warn" },
-      { icon: "Calendar", label: "Sự kiện & Audit", href: "/hanh-chinh/su-kien", badge: 1 },
-      { icon: "Inbox", label: "Công văn đến", href: "/hanh-chinh/cong-van-den", badge: null },
-      { icon: "Send", label: "Công văn đi", href: "/hanh-chinh/cong-van-di", badge: null },
+      { icon: "DoorOpen", label: "Đặt phòng họp", labelEn: "Meeting Rooms", href: "/hanh-chinh/phong-hop", badge: null },
+      { icon: "Car", label: "Quản lý xe", labelEn: "Vehicles", href: "/hanh-chinh/xe", badge: null },
+      { icon: "Wrench", label: "Yêu cầu cấp phát, sửa chữa thiết bị VP", labelEn: "Office Equipment Requests", href: "/hanh-chinh/sua-chua", badge: null },
+      { icon: "Package", label: "Văn phòng phẩm", labelEn: "Office Supplies", href: "/hanh-chinh/vpp", badge: null },
+      { icon: "UtensilsCrossed", label: "Nhà ăn", labelEn: "Canteen", href: "/hanh-chinh/nha-an", badge: null },
+      { icon: "Sparkles", label: "Vệ sinh", labelEn: "Cleaning", href: "/hanh-chinh/ve-sinh", badge: null },
+      { icon: "UserPlus", label: "Đăng ký khách", labelEn: "Visitor Registration", href: "/hanh-chinh/khach", badge: 2, badgeType: "warn" },
+      { icon: "Calendar", label: "Sự kiện & Audit", labelEn: "Events & Audit", href: "/hanh-chinh/su-kien", badge: 1 },
+      { icon: "Inbox", label: "Công văn đến", labelEn: "Incoming Documents", href: "/hanh-chinh/cong-van-den", badge: null },
+      { icon: "Send", label: "Công văn đi", labelEn: "Outgoing Documents", href: "/hanh-chinh/cong-van-di", badge: null },
     ],
   },
   {
     section: "Hệ thống",
+    sectionEn: "System",
     items: [
-      { icon: "BarChart3", label: "Báo cáo", href: "/bao-cao", badge: null },
-      { icon: "Settings", label: "Cài đặt", href: "/cai-dat", badge: null },
+      { icon: "BarChart3", label: "Báo cáo", labelEn: "Reports", href: "/bao-cao", badge: null },
+      { icon: "Settings", label: "Cài đặt", labelEn: "Settings", href: "/cai-dat", badge: null },
     ],
   },
 ];
@@ -91,6 +98,15 @@ const ROLE_LABELS: Record<string, string> = {
   EMPLOYEE: "Nhân viên",
 };
 
+const ROLE_LABELS_EN: Record<string, string> = {
+  ADMIN: "System Admin",
+  BOM: "Board of Management",
+  HR_ADMIN: "HR Department",
+  MANAGER: "Manager",
+  TEAM_LEAD: "Team Lead",
+  EMPLOYEE: "Employee",
+};
+
 interface SidebarProps {
   userName?: string;
   userRole?: string;
@@ -101,6 +117,8 @@ interface SidebarProps {
 
 export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll = false, open = true, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { lang } = useLang();
+  const L = (vi: string, en?: string) => (lang === "en" && en ? en : vi);
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -157,7 +175,7 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll =
                 className="px-5 py-2 text-[10px] uppercase tracking-[1.2px] font-semibold"
                 style={{ color: "rgba(255,255,255,0.4)" }}
               >
-                {section.section}
+                {L(section.section, section.sectionEn)}
               </div>
               {section.items.filter((item) => canViewPayroll || item.href !== "/luong").map((item) => {
                 const Icon = iconMap[item.icon];
@@ -176,7 +194,7 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll =
                     }}
                   >
                     {Icon && <Icon size={20} />}
-                    <span>{item.label}</span>
+                    <span>{L(item.label, item.labelEn)}</span>
                     {item.badge && (
                       <span
                         className="ml-auto text-[10px] px-[7px] py-[2px] rounded-[10px] font-bold text-white"
@@ -208,7 +226,7 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll =
                     }}
                   >
                     {Icon && <Icon size={16} />}
-                    <span>{item.label}</span>
+                    <span>{L(item.label, item.labelEn)}</span>
                     {item.badge && (
                       <span
                         className="ml-auto mr-5 text-[10px] px-[7px] py-[2px] rounded-[10px] font-bold text-white"
@@ -244,12 +262,12 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll =
               {userName}
             </div>
             <div className="text-[11px]" style={{ color: "rgba(255,255,255,0.5)" }}>
-              {ROLE_LABELS[userRole] || userRole}
+              {(lang === "en" ? ROLE_LABELS_EN[userRole] : ROLE_LABELS[userRole]) || userRole}
             </div>
           </div>
           <button
             onClick={() => signOut({ callbackUrl: "/login" })}
-            title="Đăng xuất"
+            title={L("Đăng xuất", "Log out")}
             className="flex-shrink-0 p-1.5 rounded-lg transition-colors"
             style={{ color: "rgba(255,255,255,0.5)" }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--ibs-red)")}

@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { X, RefreshCw, Shield, Users, FileText, BarChart3, Download } from "lucide-react";
+import { X, RefreshCw, Shield, Users, FileText, BarChart3, Download, Lock, Globe, Moon, Sun, Check, Eye, EyeOff, UserCircle } from "lucide-react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDateTime, apiError } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 import { usePermission } from "@/hooks/use-permission";
 import { isSystemAdmin } from "@/lib/permissions";
+import { useLang, useT } from "@/lib/i18n";
+import { useTheme } from "@/lib/theme";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type SystemUser = {
@@ -830,69 +832,209 @@ function ReportTab() {
   );
 }
 
-// ── Main Page ──────────────────────────────────────────────────────────────────
-export default function CaiDatPage() {
-  // Role thật lấy từ session
-  const { role } = usePermission();
-  const { status } = useSession();
-  const [activeTab, setActiveTab] = useState<"users" | "audit" | "report">("users");
+// ── Cài đặt cá nhân (mọi user) ───────────────────────────────────────────────────
+function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between py-3 border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }}>
+      <span className="text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>{label}</span>
+      <span className="text-[13px] font-medium" style={{ color: "var(--ibs-text)" }}>{value}</span>
+    </div>
+  );
+}
 
-  const isAdmin = isSystemAdmin(role); // CHỈ Quản trị hệ thống mới vào Cài đặt
+function SettingCard({ title, icon: Icon, children }: { title: string; icon: React.ElementType; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border p-6 mb-5" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+      <div className="flex items-center gap-2 mb-4">
+        <Icon size={16} />
+        <h3 className="text-[15px] font-bold" style={{ color: "var(--ibs-text)" }}>{title}</h3>
+      </div>
+      {children}
+    </div>
+  );
+}
 
-  if (status === "loading") {
-    return <PageTitle title="Cài đặt hệ thống" description="Đang tải…" />;
+function PersonalSettings() {
+  const t = useT();
+  const { lang, setLang } = useLang();
+  const { theme, setTheme } = useTheme();
+  const { data: session } = useSession();
+  const user = session?.user as any;
+  const roleLabel = ROLE_CONFIG[user?.role]?.label || user?.role || "—";
+
+  const [cur, setCur] = useState("");
+  const [nw, setNw] = useState("");
+  const [cf, setCf] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function submitPw(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    if (nw !== cf) { setMsg({ ok: false, text: t("Xác nhận mật khẩu không khớp", "Password confirmation does not match") }); return; }
+    if (nw.length < 8) { setMsg({ ok: false, text: t("Mật khẩu mới tối thiểu 8 ký tự", "New password must be at least 8 characters") }); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/v1/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword: cur, newPassword: nw }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ ok: false, text: data?.error?.message || t("Đổi mật khẩu thất bại", "Failed to change password") });
+        return;
+      }
+      setMsg({ ok: true, text: t("Đổi mật khẩu thành công", "Password changed successfully") });
+      setCur(""); setNw(""); setCf("");
+    } catch {
+      setMsg({ ok: false, text: t("Không kết nối được máy chủ", "Cannot connect to server") });
+    } finally {
+      setSaving(false);
+    }
   }
 
-  if (!isAdmin) {
-    return (
-      <div>
-        <PageTitle title="Cài đặt hệ thống" description="Phân quyền, tài khoản người dùng và audit log" />
-        <ForbiddenBlock />
-      </div>
-    );
+  const inputCls = "w-full px-3 py-2.5 rounded-lg text-[13px] outline-none border";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+
+  const SegBtn = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) => (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all"
+      style={{ background: active ? "var(--ibs-accent)" : "transparent", color: active ? "#fff" : "var(--ibs-text-dim)" }}
+    >
+      {children}
+    </button>
+  );
+
+  return (
+    <div className="max-w-[640px]">
+      {/* Thông tin tài khoản — chỉ xem (admin sửa ở Thông tin nhân sự) */}
+      <SettingCard title={t("Thông tin tài khoản", "Account information")} icon={UserCircle}>
+        <InfoRow label={t("Họ tên", "Full name")} value={user?.name || "—"} />
+        <InfoRow label={t("Email", "Email")} value={user?.email || "—"} />
+        <InfoRow label={t("Vai trò", "Role")} value={<RoleBadge role={user?.role || "EMPLOYEE"} />} />
+        <p className="text-[11px] mt-3" style={{ color: "var(--ibs-text-dim)" }}>
+          {t("Thông tin này do Quản trị nhân sự quản lý trong hồ sơ nhân sự.", "This information is managed by HR in the employee records.")}
+        </p>
+      </SettingCard>
+
+      {/* Ngôn ngữ & Giao diện */}
+      <SettingCard title={t("Ngôn ngữ & Giao diện", "Language & Appearance")} icon={Globe}>
+        <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <div>
+            <div className="text-[13px] font-medium" style={{ color: "var(--ibs-text)" }}>{t("Ngôn ngữ", "Language")}</div>
+            <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{t("Chuyển đổi Việt ↔ English", "Switch Vietnamese ↔ English")}</div>
+          </div>
+          <div className="flex gap-1 p-1 rounded-lg" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)" }}>
+            <SegBtn active={lang === "vi"} onClick={() => setLang("vi")}>Tiếng Việt</SegBtn>
+            <SegBtn active={lang === "en"} onClick={() => setLang("en")}>English</SegBtn>
+          </div>
+        </div>
+        <div className="flex items-center justify-between py-3">
+          <div>
+            <div className="text-[13px] font-medium" style={{ color: "var(--ibs-text)" }}>{t("Giao diện", "Theme")}</div>
+            <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{t("Chế độ Sáng / Tối", "Light / Dark mode")}</div>
+          </div>
+          <div className="flex gap-1 p-1 rounded-lg" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)" }}>
+            <SegBtn active={theme === "light"} onClick={() => setTheme("light")}><Sun size={13} /> {t("Sáng", "Light")}</SegBtn>
+            <SegBtn active={theme === "dark"} onClick={() => setTheme("dark")}><Moon size={13} /> {t("Tối", "Dark")}</SegBtn>
+          </div>
+        </div>
+      </SettingCard>
+
+      {/* Đổi mật khẩu */}
+      <SettingCard title={t("Đổi mật khẩu", "Change password")} icon={Lock}>
+        <form onSubmit={submitPw} className="space-y-4">
+          <div>
+            <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>{t("Mật khẩu hiện tại", "Current password")}</label>
+            <input type={showPw ? "text" : "password"} value={cur} onChange={(e) => setCur(e.target.value)} required className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>{t("Mật khẩu mới (tối thiểu 8 ký tự)", "New password (min. 8 characters)")}</label>
+            <input type={showPw ? "text" : "password"} value={nw} onChange={(e) => setNw(e.target.value)} required className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>{t("Xác nhận mật khẩu mới", "Confirm new password")}</label>
+            <input type={showPw ? "text" : "password"} value={cf} onChange={(e) => setCf(e.target.value)} required className={inputCls} style={inputStyle} />
+          </div>
+
+          <button type="button" onClick={() => setShowPw((v) => !v)} className="flex items-center gap-1.5 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
+            {showPw ? <EyeOff size={13} /> : <Eye size={13} />} {showPw ? t("Ẩn mật khẩu", "Hide passwords") : t("Hiện mật khẩu", "Show passwords")}
+          </button>
+
+          {msg && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px]" style={{ background: msg.ok ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.1)", color: msg.ok ? "var(--ibs-success)" : "var(--ibs-danger)" }}>
+              {msg.ok && <Check size={13} />} {msg.text}
+            </div>
+          )}
+
+          <button type="submit" disabled={saving} className="py-2.5 px-6 rounded-lg text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: "var(--ibs-accent)" }}>
+            {saving ? t("Đang lưu…", "Saving…") : t("Đổi mật khẩu", "Change password")}
+          </button>
+        </form>
+      </SettingCard>
+    </div>
+  );
+}
+
+// ── Main Page ──────────────────────────────────────────────────────────────────
+export default function CaiDatPage() {
+  const { role } = usePermission();
+  const { status } = useSession();
+  const t = useT();
+  const [activeTab, setActiveTab] = useState<"users" | "audit" | "report">("users");
+
+  const isAdmin = isSystemAdmin(role);
+
+  if (status === "loading") {
+    return <PageTitle title={t("Cài đặt", "Settings")} description={t("Đang tải…", "Loading…")} />;
   }
 
   const tabs = [
-    { id: "users" as const, label: "Người dùng", icon: Users },
+    { id: "users" as const, label: t("Người dùng", "Users"), icon: Users },
     { id: "audit" as const, label: "Audit Log", icon: FileText },
-    { id: "report" as const, label: "Báo cáo hoạt động", icon: BarChart3 },
+    { id: "report" as const, label: t("Báo cáo hoạt động", "Activity report"), icon: BarChart3 },
   ];
 
   return (
     <div>
-      <PageTitle
-        title="Cài đặt hệ thống"
-        description="Phân quyền RBAC, quản lý tài khoản và theo dõi hoạt động hệ thống"
-      />
+      <PageTitle title={t("Cài đặt", "Settings")} description={t("Quản lý tài khoản và cấu hình hệ thống", "Manage your account and system settings")} />
 
-      {/* Tab bar */}
-      <div
-        className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
-        style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}
-      >
-        {tabs.map(({ id, label, icon: Icon }) => {
-          const isActive = activeTab === id;
-          return (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all"
-              style={{
-                background: isActive ? "var(--ibs-accent)" : "transparent",
-                color: isActive ? "#fff" : "var(--ibs-text-dim)",
-              }}
-            >
-              <Icon size={14} />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+      <PersonalSettings />
 
-      {/* Tab content */}
-      {activeTab === "users" && <UsersTab isBOM={true} />}
-      {activeTab === "audit" && <AuditLogTab />}
-      {activeTab === "report" && <ReportTab />}
+      {/* Khu Quản trị hệ thống — chỉ ADMIN */}
+      {isAdmin && (
+        <div className="mt-10">
+          <div className="flex items-center gap-2 mb-4">
+            <Shield size={16} style={{ color: "var(--ibs-accent)" }} />
+            <h2 className="text-[16px] font-bold" style={{ color: "var(--ibs-text)" }}>{t("Quản trị hệ thống", "System administration")}</h2>
+          </div>
+
+          {/* Tab bar */}
+          <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+            {tabs.map(({ id, label, icon: Icon }) => {
+              const active = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setActiveTab(id)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all"
+                  style={{ background: active ? "var(--ibs-accent)" : "transparent", color: active ? "#fff" : "var(--ibs-text-dim)" }}
+                >
+                  <Icon size={14} />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {activeTab === "users" && <UsersTab isBOM={true} />}
+          {activeTab === "audit" && <AuditLogTab />}
+          {activeTab === "report" && <ReportTab />}
+        </div>
+      )}
     </div>
   );
 }
