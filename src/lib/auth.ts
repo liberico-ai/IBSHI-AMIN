@@ -4,19 +4,16 @@ import { compare } from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 
-// Sinh các biến thể SĐT để tra cứu (dữ liệu có thể lưu "0912...", "+84912...", "84912...").
-function phoneCandidates(raw: string): string[] {
-  const trimmed = raw.trim();
-  const digits = trimmed.replace(/\D/g, ""); // chỉ giữ chữ số
-  let local = digits;
-  if (local.startsWith("84")) local = "0" + local.slice(2); // +84xxx / 84xxx -> 0xxx
-  else if (!local.startsWith("0") && local.length === 9) local = "0" + local; // thiếu số 0 đầu
-  const set = new Set<string>([trimmed, digits, local]);
-  if (local.startsWith("0")) {
-    set.add("84" + local.slice(1));
-    set.add("+84" + local.slice(1));
-  }
-  return Array.from(set).filter((s) => s.length > 0);
+// Chuẩn hoá 1 số về dạng "0xxxxxxxxx": bỏ ký tự thừa, +84/84 -> 0.
+function canonPhone(raw: string): string {
+  const digits = (raw || "").replace(/\D/g, "");
+  if (digits.startsWith("84") && digits.length > 10) return "0" + digits.slice(2);
+  return digits;
+}
+// 1 nhân sự có thể lưu NHIỀU SĐT chung 1 ô (ngăn bởi "/", "," ";"), nhưng
+// CHỈ số ĐẦU TIÊN được dùng để đăng nhập. Số sau chỉ để lưu liên hệ.
+function primaryPhone(stored: string): string {
+  return canonPhone((stored || "").split(/[/,;]/)[0]);
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -34,21 +31,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         }
 
         // Đăng nhập bằng SỐ ĐIỆN THOẠI (Employee.phone). Không còn dùng mã NV / email.
-        const candidates = phoneCandidates(credentials.username as string);
-        if (candidates.length === 0) return null;
+        const input = canonPhone(credentials.username as string);
+        if (!input) return null;
 
-        const employees = await prisma.employee.findMany({
-          where: { phone: { in: candidates } },
-          include: { user: true },
+        // Quét NV đang hoạt động, so khớp theo TỪNG SĐT (tách nếu 1 người nhiều số).
+        const actives = await prisma.employee.findMany({
+          where: { user: { isActive: true } },
+          select: { userId: true, phone: true },
         });
+        const matchedUserIds = actives
+          .filter((e) => primaryPhone(e.phone) === input)
+          .map((e) => e.userId);
 
-        // Chỉ tính các tài khoản đang hoạt động. Nếu 0 hoặc >1 → không xác định
-        // được người dùng (SĐT trùng) → từ chối an toàn, không đăng nhập nhầm.
-        const matches = employees.filter((e) => e.user && e.user.isActive);
-        if (matches.length !== 1) return null;
+        // 0 hoặc >1 khớp → không xác định được người dùng (SĐT trùng) → từ chối an toàn.
+        if (matchedUserIds.length !== 1) return null;
 
-        const employee = matches[0];
-        const user = { ...employee.user, employee };
+        const user = await prisma.user.findUnique({
+          where: { id: matchedUserIds[0] },
+          include: { employee: true },
+        });
 
         if (!user || !user.isActive) return null;
 

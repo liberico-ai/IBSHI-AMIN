@@ -12,10 +12,15 @@ const NO_LOG_PREFIX = [
 ];
 
 export async function middleware(request: NextRequest, event: NextFetchEvent) {
-  const token = await getToken({
-    req: request,
-    secret: process.env.NEXTAUTH_SECRET,
-  });
+  // Auth.js v5: khi chạy HTTPS (sau reverse proxy), cookie phiên có tên
+  // "__Secure-authjs.session-token"; tên cookie cũng là "salt" để giải mã token.
+  // getToken mặc định `secureCookie ?? false` -> tìm tên "authjs.session-token"
+  // (KHÔNG đọc NEXTAUTH_URL) nên trên HTTPS sẽ không thấy cookie -> token null.
+  // Đọc tường minh: thử tên "__Secure-" (HTTPS) trước, fallback tên thường (HTTP/dev).
+  const secret = process.env.NEXTAUTH_SECRET;
+  const token =
+    (await getToken({ req: request, secret, secureCookie: true, cookieName: "__Secure-authjs.session-token" })) ||
+    (await getToken({ req: request, secret, secureCookie: false, cookieName: "authjs.session-token" }));
 
   const { pathname } = request.nextUrl;
 
