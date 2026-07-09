@@ -17,7 +17,9 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   // getToken mặc định `secureCookie ?? false` -> tìm tên "authjs.session-token"
   // (KHÔNG đọc NEXTAUTH_URL) nên trên HTTPS sẽ không thấy cookie -> token null.
   // Đọc tường minh: thử tên "__Secure-" (HTTPS) trước, fallback tên thường (HTTP/dev).
-  const secret = process.env.NEXTAUTH_SECRET;
+  // Dùng ĐÚNG secret mà Auth.js ký cookie (AUTH_SECRET), fallback NEXTAUTH_SECRET —
+  // để không lệch với auth()/`/api/auth/session` (vốn dùng AUTH_SECRET) trên prod.
+  const secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
   const token =
     (await getToken({ req: request, secret, secureCookie: true, cookieName: "__Secure-authjs.session-token" })) ||
     (await getToken({ req: request, secret, secureCookie: false, cookieName: "authjs.session-token" }));
