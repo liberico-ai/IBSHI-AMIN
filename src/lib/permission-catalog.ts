@@ -27,73 +27,72 @@ export type ModuleGroup = {
   features: Feature[];
 };
 
-const CRUD: Action[] = ["view", "create", "edit", "delete"];
+// Mọi tính năng đều có đủ 5 hành động (hiện đủ 5 ô checkbox trên ma trận).
+const A: Action[] = ["view", "create", "edit", "delete", "approve"];
 
 export const PERMISSION_CATALOG: ModuleGroup[] = [
   {
     module: "M1 · Hồ sơ nhân sự",
     features: [
-      { key: "m1.hoso", label: "Hồ sơ nhân sự", actions: ["view", "create", "edit", "delete"] },
-      { key: "m1.luonghd", label: "Lương / Hợp đồng (trong hồ sơ)", actions: ["view", "edit"] },
+      { key: "m1.hoso", label: "Hồ sơ nhân sự", actions: A },
+      { key: "m1.luonghd", label: "Lương / Hợp đồng (trong hồ sơ)", actions: A },
     ],
   },
   {
     module: "M2 · Sơ đồ tổ chức",
-    features: [
-      { key: "m2.sodo", label: "Sơ đồ tổ chức", actions: ["view", "edit"] },
-    ],
+    features: [{ key: "m2.sodo", label: "Sơ đồ tổ chức", actions: A }],
   },
   {
     module: "M3 · Chấm công",
     features: [
-      { key: "m3.bangcong", label: "Bảng chấm công", actions: ["view", "edit"] },
-      { key: "m3.nghiphep", label: "Nghỉ phép", actions: ["view", "create", "approve"] },
-      { key: "m3.tangca", label: "Tăng ca (OT)", actions: ["view", "create", "approve"] },
+      { key: "m3.bangcong", label: "Bảng chấm công", actions: A },
+      { key: "m3.nghiphep", label: "Nghỉ phép", actions: A },
+      { key: "m3.tangca", label: "Tăng ca (OT)", actions: A },
     ],
   },
   {
     module: "M4 · Tuyển dụng",
-    features: [{ key: "m4.tuyendung", label: "Tuyển dụng", actions: CRUD }],
+    features: [{ key: "m4.tuyendung", label: "Tuyển dụng", actions: A }],
   },
   {
     module: "M5 · Đào tạo",
-    features: [{ key: "m5.daotao", label: "Đào tạo & Chứng chỉ", actions: ["view", "create", "edit"] }],
+    features: [{ key: "m5.daotao", label: "Đào tạo & Chứng chỉ", actions: A }],
   },
   {
     module: "M6 · Đánh giá & KPI",
-    features: [{ key: "m6.kpi", label: "Đánh giá & KPI", actions: ["view", "edit"] }],
+    features: [{ key: "m6.kpi", label: "Đánh giá & KPI", actions: A }],
   },
   {
     module: "M7 · Lương & BHXH",
-    features: [{ key: "m7.luong", label: "Lương & BHXH", actions: ["view", "edit", "approve"] }],
+    features: [{ key: "m7.luong", label: "Lương & BHXH", actions: A }],
   },
   {
     module: "M8 · Kỷ luật & Quy định",
-    features: [{ key: "m8.kyluat", label: "Kỷ luật & Quy định", actions: CRUD }],
+    features: [{ key: "m8.kyluat", label: "Kỷ luật & Quy định", actions: A }],
   },
   {
     module: "M9 · HSE An toàn",
-    features: [{ key: "m9.hse", label: "HSE An toàn", actions: ["view", "create", "edit", "approve"] }],
+    features: [{ key: "m9.hse", label: "HSE An toàn", actions: A }],
   },
   {
     module: "M10 · Hành chính",
     features: [
-      { key: "m10.phonghop", label: "Phòng họp", actions: ["view", "create", "approve"] },
-      { key: "m10.xe", label: "Quản lý xe", actions: ["view", "create", "approve"] },
-      { key: "m10.vpp", label: "Văn phòng phẩm", actions: ["view", "create", "approve"] },
-      { key: "m10.nhaan", label: "Nhà ăn", actions: ["view", "create", "edit"] },
-      { key: "m10.vesinh", label: "Vệ sinh", actions: ["view", "create", "edit"] },
-      { key: "m10.khach", label: "Đăng ký khách", actions: ["view", "create", "approve"] },
-      { key: "m10.sukien", label: "Sự kiện", actions: ["view", "create", "edit"] },
-      { key: "m10.congvan", label: "Công văn đến/đi", actions: ["view", "create", "edit"] },
+      { key: "m10.phonghop", label: "Phòng họp", actions: A },
+      { key: "m10.xe", label: "Quản lý xe", actions: A },
+      { key: "m10.vpp", label: "Văn phòng phẩm", actions: A },
+      { key: "m10.nhaan", label: "Nhà ăn", actions: A },
+      { key: "m10.vesinh", label: "Vệ sinh", actions: A },
+      { key: "m10.khach", label: "Đăng ký khách", actions: A },
+      { key: "m10.sukien", label: "Sự kiện", actions: A },
+      { key: "m10.congvan", label: "Công văn đến/đi", actions: A },
     ],
   },
   {
     module: "Hệ thống",
     features: [
-      { key: "sys.phanquyen", label: "Phân quyền & tài khoản", actions: ["view", "edit"] },
-      { key: "sys.audit", label: "Audit Log", actions: ["view"] },
-      { key: "sys.baocao", label: "Báo cáo hoạt động", actions: ["view"] },
+      { key: "sys.phanquyen", label: "Phân quyền & tài khoản", actions: A },
+      { key: "sys.audit", label: "Audit Log", actions: A },
+      { key: "sys.baocao", label: "Báo cáo hoạt động", actions: A },
     ],
   },
 ];
