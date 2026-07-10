@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 import { calcScore, type EvaluationScores } from "@/lib/probation-eval";
 
@@ -24,7 +25,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "recruitment", "read")) {
+  if (!canUser(session.user as any, "m4.tuyendung:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -50,7 +51,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "recruitment", "update")) {
+  if (!canUser(session.user as any, "m4.tuyendung:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -119,7 +120,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "recruitment", "delete")) {
+  if (!canUser(session.user as any, "m4.tuyendung:delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 
 export async function PUT(
@@ -11,7 +12,7 @@ export async function PUT(
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "events", "create")) {
+  if (!canUser(session.user as any, "m10.sukien:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -36,7 +37,7 @@ export async function DELETE(
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "events", "create")) {
+  if (!canUser(session.user as any, "m10.sukien:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

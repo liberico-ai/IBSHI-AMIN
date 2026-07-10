@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -33,8 +34,8 @@ export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  const userRole = (session.user as any).role;
-  if (!canDo(userRole, "vehicleBookings", "approve2")) {
+  // Thêm xe vào ĐỘI XE = quản lý đội xe (m10.xe:edit). Không nhầm với "đặt xe" self-service.
+  if (!canUser(session.user as any, "m10.xe:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

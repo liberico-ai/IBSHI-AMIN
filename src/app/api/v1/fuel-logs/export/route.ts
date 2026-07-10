@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 
 const vnDate = (d: Date | string) => new Date(d).toISOString().slice(0, 10).split("-").reverse().join("/");
@@ -9,7 +10,7 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userRole = (session.user as { role: string }).role;
-  if (!canDo(userRole, "vehicleBookings", "readAll")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.xe:view")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const vehicleId = searchParams.get("vehicleId") || "";

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 
 // GET /api/v1/documents/outgoing?q=&from=&to=
 export async function GET(req: NextRequest) {
@@ -38,8 +39,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  const role = (session.user as any).role;
-  if (!["HR_ADMIN", "BOM", "MANAGER", "ADMIN"].includes(role)) {
+  // Quyền thêm công văn đi = ma trận "m10.congvan:create".
+  if (!canUser(session.user as any, "m10.congvan:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

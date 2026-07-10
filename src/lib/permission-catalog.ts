@@ -163,3 +163,14 @@ export function can(role: string, storedGrants: string[] | null | undefined, per
   if (role === "ADMIN") return true;
   return effectivePerms(role, storedGrants).has(perm);
 }
+
+// Kiểm tra quyền từ session user (role + perms đã tính sẵn ở JWT). Dùng trong API route.
+// perms là MẢNG (kể cả rỗng) → dùng đúng nó (đã tính ở login, [] = khóa sạch).
+// perms KHÔNG phải mảng (undefined — session cũ chưa có field) → fallback gói mẫu để không chặn nhầm.
+export function canUser(user: { role?: string | null; perms?: string[] | null } | null | undefined, perm: string): boolean {
+  const role = user?.role ?? "";
+  if (role === "ADMIN") return true;
+  const stored = user?.perms;
+  const set = Array.isArray(stored) ? new Set(stored) : templatePerms(role);
+  return set.has(perm);
+}

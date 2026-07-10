@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 
 // GET /api/v1/documents/incoming?q=&from=&to=
 export async function GET(req: NextRequest) {
@@ -53,10 +54,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  // Chỉ Phòng HCNS (HR_ADMIN / BOM) được thêm công văn đến.
-  const role = (session.user as any).role;
-  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role)) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ Phòng HCNS được thêm công văn đến" } }, { status: 403 });
+  // Quyền thêm công văn đến = ma trận "m10.congvan:create".
+  if (!canUser(session.user as any, "m10.congvan:create")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền thêm công văn đến" } }, { status: 403 });
   }
 
   const body = await req.json();

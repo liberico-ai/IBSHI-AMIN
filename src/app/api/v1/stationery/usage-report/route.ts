@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canManageVpp } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
 
 // GET ?from=YYYY-MM-DD&to=YYYY-MM-DD&departmentId=... — TỔNG HỢP VPP đã CẤP (sử dụng) theo mặt hàng.
 // Gộp số đã cấp (issuedQuantity) của các phiếu ĐÃ HOÀN THÀNH trong khoảng kỳ.
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
   // Phòng ban: whitelist chọn tuỳ ý (hoặc tất cả); người khác bị khoá về phòng mình.
   let departmentId = searchParams.get("departmentId") || null;
   let departmentName = "Tất cả phòng ban";
-  if (!canManageVpp(role, employeeCode)) {
+  if (!canUser(session.user as any, "m10.vpp:edit")) {
     const meEmp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
     departmentId = meEmp?.departmentId ?? "__none__";
   }

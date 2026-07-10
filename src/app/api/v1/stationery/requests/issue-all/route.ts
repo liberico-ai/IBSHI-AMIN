@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canManageVpp } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
 
 // POST — "Cấp phát toàn bộ": cấp đủ TẤT CẢ yêu cầu ĐÃ DUYỆT (issuedQuantity = quantity).
 // KHÔNG tự chuyển COMPLETED — phiếu chỉ hoàn tất khi NGƯỜI YÊU CẦU bấm "Xác nhận đã nhận".
@@ -9,7 +10,7 @@ import { canManageVpp } from "@/lib/access";
 export async function POST(_req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canManageVpp((session.user as any).role, (session.user as any).employeeCode)) {
+  if (!canUser(session.user as any, "m10.vpp:approve")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền cấp VPP" } }, { status: 403 });
   }
 

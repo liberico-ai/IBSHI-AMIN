@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { logAudit } from "@/lib/audit";
 import { z } from "zod";
 
@@ -45,8 +46,7 @@ export async function POST(
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  const userRole = (session.user as any).role;
-  if (!canDo(userRole, "vehicleBookings", "logMaintenance")) {
+  if (!canUser(session.user as any, "m10.xe:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

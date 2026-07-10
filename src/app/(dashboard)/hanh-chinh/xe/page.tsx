@@ -5,11 +5,12 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, formatDateTime, apiError } from "@/lib/utils";
 import { viewUrl } from "@/lib/use-presigned-url";
-import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench, Download } from "lucide-react";
+import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench, Download, Pencil } from "lucide-react";
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
 import { canApproveRoomVehicle } from "@/lib/access";
+import { useCan } from "@/hooks/use-permission";
 import { VEHICLE_DRIVERS } from "@/lib/constants";
 import { alertDialog } from "@/lib/confirm-dialog";
 
@@ -185,6 +186,8 @@ export default function XePage() {
   const [filterTo, setFilterTo] = useState("");
   const [completingBooking, setCompletingBooking] = useState<VehicleBooking | null>(null);
   const [vehicleHistoryModal, setVehicleHistoryModal] = useState<Vehicle | null>(null);
+  const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null);
+  const can = useCan();
   // Lái xe: tab "Chuyến của tôi"
   const [isDriver, setIsDriver] = useState(false);
   const [myTrips, setMyTrips] = useState<{ pending: MyTrip[]; completed: MyTrip[] }>({ pending: [], completed: [] });
@@ -559,7 +562,19 @@ export default function XePage() {
                       <Car size={16} style={{ color: "var(--ibs-accent)" }} />
                       <span className="font-mono font-bold text-[14px]">{v.licensePlate}</span>
                     </div>
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg" style={{ background: `${st.color}20`, color: st.color }}>{st.label}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg" style={{ background: `${st.color}20`, color: st.color }}>{st.label}</span>
+                      {can("m10.xe:edit") && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setEditVehicle(v); }}
+                          title="Sửa xe"
+                          className="p-1 rounded hover:bg-black/5 transition-colors"
+                          style={{ color: "var(--ibs-text-dim)" }}
+                        >
+                          <Pencil size={13} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="text-[13px] font-medium mb-1">{v.model}</div>
                   <div className="flex gap-4 text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
@@ -842,6 +857,11 @@ export default function XePage() {
       )}
       {vehicleHistoryModal && (
         <VehicleHistoryModal vehicle={vehicleHistoryModal} onClose={() => setVehicleHistoryModal(null)} />
+      )}
+
+      {editVehicle && (
+        <EditVehicleModal vehicle={editVehicle} onClose={() => setEditVehicle(null)}
+          onSuccess={() => { setEditVehicle(null); fetchVehicles(); }} />
       )}
       {viewInvoice && (
         <InvoiceViewerModal url={viewInvoice} onClose={() => setViewInvoice(null)} />
@@ -1560,6 +1580,83 @@ function NewVehicleModal({ onClose, onSuccess }: { onClose: () => void; onSucces
           <div className="flex gap-2 justify-end mt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
             <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>{saving ? "Đang lưu..." : "Thêm xe"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Edit Vehicle Modal (CHỈ Quản trị hệ thống) ──────────────────────────────
+function EditVehicleModal({ vehicle, onClose, onSuccess }: { vehicle: Vehicle; onClose: () => void; onSuccess: () => void }) {
+  const [form, setForm] = useState({
+    licensePlate: vehicle.licensePlate,
+    owner: vehicle.owner || "",
+    currentMileage: String(vehicle.currentMileage ?? 0),
+    status: vehicle.status,
+    driverName: vehicle.driverName || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault(); setSaving(true); setError("");
+    const res = await fetch(`/api/v1/vehicles/${vehicle.id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        licensePlate: form.licensePlate.trim(),
+        owner: form.owner.trim() || null,
+        currentMileage: parseInt(form.currentMileage) || 0,
+        status: form.status,
+        driverName: form.driverName.trim() || null,
+      }),
+    });
+    setSaving(false);
+    if (res.ok) onSuccess();
+    else { const d = await res.json(); setError(apiError(res.status, d.error)); }
+  }
+
+  const fld = "w-full rounded-lg px-3 py-2 text-[13px] border";
+  const fst = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" } as const;
+  const lbl = "text-[12px] font-medium mb-1 block";
+  const lst = { color: "var(--ibs-text-dim)" } as const;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="rounded-2xl w-full max-w-md mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-5">
+          <div className="text-[16px] font-bold">Sửa xe · {vehicle.licensePlate}</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <div>
+            <label className={lbl} style={lst}>Biển số *</label>
+            <input required value={form.licensePlate} onChange={(e) => setForm({ ...form, licensePlate: e.target.value })} className={fld + " font-mono"} style={fst} />
+          </div>
+          <div>
+            <label className={lbl} style={lst}>Chủ sở hữu</label>
+            <input value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} placeholder="VD: IBS HI / Lisemco / Địa Việt" className={fld} style={fst} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl} style={lst}>Số km hiện tại</label>
+              <input type="number" min="0" value={form.currentMileage} onChange={(e) => setForm({ ...form, currentMileage: e.target.value })} className={fld} style={fst} />
+            </div>
+            <div>
+              <label className={lbl} style={lst}>Trạng thái</label>
+              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className={fld} style={fst}>
+                {Object.entries(VEHICLE_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className={lbl} style={lst}>Lái xe phụ trách</label>
+            <input value={form.driverName} onChange={(e) => setForm({ ...form, driverName: e.target.value })} className={fld} style={fst} />
+          </div>
+          {error && <div className="text-[12px] text-red-500">{error}</div>}
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>{saving ? "Đang lưu..." : "Lưu"}</button>
           </div>
         </form>
       </div>

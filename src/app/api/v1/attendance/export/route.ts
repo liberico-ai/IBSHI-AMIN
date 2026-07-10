@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 import ExcelJS from "exceljs";
 
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "attendance", "bulkUpsert")) {
+  if (!canUser(session.user as any, "m3.bangcong:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

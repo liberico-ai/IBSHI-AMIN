@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 
 // PATCH /api/v1/events/:id/attendees/:attendeeId — mark attended (HR_ADMIN/BOM only)
@@ -12,7 +13,7 @@ export async function PATCH(
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "events", "create")) {
+  if (!canUser(session.user as any, "m10.sukien:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -54,7 +55,7 @@ export async function DELETE(
 
   // Only the enrollee themselves, or HR_ADMIN/BOM, can delete
   const isOwner = record.employee.userId === userId;
-  const isAdmin = canDo(userRole, "events", "create");
+  const isAdmin = canUser(session.user as any, "m10.sukien:create");
   if (!isOwner && !isAdmin) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }

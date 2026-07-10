@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { computeFifo } from "@/lib/food-inventory";
 import { canManageFoodPurchase } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
 
 // Sổ chi phí mua thực phẩm theo ngày. HCNS (HR_ADMIN/BOM) quản lý.
 const CreateSchema = z.object({
@@ -16,9 +17,11 @@ const CreateSchema = z.object({
   })).min(1),
 });
 
+// Giữ lại cho tương thích, nhưng phân quyền GHI đã chuyển sang ma trận (m10.nhaan:edit).
 function canManage(role: string, employeeCode?: string | null): boolean {
   return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN" || canManageFoodPurchase(employeeCode);
 }
+void canManage;
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -57,7 +60,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     data,
-    meta: { month, year, total, issueCostTotal, inventory, inventoryValue, endOfMonthInventoryValue, canManage: canManage((session.user as any).role, (session.user as any).employeeCode) },
+    meta: { month, year, total, issueCostTotal, inventory, inventoryValue, endOfMonthInventoryValue, canManage: canUser(session.user as any, "m10.nhaan:edit") },
   });
 }
 
@@ -66,7 +69,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canManage(role, (session.user as any).employeeCode)) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được nhập chi phí thực phẩm" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan:edit")) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền nhập chi phí thực phẩm" } }, { status: 403 });
 
   const parsed = CreateSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
@@ -82,7 +85,7 @@ export async function DELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
-  if (!canManage(role, (session.user as any).employeeCode)) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");

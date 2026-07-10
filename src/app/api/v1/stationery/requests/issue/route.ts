@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canManageVpp } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 
 // POST — "Cấp phát" chọn lọc: cấp 1 phần/đủ cho từng VPP. Phân bổ số lượng cấp vào các
@@ -13,7 +14,7 @@ const Schema = z.object({
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canManageVpp((session.user as any).role, (session.user as any).employeeCode)) {
+  if (!canUser(session.user as any, "m10.vpp:approve")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền cấp VPP" } }, { status: 403 });
   }
   const body = Schema.parse(await request.json());

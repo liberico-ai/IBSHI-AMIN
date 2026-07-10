@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 
 // GET /api/v1/salary/slips
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  const isHR = canDo(userRole, "payroll", "readAll");
+  const isHR = canUser(session.user as any, "m7.luong:view");
 
   const { searchParams } = new URL(request.url);
   const month = searchParams.get("month") ? Number(searchParams.get("month")) : undefined;

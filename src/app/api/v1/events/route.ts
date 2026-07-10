@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { rangesOverlap } from "@/lib/validation";
 import { z } from "zod";
 
@@ -40,8 +40,7 @@ export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  const userRole = (session.user as any).role;
-  if (!canDo(userRole, "events", "create")) {
+  if (!canUser(session.user as any, "m10.sukien:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR, guestMealCost } from "@/lib/constants";
 import { computeFifo } from "@/lib/food-inventory";
@@ -268,7 +269,7 @@ export async function POST(request: NextRequest) {
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canDo(userRole, "meals", "register")) {
+  if (!canUser(session.user as any, "m10.nhaan:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -286,7 +287,7 @@ export async function POST(request: NextRequest) {
   }
 
   // MANAGER can only register for their own department
-  if (!canDo(userRole, "meals", "manageCosts")) {
+  if (!canUser(session.user as any, "m10.nhaan:edit")) {
     const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
     if (!emp || emp.departmentId !== departmentId) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ có thể đăng ký bữa ăn cho phòng ban của mình" } }, { status: 403 });
@@ -338,7 +339,7 @@ export async function DELETE(request: NextRequest) {
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canDo(userRole, "meals", "register")) {
+  if (!canUser(session.user as any, "m10.nhaan:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -351,7 +352,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   // MANAGER can only delete registrations for their own department
-  if (!canDo(userRole, "meals", "manageCosts")) {
+  if (!canUser(session.user as any, "m10.nhaan:edit")) {
     const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
     if (!emp || emp.departmentId !== departmentId) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ có thể xóa bữa ăn của phòng ban mình" } }, { status: 403 });

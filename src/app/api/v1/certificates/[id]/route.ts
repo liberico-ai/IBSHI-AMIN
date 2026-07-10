@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
@@ -23,7 +24,7 @@ export async function PUT(
   }
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "contracts", "update")) {
+  if (!canUser(session.user as any, "m5.daotao:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -74,7 +75,7 @@ export async function DELETE(
   }
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "contracts", "update")) {
+  if (!canUser(session.user as any, "m5.daotao:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canViewPayroll } from "@/lib/access";
 import * as XLSX from "xlsx";
 
@@ -25,7 +26,7 @@ function findCol(header: any[], keywords: string[]): number {
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
+  if (!canUser(session.user as any, "m7.luong:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
   const { id } = await params;
@@ -72,7 +73,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
+  if (!canUser(session.user as any, "m7.luong:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền" } }, { status: 403 });
   }
   const { id } = await params;

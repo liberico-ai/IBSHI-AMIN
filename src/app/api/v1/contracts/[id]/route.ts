@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 
 const UpdateContractSchema = z.object({
@@ -26,8 +27,7 @@ export async function PUT(
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
 
-  const userRole = (session.user as any).role;
-  if (!canDo(userRole, "contracts", "update")) {
+  if (!canUser(session.user as any, "m1.luonghd:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -77,8 +77,7 @@ export async function DELETE(
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
 
-  const userRole = (session.user as any).role;
-  if (!canDo(userRole, "contracts", "delete")) {
+  if (!canUser(session.user as any, "m1.luonghd:delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

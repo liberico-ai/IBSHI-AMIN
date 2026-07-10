@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "employees", "readAll")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m1.luonghd:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { id: employeeId, contractId } = await params;
   const body = await req.json();

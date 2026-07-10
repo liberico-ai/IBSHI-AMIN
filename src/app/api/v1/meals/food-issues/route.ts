@@ -4,11 +4,14 @@ import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { computeFifo, availableQty } from "@/lib/food-inventory";
 import { canManageFoodPurchase } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
 
 // Thực XUẤT thực phẩm — bếp nhập lượng thực nấu; trừ tồn kho FIFO; chặn xuất vượt tồn.
+// Phân quyền GHI đã chuyển sang ma trận (m10.nhaan:edit); helper giữ cho tương thích.
 function canManage(role: string, employeeCode?: string | null): boolean {
   return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN" || canManageFoodPurchase(employeeCode);
 }
+void canManage;
 
 const CreateSchema = z.object({
   date: z.string(),
@@ -43,7 +46,7 @@ export async function GET(request: NextRequest) {
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const total = data.reduce((s, r) => s + r.cost, 0);
 
-  return NextResponse.json({ data, meta: { month, year, total, canManage: canManage((session.user as any).role, (session.user as any).employeeCode) } });
+  return NextResponse.json({ data, meta: { month, year, total, canManage: canUser(session.user as any, "m10.nhaan:edit") } });
 }
 
 export async function POST(request: NextRequest) {
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canManage(role, (session.user as any).employeeCode)) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được thực xuất thực phẩm" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan:edit")) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền thực xuất thực phẩm" } }, { status: 403 });
 
   const parsed = CreateSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
@@ -87,7 +90,7 @@ export async function DELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
-  if (!canManage(role, (session.user as any).employeeCode)) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");

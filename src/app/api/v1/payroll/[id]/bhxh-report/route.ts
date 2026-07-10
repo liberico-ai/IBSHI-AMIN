@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canViewPayroll } from "@/lib/access";
 import { computeBhxh } from "@/lib/constants";
 
@@ -9,7 +10,7 @@ import { computeBhxh } from "@/lib/constants";
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
+  if (!canUser(session.user as any, "m7.luong:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
   }
 

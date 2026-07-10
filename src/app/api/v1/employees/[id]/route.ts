@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canViewPayroll } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 
 export async function GET(
@@ -51,8 +52,8 @@ export async function GET(
     }
   }
 
-  // Tab Hợp đồng (lương trên HĐ) chỉ cho NV trong allowlist M7 — ẩn với người khác
-  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
+  // Tab Hợp đồng (lương trên HĐ) — ẩn với người không có quyền xem lương/HĐ (ma trận m1.luonghd:view).
+  if (!canUser(session.user as any, "m1.luonghd:view")) {
     (employee as any).contracts = [];
   }
 
@@ -108,11 +109,9 @@ export async function PUT(
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   }
 
-  // Employees can only update their own contact info
-  if (userRole === "EMPLOYEE" || userRole === "TEAM_LEAD") {
-    if (employee.userId !== userId) {
-      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-    }
+  // Tự sửa thông tin của mình luôn được; sửa hồ sơ người KHÁC cần quyền ma trận m1.hoso:edit.
+  if (employee.userId !== userId && !canUser(session.user as any, "m1.hoso:edit")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
   const body = await request.json();
@@ -129,7 +128,7 @@ export async function PUT(
   const updateData: any = { ...rest };
   if (dateOfBirth) updateData.dateOfBirth = new Date(dateOfBirth);
   if (startDate) updateData.startDate = new Date(startDate);
-  if (!canDo(userRole, "employees", "readAll") && updateData.status) {
+  if (!canUser(session.user as any, "m1.hoso:edit") && updateData.status) {
     delete updateData.status;
   }
   // Ngày nghỉ việc / tạm nghỉ — chỉ gắn khi NGƯỜI CÓ QUYỀN đổi trạng thái (status còn trong updateData).
@@ -195,8 +194,7 @@ export async function DELETE(
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
 
-  const userRole = (session.user as any).role;
-  if (!canDo(userRole, "employees", "delete")) {
+  if (!canUser(session.user as any, "m1.hoso:delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

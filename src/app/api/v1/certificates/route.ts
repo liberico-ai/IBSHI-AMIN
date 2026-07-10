@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
   const where: Record<string, unknown> = {};
 
   // Non-admins can only see their own certificates
-  if (!canDo(userRole, "contracts", "update")) {
+  if (!canUser(session.user as any, "m5.daotao:edit")) {
     const emp = await prisma.employee.findFirst({ where: { userId } });
     if (emp) where.employeeId = emp.id;
     else return NextResponse.json({ data: [] });
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canDo(userRole, "contracts", "update")) {
+  if (!canUser(session.user as any, "m5.daotao:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

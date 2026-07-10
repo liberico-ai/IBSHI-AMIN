@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { normalizeItemName } from "@/lib/stationery";
+import { canUser } from "@/lib/permission-catalog";
 
 const ItemSchema = z.object({
   // Có thể là item đã có (itemId) HOẶC item mới (name + unit)
@@ -38,7 +39,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!["HR_ADMIN", "BOM", "ADMIN"].includes((session.user as any).role))
+  // Nhập kho VPP = quản lý kho (m10.vpp:edit), không phải "đề nghị VPP".
+  if (!canUser(session.user as any, "m10.vpp:edit"))
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const body = CreateSchema.parse(await request.json());

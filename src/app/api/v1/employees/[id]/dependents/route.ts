@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -35,7 +36,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const userId = (session.user as { id: string }).id;
 
   // PII (tên + ngày sinh + MST người phụ thuộc): chỉ chính chủ hoặc HR_ADMIN+ xem được.
-  if (!canDo(userRole, "employees", "readAll")) {
+  if (!canUser(session.user as any, "m1.hoso:view")) {
     const target = await prisma.employee.findUnique({ where: { id: employeeId }, select: { userId: true } });
     if (!target || target.userId !== userId) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
@@ -53,8 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  const userRole = (session.user as any).role;
-  if (!canDo(userRole, "employees", "readAll")) {
+  if (!canUser(session.user as any, "m1.hoso:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

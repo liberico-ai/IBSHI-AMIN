@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { normalizeItemName } from "@/lib/stationery";
 import { canManageVpp } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -24,7 +25,8 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
   const employeeCode = (session.user as any).employeeCode;
-  if (!canManageVpp(role, employeeCode)) {
+  // Thêm mặt hàng vào DANH MỤC VPP = quản lý master-data (m10.vpp:edit), không phải "đề nghị VPP".
+  if (!canUser(session.user as any, "m10.vpp:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền thêm VPP" } }, { status: 403 });
   }
 

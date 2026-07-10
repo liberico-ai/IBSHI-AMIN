@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canViewPayroll } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 import { hashSync } from "bcryptjs";
 import { uniqueCompanyEmail } from "@/lib/email-gen";
@@ -103,8 +104,8 @@ export async function GET(request: NextRequest) {
     prisma.employee.count({ where }),
   ]);
 
-  // Lương nhạy cảm: chỉ NV trong whitelist xem lương mới nhận được số liệu lương.
-  const canPay = canViewPayroll((session.user as any).employeeCode, (session.user as any).role);
+  // Lương nhạy cảm: chỉ người có quyền xem lương (ma trận m7.luong:view) mới nhận số liệu lương.
+  const canPay = canUser(session.user as any, "m7.luong:view");
   if (!canPay) {
     for (const e of data as any[]) {
       if (Array.isArray(e.contracts)) for (const c of e.contracts) { c.baseSalary = 0; c.insuranceSalary = 0; c.allowance = 0; }
@@ -119,8 +120,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) {
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
-  const userRole = (session.user as any).role;
-  if (!canDo(userRole, "employees", "readAll")) {
+  if (!canUser(session.user as any, "m1.hoso:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền tạo nhân viên" } }, { status: 403 });
   }
 

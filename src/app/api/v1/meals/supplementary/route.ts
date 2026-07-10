@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 import { SUBCONTRACTOR_DEPT_SENTINEL, getSubcontractorDepartmentId } from "@/services/meal.service";
 import { MEAL_SUPP_CUTOFF_HOUR, MEAL_SUPP_CUTOFF_MINUTE } from "@/lib/constants";
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canDo(role, "meals", "register")) {
+  if (!canUser(session.user as any, "m10.nhaan:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

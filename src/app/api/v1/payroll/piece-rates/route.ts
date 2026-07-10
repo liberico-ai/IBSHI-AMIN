@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 import { canViewPayroll } from "@/lib/access";
 import { z } from "zod";
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
+  if (!canUser(session.user as any, "m7.luong:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
   }
 
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canViewPayroll((session.user as any).employeeCode, (session.user as any).role)) {
+  if (!canUser(session.user as any, "m7.luong:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
   }
 

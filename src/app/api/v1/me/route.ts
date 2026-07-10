@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { canViewPayroll } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
 import { VEHICLE_DRIVERS } from "@/lib/constants";
 import prisma from "@/lib/prisma";
 
@@ -25,6 +26,6 @@ export async function GET() {
     role: (session.user as any).role,
     employeeCode,
     isDriver,
-    canViewPayroll: canViewPayroll(employeeCode, (session.user as any).role),
+    canViewPayroll: canUser(session.user as any, "m7.luong:view"),
   });
 }
