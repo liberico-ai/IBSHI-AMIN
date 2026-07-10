@@ -128,7 +128,7 @@ export const PERMISSION_CATALOG: ModuleGroup[] = [
     module: "M10 · Hành chính",
     features: [
       // Quản lý xe
-      { key: "m10.xe.datxe", label: "Đặt xe (công tác)", group: "Quản lý xe", actions: ["view", "create", "approve1", "approve2"] },
+      { key: "m10.xe.datxe", label: "Đặt xe (công tác)", group: "Quản lý xe", actions: ["view", "create", "edit", "delete", "approve1", "approve2"] },
       { key: "m10.xe.doixe", label: "Đội xe", group: "Quản lý xe", actions: CRUD },
       { key: "m10.xe.nhienlieu", label: "Nhiên liệu", group: "Quản lý xe", actions: VC },
       { key: "m10.xe.baotri", label: "Bảo trì", group: "Quản lý xe", actions: VC },
@@ -142,7 +142,7 @@ export const PERMISSION_CATALOG: ModuleGroup[] = [
       { key: "m10.vpp.ncc", label: "Nhà cung cấp", group: "Văn phòng phẩm", actions: CRU },
       { key: "m10.vpp.baocao", label: "Báo cáo sử dụng VPP", group: "Văn phòng phẩm", actions: ["view"] },
       // Nhà ăn
-      { key: "m10.nhaan.dangky", label: "Đăng ký suất ăn", group: "Nhà ăn", actions: ["view", "create", "delete", "approve"] },
+      { key: "m10.nhaan.dangky", label: "Đăng ký suất ăn", group: "Nhà ăn", actions: ["view", "create", "edit", "delete", "approve"] },
       { key: "m10.nhaan.chiphi", label: "Chi phí thực phẩm", group: "Nhà ăn", actions: CRUD },
       { key: "m10.nhaan.thucxuat", label: "Thực xuất", group: "Nhà ăn", actions: ["view", "edit", "delete"] },
       { key: "m10.nhaan.thucte", label: "Suất thực tế", group: "Nhà ăn", actions: ["view", "edit"] },

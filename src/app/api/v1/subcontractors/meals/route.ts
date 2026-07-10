@@ -72,6 +72,28 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ data }, { status: 201 });
 }
 
+// PUT — SỬA (đặt lại) số suất ăn thầu phụ của 1 nhà thầu trong ngày (ghi đè). Quyền m10.nhaan.dangky:edit.
+export async function PUT(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
+  const userId = (session.user as any).id;
+  if (!canUser(session.user as any, "m10.nhaan.dangky:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+
+  const body = await request.json();
+  const { subcontractorId, date, lunchCount, dinnerCount } = body || {};
+  if (!subcontractorId || !date) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Thiếu subcontractorId / date" } }, { status: 400 });
+  const L = Math.max(0, Math.round(Number(lunchCount) || 0));
+  const D = Math.max(0, Math.round(Number(dinnerCount) || 0));
+
+  const data = await prisma.subcontractorMeal.upsert({
+    where: { subcontractorId_date: { subcontractorId, date: new Date(date) } },
+    create: { subcontractorId, date: new Date(date), lunchCount: L, dinnerCount: D, registeredBy: userId },
+    update: { lunchCount: L, dinnerCount: D },
+    include: { subcontractor: { select: { id: true, name: true, companyName: true } } },
+  });
+  return NextResponse.json({ data });
+}
+
 export async function DELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });

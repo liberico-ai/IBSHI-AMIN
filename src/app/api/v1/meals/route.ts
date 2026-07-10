@@ -333,6 +333,60 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ data: reg }, { status: 201 });
 }
 
+// PUT — SỬA (đặt lại) số suất ăn của 1 PHÒNG BAN trong 1 ngày: Trưa / Tối OT / Khách (theo đơn giá).
+// Ghi ĐÈ (không cộng dồn như POST). Quyền: m10.nhaan.dangky:edit (MANAGER chỉ sửa phòng mình).
+export async function PUT(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
+  const userId = (session.user as any).id;
+  if (!canUser(session.user as any, "m10.nhaan.dangky:edit")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  }
+
+  const body = await request.json();
+  const { departmentId, date, lunchCount, dinnerCount, guestByPrice } = body || {};
+  if (!departmentId || !date) {
+    return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Thiếu departmentId / date" } }, { status: 400 });
+  }
+
+  // MANAGER (không có quyền duyệt = không phải HCNS) chỉ sửa phòng mình.
+  if (!canUser(session.user as any, "m10.nhaan.dangky:approve")) {
+    const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
+    if (!emp || emp.departmentId !== departmentId) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ sửa bữa ăn của phòng ban mình" } }, { status: 403 });
+    }
+  }
+
+  // Khách theo đơn giá → tổng khách. guestByPrice = { "20000": 5, "60000": 2 }
+  const gbp: Record<string, number> = {};
+  if (guestByPrice && typeof guestByPrice === "object") {
+    for (const [price, count] of Object.entries(guestByPrice)) {
+      const c = Math.max(0, Math.round(Number(count) || 0));
+      if (Number(price) > 0 && c > 0) gbp[String(price)] = c;
+    }
+  }
+  const totalGuest = Object.values(gbp).reduce((s, c) => s + Number(c), 0);
+  const hasGuests = Object.keys(gbp).length > 0;
+
+  const reg = await prisma.mealRegistration.upsert({
+    where: { departmentId_date: { departmentId, date: new Date(date) } },
+    create: {
+      departmentId, date: new Date(date),
+      lunchCount: Math.max(0, Math.round(Number(lunchCount) || 0)),
+      dinnerCount: Math.max(0, Math.round(Number(dinnerCount) || 0)),
+      guestCount: totalGuest, guestByPrice: hasGuests ? gbp : undefined, guestUnitPrice: 0,
+      subcontractorCount: 0, registeredBy: userId,
+    },
+    update: {
+      ...(lunchCount !== undefined ? { lunchCount: Math.max(0, Math.round(Number(lunchCount) || 0)) } : {}),
+      ...(dinnerCount !== undefined ? { dinnerCount: Math.max(0, Math.round(Number(dinnerCount) || 0)) } : {}),
+      ...(guestByPrice !== undefined ? { guestCount: totalGuest, guestByPrice: hasGuests ? gbp : {} } : {}),
+    },
+    include: { department: { select: { id: true, name: true } } },
+  });
+  return NextResponse.json({ data: reg });
+}
+
 export async function DELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });

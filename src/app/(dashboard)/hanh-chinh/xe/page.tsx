@@ -5,14 +5,14 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, formatDateTime, apiError } from "@/lib/utils";
 import { viewUrl } from "@/lib/use-presigned-url";
-import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench, Download, Pencil } from "lucide-react";
+import { Plus, RefreshCw, X, Check, XCircle, Car, Droplets, Wrench, Download, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { MonthCalendar } from "@/components/shared/month-calendar";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
 import { canApproveRoomVehicle } from "@/lib/access";
 import { useCan } from "@/hooks/use-permission";
 import { VEHICLE_DRIVERS } from "@/lib/constants";
-import { alertDialog } from "@/lib/confirm-dialog";
+import { alertDialog, confirmDialog } from "@/lib/confirm-dialog";
 
 // Vietnamese number formatting helpers
 function fmtInt(raw: string): string {
@@ -187,6 +187,7 @@ export default function XePage() {
   const [completingBooking, setCompletingBooking] = useState<VehicleBooking | null>(null);
   const [vehicleHistoryModal, setVehicleHistoryModal] = useState<Vehicle | null>(null);
   const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null);
+  const [editBooking, setEditBooking] = useState<VehicleBooking | null>(null);
   const can = useCan();
   // Lái xe: tab "Chuyến của tôi"
   const [isDriver, setIsDriver] = useState(false);
@@ -291,7 +292,7 @@ export default function XePage() {
     fetchBookings();
   }
   async function cancelSeries(seriesId: string) {
-    if (!confirm("Huỷ toàn bộ series? Mọi phiếu PENDING/APPROVED trong series sẽ huỷ.")) return;
+    if (!(await confirmDialog({ title: "Huỷ cả series", message: "Huỷ toàn bộ series? Mọi phiếu chờ duyệt / đã duyệt trong series sẽ huỷ.", tone: "danger", confirmText: "Huỷ series" }))) return;
     await fetch(`/api/v1/vehicles/bookings/series/${seriesId}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "CANCEL" }),
@@ -302,12 +303,19 @@ export default function XePage() {
     const msg = hasSeries
       ? "Huỷ phiếu này? (Các phiếu khác trong series giữ nguyên)"
       : "Huỷ phiếu đặt xe này?";
-    if (!confirm(msg)) return;
+    if (!(await confirmDialog({ title: "Huỷ phiếu đặt xe", message: msg, tone: "danger", confirmText: "Huỷ phiếu" }))) return;
     await fetch(`/api/v1/vehicles/bookings/${id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "CANCEL" }),
     });
     fetchBookings();
+  }
+  // Xóa HẲN phiếu đặt xe chờ duyệt (chống rác) — chủ phiếu hoặc người có quyền m10.xe.datxe:delete.
+  async function deleteBooking(id: string) {
+    if (!(await confirmDialog({ title: "Xóa phiếu đặt xe", message: "Xóa hẳn phiếu đặt xe này? Chỉ xóa được phiếu đang chờ duyệt.", tone: "danger", confirmText: "Xóa" }))) return;
+    const res = await fetch(`/api/v1/vehicles/bookings/${id}`, { method: "DELETE" });
+    if (res.ok) fetchBookings();
+    else { const j = await res.json().catch(() => null); await alertDialog(apiError(res.status, j?.error) || "Xóa thất bại"); }
   }
 
   const pendingCount = bookings.filter((b) => b.status === "PENDING").length;
@@ -340,6 +348,10 @@ export default function XePage() {
     }
     return m;
   })();
+  // Thứ tự hiển thị theo trạng thái: Chờ duyệt → Đã duyệt → Hoàn thành → Từ chối → Đã hủy.
+  const STATUS_ORDER: Record<string, number> = {
+    PENDING: 0, PENDING_HR: 1, APPROVED: 2, COMPLETED: 3, REJECTED: 4, CANCELLED: 5,
+  };
   const displayBookings = (() => {
     const seen = new Set<string>();
     const result: VehicleBooking[] = [];
@@ -350,6 +362,11 @@ export default function XePage() {
       }
       result.push(b);
     }
+    result.sort((a, b) => {
+      const ra = STATUS_ORDER[a.status] ?? 99, rb = STATUS_ORDER[b.status] ?? 99;
+      if (ra !== rb) return ra - rb;                                    // theo nhóm trạng thái
+      return new Date(b.startDate).getTime() - new Date(a.startDate).getTime(); // trong nhóm: mới nhất trước
+    });
     return result;
   })();
 
@@ -435,10 +452,21 @@ export default function XePage() {
         {/* Người duyệt: Chỉ định lái xe → duyệt, hoặc Từ chối lịch (phiếu lẻ) */}
         {canApproveBooking && b.status === "PENDING" && !b.seriesId && (<>
           <button onClick={() => setAssignTarget(b)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}><Check size={11} /> Chỉ định</button>
-          <button onClick={async () => { if (!confirm("Từ chối lịch đặt xe này?")) return; handleBookingAction(b.id, "REJECT"); }} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}><XCircle size={11} /> Từ chối</button>
+          <button onClick={async () => { if (!(await confirmDialog({ title: "Từ chối phiếu", message: "Từ chối lịch đặt xe này?", tone: "danger", confirmText: "Từ chối" }))) return; handleBookingAction(b.id, "REJECT"); }} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}><XCircle size={11} /> Từ chối</button>
         </>)}
-        {/* Huỷ phiếu lẻ — dành cho CHỦ ĐƠN đổi ý (không phải người duyệt) */}
-        {isOwner && (b.status === "PENDING" || b.status === "APPROVED") && !b.seriesId && (
+        {/* CHỜ DUYỆT: chủ phiếu (hoặc người có quyền) Sửa / Xóa hẳn phiếu (chống rác) */}
+        {b.status === "PENDING" && !b.seriesId && (isOwner || can("m10.xe.datxe:edit")) && (
+          <button onClick={() => setEditBooking(b)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(59,130,246,0.15)", color: "#2563eb" }}>
+            <Pencil size={11} /> Sửa
+          </button>
+        )}
+        {b.status === "PENDING" && !b.seriesId && (isOwner || can("m10.xe.datxe:delete")) && (
+          <button onClick={() => deleteBooking(b.id)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
+            <Trash2 size={11} /> Xóa
+          </button>
+        )}
+        {/* ĐÃ DUYỆT: chủ đơn đổi ý → Huỷ (giữ bản ghi để truy vết) */}
+        {isOwner && b.status === "APPROVED" && !b.seriesId && (
           <button onClick={() => cancelOneBooking(b.id, false)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
             <X size={11} /> Huỷ
           </button>
@@ -820,10 +848,12 @@ export default function XePage() {
           onSuccess={() => { setConfirmTrip(null); fetchMyTrips(); }} />
       )}
 
-      {showNewBooking && (
-        <NewBookingModal vehicles={vehicles.filter((v) => v.status === "AVAILABLE")}
-          onClose={() => setShowNewBooking(false)}
-          onSuccess={() => { setShowNewBooking(false); fetchBookings(); }} />
+      {(showNewBooking || editBooking) && (
+        <NewBookingModal
+          editing={editBooking}
+          vehicles={editBooking ? vehicles : vehicles.filter((v) => v.status === "AVAILABLE")}
+          onClose={() => { setShowNewBooking(false); setEditBooking(null); }}
+          onSuccess={() => { setShowNewBooking(false); setEditBooking(null); fetchBookings(); }} />
       )}
       {assignTarget && (
         <AssignDriverModal booking={assignTarget}
@@ -1299,7 +1329,7 @@ function ExportVehicleBookingsModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]; onClose: () => void; onSuccess: () => void }) {
+function NewBookingModal({ vehicles, onClose, onSuccess, editing }: { vehicles: Vehicle[]; onClose: () => void; onSuccess: () => void; editing?: VehicleBooking | null }) {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
@@ -1317,10 +1347,19 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
     return slots;
   })();
 
+  // Pre-fill khi SỬA: tách startDate/endDate (UTC) về ngày+giờ VN.
+  const vnParts = (iso?: string | null) => {
+    if (!iso) return { date: todayStr, time: nowTime };
+    const vn = new Date(new Date(iso).getTime() + 7 * 3600 * 1000);
+    return { date: vn.toISOString().slice(0, 10), time: vn.toISOString().slice(11, 16) };
+  };
+  const initStart = editing ? vnParts(editing.startDate) : { date: todayStr, time: nowTime };
+  const initEnd = editing ? vnParts(editing.endDate) : { date: todayStr, time: plusHour };
   const [form, setForm] = useState({
-    vehicleId: "", origin: "Trụ sở Công ty", destination: "", purpose: "", passengers: "1", priority: "NORMAL",
-    startDatePart: todayStr, startTimePart: nowTime,
-    endDatePart: todayStr, endTimePart: plusHour,
+    vehicleId: editing?.vehicleId ?? "", origin: editing?.origin ?? "Trụ sở Công ty", destination: editing?.destination ?? "",
+    purpose: editing?.purpose ?? "", passengers: String(editing?.passengers ?? 1), priority: editing?.priority ?? "NORMAL",
+    startDatePart: initStart.date, startTimePart: initStart.time,
+    endDatePart: initEnd.date, endTimePart: initEnd.time,
   });
   const [recurrenceOn, setRecurrenceOn] = useState(false);
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
@@ -1348,9 +1387,23 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
     if (new Date(endDate).getTime() <= new Date(startDate).getTime()) {
       setError("Ngày/giờ về phải sau ngày/giờ đi."); setSaving(false); return;
     }
-    // Phải đặt trước tối thiểu 30 phút, không đặt giờ trong quá khứ.
-    if (new Date(startDate).getTime() < Date.now() + 30 * 60_000) {
+    // Phải đặt trước tối thiểu 30 phút, không đặt giờ trong quá khứ (chỉ khi TẠO MỚI).
+    if (!editing && new Date(startDate).getTime() < Date.now() + 30 * 60_000) {
       setError("Phải đặt trước ít nhất 30 phút (không đặt giờ trong quá khứ)."); setSaving(false); return;
+    }
+    // SỬA phiếu chờ duyệt → PUT action EDIT (không đụng series/lặp lịch).
+    if (editing) {
+      const res = await fetch(`/api/v1/vehicles/bookings/${editing.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "EDIT", vehicleId: form.vehicleId, origin: form.origin, destination: form.destination,
+          purpose: form.purpose, passengers: parseInt(form.passengers), priority: form.priority, startDate, endDate,
+        }),
+      });
+      setSaving(false);
+      if (res.ok) onSuccess();
+      else { const d = await res.json(); setError(apiError(res.status, d.error)); }
+      return;
     }
     // Sanitize: chỉ giữ thứ 1..6 (KHÔNG cho CN=0)
     const cleanDays = recurrenceDays.filter((d) => d >= 1 && d <= 6);
@@ -1383,7 +1436,7 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="rounded-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
-        <div className="flex items-center justify-between mb-5"><div className="text-[16px] font-bold">Đặt xe công tác</div><button onClick={onClose}><X size={18} /></button></div>
+        <div className="flex items-center justify-between mb-5"><div className="text-[16px] font-bold">{editing ? "Sửa phiếu đặt xe" : "Đặt xe công tác"}</div><button onClick={onClose}><X size={18} /></button></div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
             <label className={labelCls} style={labelStyle}>Xe *</label>
@@ -1456,7 +1509,8 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
               {VEHICLE_PRIORITY.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           </div>
-          {/* Lặp lại — đặt lịch cố định */}
+          {/* Lặp lại — đặt lịch cố định (ẩn khi SỬA 1 phiếu) */}
+          {!editing && (
           <div className="rounded-lg p-3 border" style={{ background: "rgba(0,180,216,0.04)", borderColor: "var(--ibs-border)" }}>
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={recurrenceOn} onChange={(e) => toggleRecurrence(e.target.checked)} />
@@ -1513,11 +1567,12 @@ function NewBookingModal({ vehicles, onClose, onSuccess }: { vehicles: Vehicle[]
               </>
             )}
           </div>
+          )}
 
           {error && <div className="text-[12px] text-red-500">{error}</div>}
           <div className="flex gap-2 justify-end mt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
-            <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>{saving ? "Đang lưu..." : "Đặt xe"}</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>{saving ? "Đang lưu..." : editing ? "Lưu thay đổi" : "Đặt xe"}</button>
           </div>
         </form>
       </div>

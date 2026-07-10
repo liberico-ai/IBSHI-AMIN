@@ -538,7 +538,7 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
   useEffect(() => { load(); }, [fromDate, toDate, statusF]);
 
   async function deleteReq(id: string) {
-    if (!(await confirmDialog({ message: "Xóa phiếu đề nghị VPP này? (chỉ khi CHỜ DUYỆT)", tone: "danger", confirmText: "Xóa" }))) return;
+    if (!(await confirmDialog({ title: "Xóa phiếu đề nghị VPP", message: "Xóa phiếu đề nghị VPP này? Chỉ xóa được phiếu đang chờ duyệt.", tone: "danger", confirmText: "Xóa" }))) return;
     const res = await fetch(`/api/v1/stationery/requests/${id}`, { method: "DELETE" });
     if (res.ok) load();
     else { const d = await res.json(); await alertDialog(apiError(res.status, d.error)); }
@@ -979,7 +979,6 @@ function RequestModal({ onClose, onSuccess, editing }: { onClose: () => void; on
 
   async function submit() {
     setError(null);
-    if (!requesterId) { setError("Chưa chọn NV yêu cầu"); return; }
     if (!reason.trim()) { setError("Chưa nhập lý do"); return; }
     const valid = items.filter((it) => it.itemId && Number(it.quantity) > 0);
     if (valid.length === 0) { setError("Chọn ít nhất 1 mặt hàng trong danh mục VPP"); return; }
@@ -1006,18 +1005,10 @@ function RequestModal({ onClose, onSuccess, editing }: { onClose: () => void; on
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
       <div className="rounded-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)" }}>
         <div className="flex justify-between mb-4">
-          <h3 className="text-[16px] font-semibold">{editing ? "Sửa phiếu xuất VPP" : "Tạo phiếu xuất VPP"}</h3>
+          <h3 className="text-[16px] font-semibold">{editing ? "Sửa phiếu yêu cầu" : "Tạo phiếu yêu cầu"}</h3>
           <button onClick={onClose}><X size={20} /></button>
         </div>
 
-        <div className="mb-4">
-          <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>NV yêu cầu *</label>
-          <select value={requesterId} onChange={(e) => setRequesterId(e.target.value)} className="w-full px-3 py-2 rounded-lg border text-[13px]"
-            style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}>
-            <option value="">-- Chọn NV --</option>
-            {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName} ({e.code} — {e.department.name})</option>)}
-          </select>
-        </div>
 
         <div className="mb-4">
           <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Lý do đề xuất *</label>
@@ -1063,7 +1054,7 @@ function RequestModal({ onClose, onSuccess, editing }: { onClose: () => void; on
         <div className="flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={onClose}>Hủy</Button>
           <Button variant="accent" size="sm" loading={submitting} onClick={submit}>
-            {submitting ? "Đang gửi..." : "Gửi phiếu xuất"}
+            {submitting ? "Đang lưu..." : "Lưu"}
           </Button>
         </div>
       </div>

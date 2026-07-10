@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Plus, X, RefreshCw, Upload, ExternalLink, Trash2, FileText, Search } from "lucide-react";
+import { Plus, X, RefreshCw, Upload, ExternalLink, Trash2, FileText, Search, Pencil } from "lucide-react";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { DateInput } from "@/components/shared/date-input";
 import { formatDate, apiError } from "@/lib/utils";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { BUCKETS } from "@/lib/minio-constants";
 import { viewUrl } from "@/lib/use-presigned-url";
+import { useCan } from "@/hooks/use-permission";
 
 type Doc = {
   id: string;
@@ -121,10 +122,12 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
   const apiBase = `/api/v1/documents/${kind}`;
   const folder = kind === "incoming" ? "incoming-docs" : "outgoing-docs";
 
+  const can = useCan();
   const [docs, setDocs] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<Doc | null>(null);
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -153,7 +156,8 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
   const canManage = kind === "incoming"
     ? (userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN")
     : (userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || userRole === "MANAGER");
-  const canDelete = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
+  const canEditDoc = can("m10.congvan:edit");
+  const canDelete = can("m10.congvan:delete");
 
   async function handleDelete(id: string) {
     if (!(await confirmDialog({ message: "Xác nhận xoá công văn này?", tone: "danger", confirmText: "Xoá" }))) return;
@@ -277,17 +281,31 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
     {
       key: "actions",
       header: "",
-      width: "60px",
-      render: (d) => canDelete ? (
-        <button
-          onClick={() => handleDelete(d.id)}
-          className="text-[11px] px-2 py-0.5 rounded inline-flex items-center gap-1"
-          style={{ background: "rgba(239,68,68,0.12)", color: "var(--ibs-danger)" }}
-          title="Xoá công văn"
-        >
-          <Trash2 size={11} />
-        </button>
-      ) : null,
+      width: "110px",
+      render: (d) => (
+        <div className="flex items-center gap-1 justify-end">
+          {canEditDoc && (
+            <button
+              onClick={() => setEditing(d)}
+              className="text-[11px] px-2 py-0.5 rounded inline-flex items-center gap-1"
+              style={{ background: "rgba(59,130,246,0.12)", color: "#2563eb" }}
+              title="Sửa công văn"
+            >
+              <Pencil size={11} />
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => handleDelete(d.id)}
+              className="text-[11px] px-2 py-0.5 rounded inline-flex items-center gap-1"
+              style={{ background: "rgba(239,68,68,0.12)", color: "var(--ibs-danger)" }}
+              title="Xoá công văn"
+            >
+              <Trash2 size={11} />
+            </button>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -378,13 +396,14 @@ export function DocumentArchive({ kind, title, description, numberRequired }: Pr
         emptyText="Chưa có công văn nào. Bấm 'Thêm công văn' để thêm mới."
       />
 
-      {showAdd && (
+      {(showAdd || editing) && (
         <AddModal
           kind={kind}
           folder={folder}
           numberRequired={numberRequired}
-          onClose={() => setShowAdd(false)}
-          onSaved={() => { setShowAdd(false); fetchDocs(); }}
+          editing={editing}
+          onClose={() => { setShowAdd(false); setEditing(null); }}
+          onSaved={() => { setShowAdd(false); setEditing(null); fetchDocs(); }}
         />
       )}
     </div>
@@ -396,26 +415,28 @@ function AddModal({
   kind,
   folder,
   numberRequired,
+  editing,
   onClose,
   onSaved,
 }: {
   kind: "incoming" | "outgoing";
   folder: string;
   numberRequired?: boolean;
+  editing?: Doc | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [docDate, setDocDate] = useState(new Date().toISOString().slice(0, 10));
-  const [docNumber, setDocNumber] = useState("");
-  const [subject, setSubject] = useState("");
-  const [entity, setEntity] = useState("");
-  const [recipientType, setRecipientType] = useState<"CONG_TY" | "CA_NHAN">("CONG_TY");
+  const [docDate, setDocDate] = useState(editing?.docDate ? new Date(editing.docDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+  const [docNumber, setDocNumber] = useState(editing?.docNumber ?? "");
+  const [subject, setSubject] = useState(editing?.subject ?? "");
+  const [entity, setEntity] = useState(editing ? (kind === "incoming" ? editing.fromEntity : editing.toEntity) ?? "" : "");
+  const [recipientType, setRecipientType] = useState<"CONG_TY" | "CA_NHAN">((editing?.recipientType as any) ?? "CONG_TY");
   const [routedTo, setRoutedTo] = useState("");
-  const [transportMethod, setTransportMethod] = useState("");
-  const [transportUnit, setTransportUnit] = useState("");
+  const [transportMethod, setTransportMethod] = useState(editing?.transportMethod ?? "");
+  const [transportUnit, setTransportUnit] = useState(editing?.transportUnit ?? "");
   // Công văn ĐI: người gửi / đơn vị gửi (Công ty hay Cá nhân/phòng ban).
-  const [senderType, setSenderType] = useState<"CONG_TY" | "CA_NHAN">("CONG_TY");
-  const [senderText, setSenderText] = useState(""); // khi Công ty
+  const [senderType, setSenderType] = useState<"CONG_TY" | "CA_NHAN">((editing?.senderType as any) ?? "CONG_TY");
+  const [senderText, setSenderText] = useState(editing && editing.senderType !== "CA_NHAN" ? editing.senderName ?? "" : ""); // khi Công ty
   const [senderSel, setSenderSel] = useState("");   // khi Cá nhân: emp:<id> / dept:<id>
   const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
   const [emps, setEmps] = useState<{ id: string; code: string; fullName: string; department?: { name?: string } | null }[]>([]);
@@ -434,7 +455,7 @@ function AddModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!file) {
+    if (!file && !editing) {
       setError("Vui lòng chọn file scan công văn");
       return;
     }
@@ -446,36 +467,39 @@ function AddModal({
       setError("Vui lòng nhập mã công văn");
       return;
     }
-    if (kind === "incoming" && recipientType === "CA_NHAN" && !routedTo.trim()) {
+    if (kind === "incoming" && recipientType === "CA_NHAN" && !routedTo.trim() && !editing) {
       setError("Vui lòng chọn nơi nhận (cá nhân / phòng ban)");
       return;
     }
-    if (kind === "outgoing" && senderType === "CA_NHAN" && !senderSel) {
+    if (kind === "outgoing" && senderType === "CA_NHAN" && !senderSel && !editing) {
       setError("Vui lòng chọn người gửi (cá nhân / phòng ban)");
       return;
     }
 
-    setUploading(true);
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("bucket", BUCKETS.HR_DOCUMENTS);
-    fd.append("folder", folder);
-
-    const upRes = await fetch("/api/v1/upload", { method: "POST", body: fd });
-    const upJson = await upRes.json();
-    setUploading(false);
-    if (!upRes.ok) {
-      setError(apiError(upRes.status, upJson?.error) || "Upload file thất bại");
-      return;
+    // File scan: bắt buộc khi TẠO MỚI; khi SỬA chỉ upload nếu chọn file mới (giữ file cũ nếu không đổi).
+    let scanFileUrl: string | undefined;
+    if (file) {
+      setUploading(true);
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("bucket", BUCKETS.HR_DOCUMENTS);
+      fd.append("folder", folder);
+      const upRes = await fetch("/api/v1/upload", { method: "POST", body: fd });
+      const upJson = await upRes.json();
+      setUploading(false);
+      if (!upRes.ok) {
+        setError(apiError(upRes.status, upJson?.error) || "Upload file thất bại");
+        return;
+      }
+      scanFileUrl = upJson.data?.url;
     }
-    const scanFileUrl = upJson.data?.url;
 
     setSaving(true);
     const payload: any = {
       docDate,
       docNumber: docNumber.trim() || null,
       subject: subject.trim(),
-      scanFileUrl,
+      ...(scanFileUrl ? { scanFileUrl } : {}),
     };
     if (kind === "incoming") {
       payload.recipientType = recipientType;
@@ -505,8 +529,8 @@ function AddModal({
         payload.senderName = senderText.trim() || null;
       }
     }
-    const res = await fetch(`/api/v1/documents/${kind}`, {
-      method: "POST",
+    const res = await fetch(editing ? `/api/v1/documents/${kind}/${editing.id}` : `/api/v1/documents/${kind}`, {
+      method: editing ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
@@ -534,7 +558,7 @@ function AddModal({
       >
         <div className="flex items-center justify-between mb-5">
           <div className="text-[17px] font-bold" style={{ color: "var(--ibs-text)" }}>
-            Thêm công văn {kind === "incoming" ? "đến" : "đi"}
+            {editing ? "Sửa" : "Thêm"} công văn {kind === "incoming" ? "đến" : "đi"}
           </div>
           <button
             type="button"
@@ -702,7 +726,7 @@ function AddModal({
 
           <div>
             <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>
-              File scan <span style={{ color: "var(--ibs-danger)" }}>*</span>
+              File scan {editing ? <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>(giữ file cũ nếu không chọn mới)</span> : <span style={{ color: "var(--ibs-danger)" }}>*</span>}
             </label>
             <input
               ref={fileRef}
@@ -749,7 +773,7 @@ function AddModal({
             className="px-4 py-2 rounded-lg text-[13px] font-semibold"
             style={{ background: "var(--ibs-accent)", color: "#fff", opacity: uploading || saving ? 0.7 : 1 }}
           >
-            {uploading ? "Đang upload..." : saving ? "Đang lưu..." : "Lưu công văn"}
+            {uploading ? "Đang upload..." : saving ? "Đang lưu..." : editing ? "Lưu thay đổi" : "Lưu công văn"}
           </button>
         </div>
       </form>

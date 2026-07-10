@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { formatDate, apiError } from "@/lib/utils";
-import { Plus, RefreshCw, X, Star, Download } from "lucide-react";
+import { Plus, RefreshCw, X, Star, Download, Trash2 } from "lucide-react";
+import { useCan } from "@/hooks/use-permission";
 import Link from "next/link";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { DateInput } from "@/components/shared/date-input";
@@ -173,6 +174,7 @@ async function exportMealData(type: string, from: string, to: string, subId?: st
 }
 
 export default function NhaAnPage() {
+  const can = useCan();
   const [tab, setTab] = useState<"registrations" | "supplementary" | "feedback" | "cost" | "food" | "subcontractors">("registrations");
   const [dateFrom, setDateFrom] = useState(today());
   const [dateTo, setDateTo] = useState(today());
@@ -189,6 +191,8 @@ export default function NhaAnPage() {
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
   const [myEmployeeCode, setMyEmployeeCode] = useState("");
   const [showRegister, setShowRegister] = useState(false);
+  const [editReg, setEditReg] = useState<MealReg | null>(null);
+  const [editSubMeal, setEditSubMeal] = useState<{ subcontractorId: string; name: string; lunch: number; dinner: number } | null>(null);
   const [showSupplementary, setShowSupplementary] = useState(false);
   const [suppReqs, setSuppReqs] = useState<SupplementaryReq[]>([]);
   const [suppCanApprove, setSuppCanApprove] = useState(false);
@@ -293,6 +297,13 @@ export default function NhaAnPage() {
     await fetch(`/api/v1/subcontractors/meals?date=${selectedDate}`, { method: "DELETE" });
     fetchRegs();
   }
+  // Xóa suất ăn của 1 nhà thầu trong ngày (chi tiết thầu phụ).
+  async function deleteSubMeal(subcontractorId: string, name: string) {
+    if (!(await confirmDialog({ title: "Xóa suất ăn thầu phụ", message: `Xóa suất ăn của "${name}" trong ngày này?`, tone: "danger", confirmText: "Xóa" }))) return;
+    const res = await fetch(`/api/v1/subcontractors/meals?subcontractorId=${subcontractorId}&date=${selectedDate}`, { method: "DELETE" });
+    if (!res.ok) { const d = await res.json().catch(() => null); await alertDialog("Lỗi: " + apiError(res.status, d?.error)); return; }
+    fetchRegs();
+  }
 
   function fetchSupplementary() {
     setSuppLoading(true);
@@ -312,6 +323,13 @@ export default function NhaAnPage() {
     const res = await fetch(`/api/v1/meals/supplementary/${id}/reject`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
     });
+    if (!res.ok) { const d = await res.json(); await alertDialog("Lỗi: " + apiError(res.status, d.error)); return; }
+    fetchSupplementary();
+  }
+  // Xóa phiếu đăng ký bổ sung CHỜ DUYỆT (chủ phiếu hoặc quyền m10.nhaan.dangky:delete).
+  async function deleteSupp(id: string) {
+    if (!(await confirmDialog({ title: "Xóa phiếu đăng ký bổ sung", message: "Xóa phiếu đăng ký suất ăn bổ sung này? Chỉ xóa được phiếu đang chờ duyệt.", tone: "danger", confirmText: "Xóa" }))) return;
+    const res = await fetch(`/api/v1/meals/supplementary/${id}`, { method: "DELETE" });
     if (!res.ok) { const d = await res.json(); await alertDialog("Lỗi: " + apiError(res.status, d.error)); return; }
     fetchSupplementary();
   }
@@ -552,7 +570,7 @@ export default function NhaAnPage() {
                     <td className="px-4 py-2.5 text-right font-semibold">{r.lunchCount + r.dinnerCount + r.guestCount}</td>
                     {isHRAdmin && !isRange && (
                       <td className="px-5 py-2.5 text-right">
-                        <button onClick={() => handleDelete(r.departmentId)} className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>Xóa</button>
+                        <button onClick={() => { const raw = registrations.find((x) => x.departmentId === r.departmentId); if (raw) setEditReg(raw); }} className="text-[12px]" style={{ color: "var(--ibs-accent)" }}>Sửa</button>
                       </td>
                     )}
                   </tr>
@@ -604,8 +622,16 @@ export default function NhaAnPage() {
                         <span className="font-medium" style={{ color: "#10b981" }}>{s.name}</span>
                         <span style={{ color: "var(--ibs-text-dim)" }}> · {s.companyName}</span>
                       </span>
-                      <span style={{ color: "var(--ibs-text-dim)" }} className="whitespace-nowrap">
-                        {s.dinner > 0 ? <>trưa {s.lunch} · tối OT {s.dinner} · </> : null}<span className="font-semibold" style={{ color: "var(--ibs-text)" }}>{t} suất</span>
+                      <span className="flex items-center gap-3 shrink-0">
+                        <span style={{ color: "var(--ibs-text-dim)" }} className="whitespace-nowrap">
+                          {s.dinner > 0 ? <>trưa {s.lunch} · tối OT {s.dinner} · </> : null}<span className="font-semibold" style={{ color: "var(--ibs-text)" }}>{t} suất</span>
+                        </span>
+                        {isHRAdmin && !isRange && (
+                          <>
+                            <button onClick={() => setEditSubMeal({ subcontractorId: s.id, name: s.name, lunch: s.lunch, dinner: s.dinner })} className="text-[11px] font-semibold" style={{ color: "var(--ibs-accent)" }}>Sửa</button>
+                            <button onClick={() => deleteSubMeal(s.id, s.name)} className="text-[11px] font-semibold" style={{ color: "var(--ibs-danger)" }}>Xóa</button>
+                          </>
+                        )}
                       </span>
                     </div>
                   );
@@ -691,6 +717,11 @@ export default function NhaAnPage() {
                             <button onClick={() => approveSupp(s.id)} className="text-[12px] px-2.5 py-1 rounded-md font-semibold text-white" style={{ background: "#10b981" }}>Duyệt</button>
                             <button onClick={() => rejectSupp(s.id)} className="text-[12px] px-2.5 py-1 rounded-md font-semibold" style={{ background: "rgba(220,38,38,0.1)", color: "var(--ibs-danger)" }}>Từ chối</button>
                           </>
+                        )}
+                        {s.status === "PENDING" && (!suppCanApprove || can("m10.nhaan.dangky:delete")) && (
+                          <button onClick={() => deleteSupp(s.id)} className="text-[12px] px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1" style={{ background: "rgba(220,38,38,0.1)", color: "var(--ibs-danger)" }} title="Xóa phiếu chờ duyệt">
+                            <Trash2 size={12} /> Xóa
+                          </button>
                         )}
                       </div>
                     </div>
@@ -1369,6 +1400,141 @@ export default function NhaAnPage() {
         <FeedbackModal employeeId={myEmployeeId} selectedDate={selectedDate}
           onClose={() => setShowFeedback(false)} onSuccess={() => { setShowFeedback(false); fetchFeedbacks(); }} />
       )}
+      {editReg && (
+        <EditRegModal reg={editReg} date={selectedDate}
+          onClose={() => setEditReg(null)} onSaved={() => { setEditReg(null); fetchRegs(); }} />
+      )}
+      {editSubMeal && (
+        <EditSubMealModal sub={editSubMeal} date={selectedDate}
+          onClose={() => setEditSubMeal(null)} onSaved={() => { setEditSubMeal(null); fetchRegs(); }} />
+      )}
+    </div>
+  );
+}
+
+// Sửa (đặt lại) số suất ăn thầu phụ của 1 nhà thầu trong ngày.
+function EditSubMealModal({ sub, date, onClose, onSaved }: { sub: { subcontractorId: string; name: string; lunch: number; dinner: number }; date: string; onClose: () => void; onSaved: () => void }) {
+  const [lunch, setLunch] = useState(String(sub.lunch));
+  const [dinner, setDinner] = useState(String(sub.dinner));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const inputCls = "w-full px-3 py-2 rounded-lg border text-[13px]";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  async function save() {
+    setError(""); setSaving(true);
+    const res = await fetch("/api/v1/subcontractors/meals", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subcontractorId: sub.subcontractorId, date, lunchCount: Number(lunch) || 0, dinnerCount: Number(dinner) || 0 }),
+    });
+    setSaving(false);
+    if (res.ok) onSaved();
+    else { const d = await res.json().catch(() => null); setError(apiError(res.status, d?.error) || "Lưu thất bại"); }
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }}>
+      <div className="w-full max-w-sm rounded-2xl p-5" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-[15px] font-bold">Sửa suất ăn thầu phụ</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-4" style={{ color: "var(--ibs-text-dim)" }}>{sub.name} · ngày {formatDate(date)} · nhập lại số (ghi đè)</div>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>Trưa</label>
+            <input type="number" min="0" value={lunch} onChange={(e) => setLunch(e.target.value)} className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>Tối OT</label>
+            <input type="number" min="0" value={dinner} onChange={(e) => setDinner(e.target.value)} className={inputCls} style={inputStyle} />
+          </div>
+        </div>
+        {error && <div className="text-[12px] mb-3 p-2 rounded" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.7 : 1 }}>{saving ? "Đang lưu..." : "Lưu"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Sửa (ĐẶT LẠI) đăng ký suất ăn 1 phòng ban trong ngày: Trưa / Tối OT / Khách theo đơn giá (ghi đè).
+function EditRegModal({ reg, date, onClose, onSaved }: { reg: MealReg; date: string; onClose: () => void; onSaved: () => void }) {
+  const [lunch, setLunch] = useState(String(reg.lunchCount ?? 0));
+  const [dinner, setDinner] = useState(String(reg.dinnerCount ?? 0));
+  const initTiers = (() => {
+    const gbp = reg.guestByPrice;
+    if (gbp && typeof gbp === "object" && Object.keys(gbp).length > 0) {
+      return Object.entries(gbp).map(([price, count]) => ({ price: String(price), count: String(count) }));
+    }
+    if ((reg.guestCount ?? 0) > 0 && reg.guestUnitPrice > 0) return [{ price: String(reg.guestUnitPrice), count: String(reg.guestCount) }];
+    return [] as { price: string; count: string }[];
+  })();
+  const [tiers, setTiers] = useState(initTiers);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const inputCls = "w-full px-3 py-2 rounded-lg border text-[13px]";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+
+  async function save() {
+    setError("");
+    const guestByPrice: Record<string, number> = {};
+    for (const t of tiers) {
+      const p = Math.round(Number(t.price) || 0), c = Math.round(Number(t.count) || 0);
+      if (p > 0 && c > 0) guestByPrice[String(p)] = (guestByPrice[String(p)] || 0) + c;
+    }
+    setSaving(true);
+    const res = await fetch("/api/v1/meals", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ departmentId: reg.departmentId, date, lunchCount: Number(lunch) || 0, dinnerCount: Number(dinner) || 0, guestByPrice }),
+    });
+    setSaving(false);
+    if (res.ok) onSaved();
+    else { const d = await res.json().catch(() => null); setError(apiError(res.status, d?.error) || "Lưu thất bại"); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }}>
+      <div className="w-full max-w-md rounded-2xl p-5 max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-[15px] font-bold">Sửa đăng ký — {reg.department.name}</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-4" style={{ color: "var(--ibs-text-dim)" }}>Ngày {formatDate(date)} · nhập lại số (ghi đè, không cộng dồn)</div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>Trưa (CBNV)</label>
+            <input type="number" min="0" value={lunch} onChange={(e) => setLunch(e.target.value)} className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>Tối OT</label>
+            <input type="number" min="0" value={dinner} onChange={(e) => setDinner(e.target.value)} className={inputCls} style={inputStyle} />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-[12px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>Khách (theo đơn giá)</label>
+          <button type="button" onClick={() => setTiers([...tiers, { price: "", count: "" }])} className="text-[12px] font-semibold" style={{ color: "var(--ibs-accent)" }}>+ Thêm dòng khách</button>
+        </div>
+        <div className="space-y-2 mb-4">
+          {tiers.length === 0 && <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không có khách.</div>}
+          {tiers.map((t, i) => (
+            <div key={i} className="flex gap-2 items-center">
+              <input type="number" min="0" placeholder="Đơn giá (đ)" value={t.price} onChange={(e) => setTiers(tiers.map((x, j) => j === i ? { ...x, price: e.target.value } : x))} className="flex-1 px-2 py-1.5 rounded border text-[13px]" style={inputStyle} />
+              <span style={{ color: "var(--ibs-text-dim)" }}>×</span>
+              <input type="number" min="0" placeholder="Số khách" value={t.count} onChange={(e) => setTiers(tiers.map((x, j) => j === i ? { ...x, count: e.target.value } : x))} className="w-24 px-2 py-1.5 rounded border text-[13px]" style={inputStyle} />
+              <button type="button" onClick={() => setTiers(tiers.filter((_, j) => j !== i))} title="Xóa dòng khách" className="text-[18px] px-1" style={{ color: "var(--ibs-danger)" }}>×</button>
+            </div>
+          ))}
+        </div>
+
+        {error && <div className="text-[12px] mb-3 p-2 rounded" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.7 : 1 }}>{saving ? "Đang lưu..." : "Lưu"}</button>
+        </div>
+      </div>
     </div>
   );
 }
