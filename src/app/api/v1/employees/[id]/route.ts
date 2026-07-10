@@ -61,6 +61,7 @@ export async function GET(
 }
 
 const UpdateEmployeeSchema = z.object({
+  code: z.string().min(1).optional(),   // Mã nhân viên (unique) — chỉ HR sửa
   // Thông tin cơ bản
   fullName: z.string().min(1).optional(),
   photo: z.string().optional().nullable(),
@@ -164,6 +165,22 @@ export async function PUT(
     updateData.bankAccounts = cleaned;
     updateData.bankAccount = cleaned[0]?.accountNumber ?? null;
     updateData.bankName = cleaned[0]?.bank ?? null;
+  }
+
+  // Sửa MÃ NHÂN VIÊN — chỉ người có quyền sửa hồ sơ; kiểm tra trùng (bỏ qua chính mình + bản #DEL#).
+  if (updateData.code !== undefined) {
+    if (!canUser(session.user as any, "m1.hoso:edit")) {
+      delete updateData.code; // không đủ quyền → bỏ qua, không đổi mã
+    } else {
+      const newCode = String(updateData.code).trim();
+      if (!newCode || newCode === employee.code) {
+        delete updateData.code;
+      } else {
+        const dup = await prisma.employee.findFirst({ where: { code: newCode, id: { not: id } }, select: { id: true } });
+        if (dup) return NextResponse.json({ error: { code: "DUPLICATE", message: `Mã nhân viên "${newCode}" đã tồn tại` } }, { status: 409 });
+        updateData.code = newCode;
+      }
+    }
   }
 
   const updated = await prisma.employee.update({

@@ -1059,6 +1059,7 @@ function EditEmployeeDialog({
 }) {
   const isHR = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
   const [form, setForm] = useState({
+    code: employee.code || "",
     fullName: employee.fullName || "",
     gender: employee.gender || "MALE",
     dateOfBirth: employee.dateOfBirth ? String(employee.dateOfBirth).slice(0, 10) : "",
@@ -1113,6 +1114,7 @@ function EditEmployeeDialog({
         emergencyPhone: form.emergencyPhone,
       };
       if (isHR) {
+        if (form.code.trim()) body.code = form.code.trim();
         body.fullName = form.fullName;
         body.gender = form.gender;
         if (form.dateOfBirth) body.dateOfBirth = form.dateOfBirth;
@@ -1188,6 +1190,11 @@ function EditEmployeeDialog({
               <p className="text-[11px] uppercase tracking-wider font-semibold mb-3"
                 style={{ color: "var(--ibs-text-dim)" }}>Thông tin cơ bản</p>
               <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className={labelCls} style={labelStyle}>Mã nhân viên</label>
+                  <input value={form.code} onChange={(e) => handleChange("code", e.target.value)}
+                    className={inputCls} style={inputStyle} placeholder="VD: 190907" />
+                </div>
                 <div>
                   <label className={labelCls} style={labelStyle}>Họ tên đầy đủ</label>
                   <input value={form.fullName} onChange={(e) => handleChange("fullName", e.target.value)}
