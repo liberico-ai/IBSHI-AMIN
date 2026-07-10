@@ -104,8 +104,8 @@ export async function GET(request: NextRequest) {
     prisma.employee.count({ where }),
   ]);
 
-  // Lương nhạy cảm: chỉ người có quyền xem lương (ma trận m7.luong:view) mới nhận số liệu lương.
-  const canPay = canUser(session.user as any, "m7.luong:view");
+  // Lương nhạy cảm: chỉ người có quyền xem lương (ma trận m7.bangluong:view) mới nhận số liệu lương.
+  const canPay = canUser(session.user as any, "m7.bangluong:view");
   if (!canPay) {
     for (const e of data as any[]) {
       if (Array.isArray(e.contracts)) for (const c of e.contracts) { c.baseSalary = 0; c.insuranceSalary = 0; c.allowance = 0; }

@@ -13,7 +13,7 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canUser(session.user as any, "m7.luong:view")) {
+  if (!canUser(session.user as any, "m7.phieuluong:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
   }
 

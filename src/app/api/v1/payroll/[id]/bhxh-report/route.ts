@@ -10,7 +10,7 @@ import { computeBhxh } from "@/lib/constants";
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canUser(session.user as any, "m7.luong:view")) {
+  if (!canUser(session.user as any, "m7.bhxh:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
   }
 

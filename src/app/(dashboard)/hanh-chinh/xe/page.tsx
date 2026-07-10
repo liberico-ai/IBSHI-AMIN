@@ -564,7 +564,7 @@ export default function XePage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg" style={{ background: `${st.color}20`, color: st.color }}>{st.label}</span>
-                      {can("m10.xe:edit") && (
+                      {can("m10.xe.doixe:edit") && (
                         <button
                           onClick={(e) => { e.stopPropagation(); setEditVehicle(v); }}
                           title="Sửa xe"

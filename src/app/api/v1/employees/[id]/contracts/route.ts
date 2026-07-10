@@ -32,7 +32,7 @@ export async function POST(
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
 
-  if (!canUser(session.user as any, "m1.luonghd:create")) {
+  if (!canUser(session.user as any, "m1.hopdong:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

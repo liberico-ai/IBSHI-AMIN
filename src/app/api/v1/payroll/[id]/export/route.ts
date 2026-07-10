@@ -15,7 +15,7 @@ export async function GET(
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m7.luong:view")) {
+  if (!canUser(session.user as any, "m7.bangluong:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
   }
 

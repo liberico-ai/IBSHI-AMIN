@@ -22,8 +22,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  // Quyền sửa xe = ma trận "m10.xe:edit" (ADMIN = superset; fallback gói mẫu).
-  if (!canUser(session.user as any, "m10.xe:edit")) {
+  // Quyền sửa xe = ma trận "m10.xe.doixe:edit" (ADMIN = superset; fallback gói mẫu).
+  if (!canUser(session.user as any, "m10.xe.doixe:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền sửa xe" } }, { status: 403 });
   }
 

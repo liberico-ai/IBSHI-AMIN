@@ -5,7 +5,7 @@ import { z } from "zod";
 import { canUser } from "@/lib/permission-catalog";
 
 // Con số suất ăn THỰC TẾ bếp phục vụ — đối soát Kế hoạch (đăng ký) vs Thực tế theo ngày.
-// Đọc: ai đăng nhập cũng xem được. Nhập/sửa: theo ma trận (m10.nhaan:edit).
+// Đọc: ai đăng nhập cũng xem được. Nhập/sửa: theo ma trận (m10.nhaan.thucte:edit).
 function canManage(role: string): boolean {
   return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
 }
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
     .filter((r) => r.planLunch + r.planDinner + r.planGuest + r.planSub > 0 || r.hasActual)
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  return NextResponse.json({ data, meta: { month, year, canManage: canUser(session.user as any, "m10.nhaan:edit") } });
+  return NextResponse.json({ data, meta: { month, year, canManage: canUser(session.user as any, "m10.nhaan.thucte:edit") } });
 }
 
 export async function POST(request: NextRequest) {
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canUser(session.user as any, "m10.nhaan:edit")) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền nhập con số thực tế" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan.thucte:edit")) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền nhập con số thực tế" } }, { status: 403 });
 
   const parsed = SaveSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
@@ -114,7 +114,7 @@ export async function DELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
-  if (!canUser(session.user as any, "m10.nhaan:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan.thucte:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const date = searchParams.get("date");

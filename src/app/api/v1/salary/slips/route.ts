@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  const isHR = canUser(session.user as any, "m7.luong:view");
+  const isHR = canUser(session.user as any, "m7.bangluong:view");
 
   const { searchParams } = new URL(request.url);
   const month = searchParams.get("month") ? Number(searchParams.get("month")) : undefined;

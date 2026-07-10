@@ -27,7 +27,7 @@ export async function PUT(
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
 
-  if (!canUser(session.user as any, "m1.luonghd:edit")) {
+  if (!canUser(session.user as any, "m1.hopdong:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -77,7 +77,7 @@ export async function DELETE(
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
 
-  if (!canUser(session.user as any, "m1.luonghd:delete")) {
+  if (!canUser(session.user as any, "m1.hopdong:delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

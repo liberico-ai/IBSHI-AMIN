@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   // Phòng ban: whitelist chọn tuỳ ý (hoặc tất cả); người khác bị khoá về phòng mình.
   let departmentId = searchParams.get("departmentId") || null;
   let departmentName = "Tất cả phòng ban";
-  if (!canUser(session.user as any, "m10.vpp:edit")) {
+  if (!canUser(session.user as any, "m10.vpp.baocao:view")) {
     const meEmp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
     departmentId = meEmp?.departmentId ?? "__none__";
   }

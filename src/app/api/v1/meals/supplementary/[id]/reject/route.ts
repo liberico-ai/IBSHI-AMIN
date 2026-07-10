@@ -10,7 +10,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userId = (session.user as any).id;
-  if (!canUser(session.user as any, "m10.nhaan:approve"))
+  if (!canUser(session.user as any, "m10.nhaan.dangky:approve"))
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền duyệt suất ăn bổ sung" } }, { status: 403 });
 
   const { id } = await params;

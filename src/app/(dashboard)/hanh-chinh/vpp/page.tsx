@@ -6,7 +6,8 @@ import { apiError } from "@/lib/utils";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { viewUrl } from "@/lib/use-presigned-url";
 import { canManageVpp } from "@/lib/access";
-import { Plus, Upload, Check, X, ChevronDown, ChevronRight, FileText, Package, Download } from "lucide-react";
+import { useCan } from "@/hooks/use-permission";
+import { Plus, Upload, Check, X, ChevronDown, ChevronRight, FileText, Package, Download, Pencil, Trash2 } from "lucide-react";
 
 type Supplier = { id: string; name: string };
 type Item = { id: string; name: string; unit: string; note?: string | null; currentStock: number };
@@ -512,152 +513,12 @@ function StockInTab() {
   );
 }
 
-function StockInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierName, setSupplierName] = useState("");
-  const [showSupplierList, setShowSupplierList] = useState(false);
-  const [importDate, setImportDate] = useState(new Date().toISOString().slice(0, 10));
-  const [notes, setNotes] = useState("");
-  const [items, setItems] = useState<{ name: string; unit: string; quantity: string; itemId?: string }[]>([{ name: "", unit: "", quantity: "" }]);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [suggestions, setSuggestions] = useState<Record<number, Item[]>>({});
-
-  useEffect(() => {
-    fetch("/api/v1/stationery/suppliers").then((r) => r.json()).then((res) => setSuppliers(res.data || []));
-  }, []);
-
-  async function searchItem(idx: number, q: string) {
-    if (q.length < 2) { setSuggestions((s) => ({ ...s, [idx]: [] })); return; }
-    const res = await fetch(`/api/v1/stationery/items?q=${encodeURIComponent(q)}`).then((r) => r.json());
-    setSuggestions((s) => ({ ...s, [idx]: res.data || [] }));
-  }
-
-  function updateRow(i: number, k: "name" | "unit" | "quantity", v: string) {
-    const next = [...items];
-    next[i] = { ...next[i], [k]: v };
-    if (k === "name") { next[i].itemId = undefined; searchItem(i, v); }
-    setItems(next);
-  }
-  function selectSuggestion(i: number, it: Item) {
-    const next = [...items];
-    next[i] = { name: it.name, unit: it.unit, quantity: next[i].quantity, itemId: it.id };
-    setItems(next);
-    setSuggestions((s) => ({ ...s, [i]: [] }));
-  }
-
-  async function submit() {
-    setError(null);
-    const valid = items.filter((it) => it.name.trim() && it.unit.trim() && Number(it.quantity) > 0);
-    if (valid.length === 0) { setError("Cần ít nhất 1 item"); return; }
-    if (!supplierName.trim()) { setError("Chưa nhập tên NCC"); return; }
-    setSubmitting(true);
-    try {
-      const res = await fetch("/api/v1/stationery/stock-in", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          supplierName: supplierName.trim(), importDate, notes: notes || null,
-          items: valid.map((it) => ({ itemId: it.itemId, name: it.name.trim(), unit: it.unit.trim(), quantity: Number(it.quantity) })),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(apiError(res.status, data.error));
-      onSuccess();
-    } catch (e: any) { setError(String(e.message || e)); } finally { setSubmitting(false); }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
-      <div className="rounded-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)" }}>
-        <div className="flex justify-between mb-4">
-          <h3 className="text-[16px] font-semibold">Nhập kho VPP mới</h3>
-          <button onClick={onClose}><X size={20} /></button>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="relative">
-            <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>NCC *</label>
-            <input
-              value={supplierName}
-              onChange={(e) => { setSupplierName(e.target.value); setShowSupplierList(true); }}
-              onFocus={() => setShowSupplierList(true)}
-              onBlur={() => setTimeout(() => setShowSupplierList(false), 200)}
-              placeholder="Nhập tên NCC (vd: Super MRO)"
-              className="w-full px-3 py-2 rounded-lg border text-[13px]"
-              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}
-            />
-            {showSupplierList && suppliers.filter((s) => s.name.toLowerCase().includes(supplierName.toLowerCase())).length > 0 && (
-              <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border shadow-lg max-h-40 overflow-y-auto"
-                style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-                {suppliers.filter((s) => s.name.toLowerCase().includes(supplierName.toLowerCase())).map((s) => (
-                  <button key={s.id} type="button" onMouseDown={() => { setSupplierName(s.name); setShowSupplierList(false); }}
-                    className="block w-full text-left px-3 py-1.5 text-[12px] hover:bg-black/5">{s.name}</button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div>
-            <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày nhập *</label>
-            <input type="date" value={importDate} onChange={(e) => setImportDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border text-[13px]"
-              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
-          </div>
-        </div>
-
-        <div className="mb-2 text-[12px] font-semibold">Danh sách VPP nhập:</div>
-        <div className="space-y-2 mb-3">
-          {items.map((it, i) => (
-            <div key={i} className="relative grid gap-2" style={{ gridTemplateColumns: "3fr 1fr 1fr auto" }}>
-              <div className="relative">
-                <input value={it.name} onChange={(e) => updateRow(i, "name", e.target.value)}
-                  placeholder="Tên VPP (vd: Giấy A4)" className="w-full px-2 py-1.5 rounded border text-[13px]"
-                  style={{ background: "var(--ibs-bg)", borderColor: it.itemId ? "var(--ibs-success)" : "var(--ibs-border)" }} />
-                {suggestions[i]?.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border shadow-lg max-h-40 overflow-y-auto"
-                    style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-                    {suggestions[i].map((s) => (
-                      <button key={s.id} onClick={() => selectSuggestion(i, s)} className="block w-full text-left px-3 py-1.5 text-[12px] hover:bg-black/5">
-                        {s.name} <span style={{ color: "var(--ibs-text-dim)" }}>({s.unit}, tồn {fmt(s.currentStock)})</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <input value={it.unit} onChange={(e) => updateRow(i, "unit", e.target.value)} placeholder="ĐVT" className="px-2 py-1.5 rounded border text-[13px]"
-                style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
-              <input type="number" value={it.quantity} onChange={(e) => updateRow(i, "quantity", e.target.value)} placeholder="SL" className="px-2 py-1.5 rounded border text-[13px]"
-                style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
-              <button onClick={() => setItems(items.filter((_, j) => j !== i))} disabled={items.length === 1}
-                className="px-2 text-[18px] opacity-60 hover:opacity-100 disabled:opacity-20">×</button>
-            </div>
-          ))}
-        </div>
-        <button onClick={() => setItems([...items, { name: "", unit: "", quantity: "" }])}
-          className="text-[12px] mb-4" style={{ color: "var(--ibs-accent)" }}>+ Thêm dòng</button>
-
-        <div className="mb-4">
-          <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ghi chú</label>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg border text-[13px]"
-            style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
-        </div>
-
-        {error && <div className="mb-3 p-2 rounded text-[13px]" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
-
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>Hủy</Button>
-          <Button variant="accent" size="sm" loading={submitting} onClick={submit}>
-            {submitting ? "Đang lưu..." : "Lưu phiếu nhập"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function RequestsTab({ me }: { me: { id: string; role: string; employeeId: string | null } | null }) {
+  const can = useCan();
   const [requests, setRequests] = useState<Request[]>([]);
   const [canApprove, setCanApprove] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [editing, setEditing] = useState<Request | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [fromDate, setFromDate] = useState("");
@@ -675,6 +536,13 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
     }).finally(() => setLoading(false));
   }
   useEffect(() => { load(); }, [fromDate, toDate, statusF]);
+
+  async function deleteReq(id: string) {
+    if (!(await confirmDialog({ message: "Xóa phiếu đề nghị VPP này? (chỉ khi CHỜ DUYỆT)", tone: "danger", confirmText: "Xóa" }))) return;
+    const res = await fetch(`/api/v1/stationery/requests/${id}`, { method: "DELETE" });
+    if (res.ok) load();
+    else { const d = await res.json(); await alertDialog(apiError(res.status, d.error)); }
+  }
 
   function exportExcel() {
     const rows = requests.flatMap((r) => r.items.map((it) => ({
@@ -773,11 +641,6 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
           <button onClick={exportExcel} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)", background: "var(--ibs-bg)" }}>
             <Download size={14} /> Export
           </button>
-          <button onClick={() => setShowNew(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
-            style={{ background: "var(--ibs-accent)" }}>
-            <Plus size={14} /> Tạo phiếu xuất
-          </button>
         </div>
       </div>
 
@@ -824,6 +687,16 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
                               <X size={12} /> Từ chối
                             </button>
                           </>
+                        )}
+                        {r.status === "PENDING_APPROVAL" && (r.createdById === me?.id || can("m10.vpp.denghi:edit")) && (
+                          <button onClick={() => setEditing(r)} className="text-[11px] px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1" style={{ background: "rgba(59,130,246,0.12)", color: "#2563eb" }}>
+                            <Pencil size={12} /> Sửa
+                          </button>
+                        )}
+                        {r.status === "PENDING_APPROVAL" && (r.createdById === me?.id || can("m10.vpp.denghi:delete")) && (
+                          <button onClick={() => deleteReq(r.id)} className="text-[11px] px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1" style={{ background: "rgba(239,68,68,0.12)", color: "var(--ibs-danger)" }}>
+                            <Trash2 size={12} /> Xóa
+                          </button>
                         )}
                         {r.status === "APPROVED" && me?.employeeId === r.requester.id && (
                           r.items.some((it) => (it.issuedQuantity || 0) > (it.confirmedQuantity || 0)) ? (
@@ -929,7 +802,7 @@ function RequestsTab({ me }: { me: { id: string; role: string; employeeId: strin
         </>
       )}
 
-      {showNew && <RequestModal onClose={() => setShowNew(false)} onSuccess={() => { setShowNew(false); load(); }} />}
+      {(showNew || editing) && <RequestModal editing={editing} onClose={() => { setShowNew(false); setEditing(null); }} onSuccess={() => { setShowNew(false); setEditing(null); load(); }} />}
     </div>
   );
 }
@@ -1052,13 +925,17 @@ function UsageReportModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function RequestModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+function RequestModal({ onClose, onSuccess, editing }: { onClose: () => void; onSuccess: () => void; editing?: Request | null }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [requesterId, setRequesterId] = useState("");
-  const [reason, setReason] = useState("");
-  const [fileUrl, setFileUrl] = useState("");
+  const [requesterId, setRequesterId] = useState(editing?.requester.id ?? "");
+  const [reason, setReason] = useState(editing?.reason ?? "");
+  const [fileUrl, setFileUrl] = useState(editing?.fileUrl ?? "");
   const [uploading, setUploading] = useState(false);
-  const [items, setItems] = useState<{ itemId?: string; name: string; unit: string; quantity: string; note: string; currentStock?: number }[]>([{ name: "", unit: "", quantity: "", note: "" }]);
+  const [items, setItems] = useState<{ itemId?: string; name: string; unit: string; quantity: string; note: string; currentStock?: number }[]>(
+    editing && editing.items.length
+      ? editing.items.map((it) => ({ itemId: it.item.id, name: it.item.name, unit: it.item.unit, quantity: String(it.quantity), note: it.note ?? "", currentStock: it.item.currentStock }))
+      : [{ name: "", unit: "", quantity: "", note: "" }]
+  );
   const [suggestions, setSuggestions] = useState<Record<number, Item[]>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1104,24 +981,21 @@ function RequestModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     setError(null);
     if (!requesterId) { setError("Chưa chọn NV yêu cầu"); return; }
     if (!reason.trim()) { setError("Chưa nhập lý do"); return; }
-    if (!fileUrl) { setError("Bắt buộc upload file Đề nghị VPP"); return; }
     const valid = items.filter((it) => it.itemId && Number(it.quantity) > 0);
-    if (valid.length === 0) { setError("Chọn ít nhất 1 mặt hàng có sẵn trong kho"); return; }
-    for (const it of valid) {
-      if ((it.currentStock ?? 0) < Number(it.quantity)) {
-        setError(`"${it.name}" chỉ còn ${it.currentStock} ${it.unit} (yêu cầu ${it.quantity})`);
-        return;
-      }
-    }
+    if (valid.length === 0) { setError("Chọn ít nhất 1 mặt hàng trong danh mục VPP"); return; }
+    // Không quản lý tồn kho nữa → không chặn theo số lượng tồn.
     setSubmitting(true);
     try {
-      const res = await fetch("/api/v1/stationery/requests", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requesterEmployeeId: requesterId, reason: reason.trim(), fileUrl,
-          items: valid.map((it) => ({ itemId: it.itemId, quantity: Number(it.quantity), note: it.note || null })),
-        }),
-      });
+      const res = await fetch(
+        editing ? `/api/v1/stationery/requests/${editing.id}` : "/api/v1/stationery/requests",
+        {
+          method: editing ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requesterEmployeeId: requesterId, reason: reason.trim(), fileUrl,
+            items: valid.map((it) => ({ itemId: it.itemId, quantity: Number(it.quantity), note: it.note || null })),
+          }),
+        }
+      );
       const d = await res.json();
       if (!res.ok) throw new Error(apiError(res.status, d.error));
       onSuccess();
@@ -1132,26 +1006,17 @@ function RequestModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
       <div className="rounded-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)" }}>
         <div className="flex justify-between mb-4">
-          <h3 className="text-[16px] font-semibold">Tạo phiếu xuất VPP</h3>
+          <h3 className="text-[16px] font-semibold">{editing ? "Sửa phiếu xuất VPP" : "Tạo phiếu xuất VPP"}</h3>
           <button onClick={onClose}><X size={20} /></button>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>NV yêu cầu *</label>
-            <select value={requesterId} onChange={(e) => setRequesterId(e.target.value)} className="w-full px-3 py-2 rounded-lg border text-[13px]"
-              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}>
-              <option value="">-- Chọn NV --</option>
-              {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName} ({e.code} — {e.department.name})</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>File Đề nghị VPP * (Word/PDF)</label>
-            <input type="file" accept=".doc,.docx,.pdf,.jpg,.png" onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])}
-              className="w-full text-[13px]" />
-            {uploading && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Đang upload...</div>}
-            {fileUrl && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-success)" }}>✓ Đã upload</div>}
-          </div>
+        <div className="mb-4">
+          <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>NV yêu cầu *</label>
+          <select value={requesterId} onChange={(e) => setRequesterId(e.target.value)} className="w-full px-3 py-2 rounded-lg border text-[13px]"
+            style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}>
+            <option value="">-- Chọn NV --</option>
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName} ({e.code} — {e.department.name})</option>)}
+          </select>
         </div>
 
         <div className="mb-4">
@@ -1160,20 +1025,20 @@ function RequestModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
             style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} placeholder="VD: Phục vụ in tài liệu họp tháng" />
         </div>
 
-        <div className="mb-2 text-[12px] font-semibold">Danh sách VPP yêu cầu (gõ ≥2 ký tự để tìm trong kho):</div>
+        <div className="mb-2 text-[12px] font-semibold">Danh sách VPP yêu cầu (gõ ≥2 ký tự để tìm trong danh mục):</div>
         <div className="space-y-2 mb-3">
           {items.map((it, i) => (
             <div key={i} className="relative grid gap-2" style={{ gridTemplateColumns: "3fr 1fr 1fr 2fr auto" }}>
               <div className="relative">
                 <input value={it.name} onChange={(e) => updateRow(i, "name", e.target.value)}
-                  placeholder="Tìm tên VPP trong kho..." className="w-full px-2 py-1.5 rounded border text-[13px]"
+                  placeholder="Tìm tên VPP trong danh mục..." className="w-full px-2 py-1.5 rounded border text-[13px]"
                   style={{ background: "var(--ibs-bg)", borderColor: it.itemId ? "var(--ibs-success)" : "var(--ibs-border)" }} />
                 {suggestions[i]?.length > 0 && (
                   <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border shadow-lg max-h-40 overflow-y-auto"
                     style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
                     {suggestions[i].map((s) => (
                       <button key={s.id} onClick={() => selectSuggestion(i, s)} className="block w-full text-left px-3 py-1.5 text-[12px] hover:bg-black/5">
-                        {s.name} <span style={{ color: "var(--ibs-text-dim)" }}>({s.unit}, tồn {fmt(s.currentStock)})</span>
+                        {s.name} <span style={{ color: "var(--ibs-text-dim)" }}>({s.unit})</span>
                       </button>
                     ))}
                   </div>

@@ -13,7 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m1.luonghd:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m1.hopdong:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { id: employeeId, contractId } = await params;
   const body = await req.json();

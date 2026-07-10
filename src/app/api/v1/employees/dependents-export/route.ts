@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  if (!canUser(session.user as any, "m1.hoso:view")) {
+  if (!canUser(session.user as any, "m1.npt:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

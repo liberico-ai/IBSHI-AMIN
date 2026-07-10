@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   const where: Record<string, unknown> = {};
 
   // Non-admins can only see their own certificates
-  if (!canUser(session.user as any, "m5.daotao:edit")) {
+  if (!canUser(session.user as any, "m5.chungchi:edit")) {
     const emp = await prisma.employee.findFirst({ where: { userId } });
     if (emp) where.employeeId = emp.id;
     else return NextResponse.json({ data: [] });
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m5.daotao:edit")) {
+  if (!canUser(session.user as any, "m5.chungchi:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

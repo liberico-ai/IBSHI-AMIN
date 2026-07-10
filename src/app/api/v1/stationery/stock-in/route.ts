@@ -39,8 +39,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  // Nhập kho VPP = quản lý kho (m10.vpp:edit), không phải "đề nghị VPP".
-  if (!canUser(session.user as any, "m10.vpp:edit"))
+  // Nhập kho VPP = quản lý kho (m10.vpp.nhapkho:create), không phải "đề nghị VPP".
+  if (!canUser(session.user as any, "m10.vpp.nhapkho:create"))
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const body = CreateSchema.parse(await request.json());

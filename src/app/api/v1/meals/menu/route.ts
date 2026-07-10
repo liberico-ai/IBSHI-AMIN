@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  if (!canUser(session.user as any, "m10.nhaan:edit")) {
+  if (!canUser(session.user as any, "m10.nhaan.thucdon:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userRole = (session.user as { role: string }).role;
-  if (!canUser(session.user as any, "m10.xe:view")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.xe.nhienlieu:view")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const vehicleId = searchParams.get("vehicleId") || "";

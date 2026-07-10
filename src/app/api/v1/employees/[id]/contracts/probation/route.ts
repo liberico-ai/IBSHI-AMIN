@@ -19,7 +19,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
-  if (!canUser(session.user as any, "m1.luonghd:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m1.hopdong:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { id: employeeId } = await params;
   const emp = await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true } });

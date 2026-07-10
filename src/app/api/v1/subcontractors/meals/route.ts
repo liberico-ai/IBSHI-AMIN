@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canUser(session.user as any, "m10.nhaan:create")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan.dangky:create")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const parsed = RegisterSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
@@ -76,7 +76,7 @@ export async function DELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m10.nhaan:create")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan.dangky:create")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");

@@ -23,7 +23,7 @@ export async function PUT(
   if (!req) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
   if (action === "APPROVE" || action === "REJECT") {
-    if (!canUser(session.user as any, "m4.tuyendung:delete")) {
+    if (!canUser(session.user as any, "m4.yeucau:delete")) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
     }
     const updated = await prisma.recruitmentRequest.update({
@@ -57,7 +57,7 @@ export async function PUT(
   }
 
   // HR_ADMIN can update other fields (status=COMPLETED when filled)
-  if (!canUser(session.user as any, "m4.tuyendung:create")) {
+  if (!canUser(session.user as any, "m4.yeucau:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
   const { status } = body;

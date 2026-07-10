@@ -302,48 +302,60 @@ function EditUserModal({
               <div className="py-8 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Đang tải…</div>
             ) : (
               <div className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--ibs-border)" }}>
-                <table className="w-full border-collapse text-[12px]">
-                  <thead>
-                    <tr style={{ background: "var(--ibs-bg)" }}>
-                      <th className="text-left px-3 py-2 font-semibold">Module / Tính năng</th>
-                      {PERM_ACTIONS.map((a) => (
-                        <th key={a} className="px-1 py-2 font-semibold text-center w-[48px]">{ACTION_LABELS[a]}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {PERMISSION_CATALOG.flatMap((g) => [
-                      <tr key={g.module + "::h"}>
-                        <td colSpan={6} className="px-3 py-1.5 font-semibold" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-accent)" }}>
-                          {g.module}
-                        </td>
-                      </tr>,
-                      ...g.features.map((f) => (
-                        <tr key={f.key} className="border-t" style={{ borderColor: "var(--ibs-border)" }}>
-                          <td className="px-3 py-2">{f.label}</td>
-                          {PERM_ACTIONS.map((a) => {
-                            const k = `${f.key}:${a}`;
-                            return (
-                              <td key={a} className="px-1 py-2 text-center">
-                                {f.actions.includes(a) ? (
-                                  <input
-                                    type="checkbox"
-                                    checked={perms.has(k)}
-                                    onChange={() => togglePerm(k)}
-                                    className="w-4 h-4 cursor-pointer align-middle"
-                                    style={{ accentColor: "var(--ibs-accent)" }}
-                                  />
-                                ) : (
-                                  <span style={{ color: "var(--ibs-text-dim)" }}>–</span>
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      )),
-                    ])}
-                  </tbody>
-                </table>
+                {PERMISSION_CATALOG.map((g) => (
+                  <details key={g.module} className="border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }} open={g.module.startsWith("M10")}>
+                    <summary
+                      className="cursor-pointer select-none list-none flex items-center gap-2 px-3 py-2.5 text-[12px] font-semibold"
+                      style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-accent)" }}
+                    >
+                      <span className="text-[10px]">▸</span>
+                      {g.module}
+                    </summary>
+                    <div>
+                      {g.features.map((f, i) => {
+                        const showGroup = !!f.group && f.group !== g.features[i - 1]?.group;
+                        return (
+                          <div key={f.key}>
+                            {showGroup && (
+                              <div className="px-3 pt-2.5 pb-1 text-[10.5px] font-bold uppercase tracking-wider" style={{ color: "var(--ibs-text-dim)" }}>
+                                {f.group}
+                              </div>
+                            )}
+                            <div className="flex items-start justify-between gap-3 px-3 py-2 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+                              <span className="text-[12.5px] pt-1 leading-tight">{f.label}</span>
+                              <div className="flex flex-wrap gap-1.5 justify-end shrink-0">
+                                {f.actions.map((a) => {
+                                  const k = `${f.key}:${a}`;
+                                  const on = perms.has(k);
+                                  return (
+                                    <label
+                                      key={a}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium cursor-pointer border"
+                                      style={{
+                                        borderColor: on ? "var(--ibs-accent)" : "var(--ibs-border)",
+                                        background: on ? "rgba(0,180,216,0.1)" : "transparent",
+                                        color: on ? "var(--ibs-accent)" : "var(--ibs-text-dim)",
+                                      }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={on}
+                                        onChange={() => togglePerm(k)}
+                                        className="w-3.5 h-3.5 cursor-pointer"
+                                        style={{ accentColor: "var(--ibs-accent)" }}
+                                      />
+                                      {ACTION_LABELS[a]}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                ))}
               </div>
             )}
           </div>

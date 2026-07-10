@@ -26,6 +26,6 @@ export async function GET() {
     role: (session.user as any).role,
     employeeCode,
     isDriver,
-    canViewPayroll: canUser(session.user as any, "m7.luong:view"),
+    canViewPayroll: canUser(session.user as any, "m7.bangluong:view"),
   });
 }

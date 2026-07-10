@@ -14,7 +14,7 @@ const Schema = z.object({
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canUser(session.user as any, "m10.vpp:approve")) {
+  if (!canUser(session.user as any, "m10.vpp.denghi:approve")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền cấp VPP" } }, { status: 403 });
   }
   const body = Schema.parse(await request.json());

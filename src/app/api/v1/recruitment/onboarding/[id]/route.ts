@@ -16,7 +16,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m4.tuyendung:view")) {
+  if (!canUser(session.user as any, "m4.onboarding:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -44,7 +44,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m4.tuyendung:edit")) {
+  if (!canUser(session.user as any, "m4.onboarding:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -86,7 +86,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m4.tuyendung:delete")) {
+  if (!canUser(session.user as any, "m4.onboarding:delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

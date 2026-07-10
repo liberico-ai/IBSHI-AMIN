@@ -22,7 +22,7 @@ export async function PUT(
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m8.kyluat:create")) {
+  if (!canUser(session.user as any, "m8.quydinh:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -51,7 +51,7 @@ export async function DELETE(
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m8.kyluat:delete")) {
+  if (!canUser(session.user as any, "m8.quydinh:delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

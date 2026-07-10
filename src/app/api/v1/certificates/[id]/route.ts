@@ -24,7 +24,7 @@ export async function PUT(
   }
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m5.daotao:edit")) {
+  if (!canUser(session.user as any, "m5.chungchi:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -75,7 +75,7 @@ export async function DELETE(
   }
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m5.daotao:edit")) {
+  if (!canUser(session.user as any, "m5.chungchi:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

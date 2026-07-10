@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canUser(session.user as any, "m10.nhaan:create")) {
+  if (!canUser(session.user as any, "m10.nhaan.dangky:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

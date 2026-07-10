@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as { role: string }).role;
-  if (!canUser(session.user as any, "m4.tuyendung:view")) {
+  if (!canUser(session.user as any, "m4.vitri:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m4.tuyendung:create")) {
+  if (!canUser(session.user as any, "m4.vitri:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

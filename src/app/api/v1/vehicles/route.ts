@@ -34,8 +34,8 @@ export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  // Thêm xe vào ĐỘI XE = quản lý đội xe (m10.xe:edit). Không nhầm với "đặt xe" self-service.
-  if (!canUser(session.user as any, "m10.xe:edit")) {
+  // Thêm xe vào ĐỘI XE = quản lý đội xe (m10.xe.doixe:create). Không nhầm với "đặt xe" self-service.
+  if (!canUser(session.user as any, "m10.xe.doixe:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

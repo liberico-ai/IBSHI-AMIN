@@ -52,8 +52,8 @@ export async function GET(
     }
   }
 
-  // Tab Hợp đồng (lương trên HĐ) — ẩn với người không có quyền xem lương/HĐ (ma trận m1.luonghd:view).
-  if (!canUser(session.user as any, "m1.luonghd:view")) {
+  // Tab Hợp đồng (lương trên HĐ) — ẩn với người không có quyền xem lương/HĐ (ma trận m1.hopdong:view).
+  if (!canUser(session.user as any, "m1.hopdong:view")) {
     (employee as any).contracts = [];
   }
 

@@ -269,7 +269,7 @@ export async function POST(request: NextRequest) {
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canUser(session.user as any, "m10.nhaan:create")) {
+  if (!canUser(session.user as any, "m10.nhaan.dangky:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -287,7 +287,7 @@ export async function POST(request: NextRequest) {
   }
 
   // MANAGER can only register for their own department
-  if (!canUser(session.user as any, "m10.nhaan:edit")) {
+  if (!canUser(session.user as any, "m10.nhaan.dangky:approve")) {
     const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
     if (!emp || emp.departmentId !== departmentId) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ có thể đăng ký bữa ăn cho phòng ban của mình" } }, { status: 403 });
@@ -339,7 +339,7 @@ export async function DELETE(request: NextRequest) {
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canUser(session.user as any, "m10.nhaan:create")) {
+  if (!canUser(session.user as any, "m10.nhaan.dangky:create")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -352,7 +352,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   // MANAGER can only delete registrations for their own department
-  if (!canUser(session.user as any, "m10.nhaan:edit")) {
+  if (!canUser(session.user as any, "m10.nhaan.dangky:approve")) {
     const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
     if (!emp || emp.departmentId !== departmentId) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ có thể xóa bữa ăn của phòng ban mình" } }, { status: 403 });
