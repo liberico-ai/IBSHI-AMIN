@@ -65,7 +65,7 @@ export const PERMISSION_CATALOG: ModuleGroup[] = [
     module: "M3 · Chấm công",
     features: [
       { key: "m3.bangcong", label: "Bảng chấm công", actions: ["view", "edit", "import"] },
-      { key: "m3.nghiphep", label: "Nghỉ phép", actions: ["view", "create", "approve1", "approve2"] },
+      { key: "m3.nghiphep", label: "Nghỉ phép", actions: ["view", "create", "edit", "delete", "approve1", "approve2"] },
       { key: "m3.tangca", label: "Tăng ca (OT)", actions: ["view", "create", "edit", "delete", "approve"] },
     ],
   },

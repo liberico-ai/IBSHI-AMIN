@@ -5,7 +5,9 @@ import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ApprovalWorkflow } from "@/components/shared/approval-workflow";
 import { formatDate, apiError } from "@/lib/utils";
-import { Plus, X, Calendar, Clock, Download, FileText, AlertTriangle } from "lucide-react";
+import { Plus, X, Calendar, Clock, Download, FileText, AlertTriangle, Pencil, Trash2 } from "lucide-react";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
+import { useCan } from "@/hooks/use-permission";
 import { DateInput } from "@/components/shared/date-input";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
@@ -75,8 +77,14 @@ const STATUS_OPTIONS = [
 ];
 
 // ── New Leave Request Dialog ──────────────────────────────────────────────────
-function NewLeaveDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (item: LeaveRequest) => void }) {
-  const [form, setForm] = useState({ leaveType: "ANNUAL", startDate: "", endDate: "", reason: "", proofUrls: [] as string[] });
+function NewLeaveDialog({ onClose, onSuccess, editing }: { onClose: () => void; onSuccess: (item: LeaveRequest) => void; editing?: LeaveRequest | null }) {
+  const [form, setForm] = useState({
+    leaveType: editing?.leaveType || "ANNUAL",
+    startDate: editing ? String(editing.startDate).slice(0, 10) : "",
+    endDate: editing ? String(editing.endDate).slice(0, 10) : "",
+    reason: editing?.reason || "",
+    proofUrls: (editing?.proofUrls || []) as string[],
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,11 +98,14 @@ function NewLeaveDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess
     setError(null);
     setSaving(true);
     try {
-      const res = await fetch("/api/v1/leave-requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
+      const res = await fetch(
+        editing ? `/api/v1/leave-requests/${editing.id}` : "/api/v1/leave-requests",
+        {
+          method: editing ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(editing ? { action: "EDIT", ...form } : form),
+        }
+      );
       const json = await res.json();
       if (!res.ok) {
         setError(apiError(res.status, json?.error));
@@ -117,7 +128,7 @@ function NewLeaveDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
       <div className="w-full max-w-[480px] rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
-          <h3 className="text-[15px] font-semibold">Tạo đơn xin nghỉ</h3>
+          <h3 className="text-[15px] font-semibold">{editing ? "Sửa đơn xin nghỉ" : "Tạo đơn xin nghỉ"}</h3>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
 
@@ -196,7 +207,7 @@ function NewLeaveDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess
             <button type="submit" disabled={saving}
               className="flex-1 py-2 rounded-lg text-[13px] font-medium text-white"
               style={{ background: saving ? "rgba(0,180,216,0.5)" : "var(--ibs-accent)" }}>
-              {saving ? "Đang gửi..." : "Gửi đơn"}
+              {saving ? "Đang lưu..." : editing ? "Lưu" : "Gửi đơn"}
             </button>
           </div>
         </form>
@@ -302,13 +313,16 @@ export default function NghiPhepPage() {
   const [showNew, setShowNew] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
+  const can = useCan();
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<LeaveRequest | null>(null);
   const [proofModalFor, setProofModalFor] = useState<LeaveRequest | null>(null);
   const [rejectTarget, setRejectTarget] = useState<LeaveRequest | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/me")
       .then((r) => r.json())
-      .then((res) => { if (res.role) setUserRole(res.role); })
+      .then((res) => { if (res.role) setUserRole(res.role); setMyEmployeeId(res.employeeId ?? null); })
       .catch(() => {});
   }, []);
 
@@ -389,6 +403,16 @@ export default function NghiPhepPage() {
       setRejectTarget(null);
     }
   }
+
+  // Xóa đơn nghỉ CHỜ DUYỆT (chủ đơn hoặc người có quyền).
+  async function deleteLeave(r: LeaveRequest) {
+    if (!(await confirmDialog({ title: "Xóa đơn nghỉ", message: "Xóa đơn xin nghỉ này? Chỉ xóa được đơn đang chờ duyệt.", tone: "danger", confirmText: "Xóa" }))) return;
+    const res = await fetch(`/api/v1/leave-requests/${r.id}`, { method: "DELETE" });
+    if (!res.ok) { const d = await res.json().catch(() => null); await alertDialog("Lỗi: " + apiError(res.status, d?.error)); return; }
+    setRequests((prev) => prev.filter((x) => x.id !== r.id));
+  }
+  const canEditLeave = (r: LeaveRequest) => r.status === "PENDING" && (r.employee.id === myEmployeeId || can("m3.nghiphep:edit"));
+  const canDeleteLeave = (r: LeaveRequest) => r.status === "PENDING" && (r.employee.id === myEmployeeId || can("m3.nghiphep:delete"));
 
   // Summary counts
   const pendingCount = requests.filter((r) => r.status === "PENDING").length;
@@ -527,14 +551,22 @@ export default function NghiPhepPage() {
                       <StatusBadge status={r.status} />
                     </td>
                     <td className="px-4 py-3">
-                      {canApprove && (
-                        <ApprovalWorkflow
-                          status={r.status}
-                          loading={actionLoading === r.id + "APPROVE" || actionLoading === r.id + "REJECT"}
-                          onApprove={() => handleAction(r.id, "APPROVE")}
-                          onReject={() => setRejectTarget(r)}
-                        />
-                      )}
+                      <div className="flex items-center gap-2 justify-end flex-wrap">
+                        {canApprove && (
+                          <ApprovalWorkflow
+                            status={r.status}
+                            loading={actionLoading === r.id + "APPROVE" || actionLoading === r.id + "REJECT"}
+                            onApprove={() => handleAction(r.id, "APPROVE")}
+                            onReject={() => setRejectTarget(r)}
+                          />
+                        )}
+                        {canEditLeave(r) && (
+                          <button onClick={() => setEditTarget(r)} title="Sửa đơn" className="text-[12px] px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: "rgba(59,130,246,0.12)", color: "#2563eb" }}><Pencil size={12} /> Sửa</button>
+                        )}
+                        {canDeleteLeave(r) && (
+                          <button onClick={() => deleteLeave(r)} title="Xóa đơn" className="text-[12px] px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: "rgba(239,68,68,0.12)", color: "var(--ibs-danger)" }}><Trash2 size={12} /> Xóa</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -550,12 +582,13 @@ export default function NghiPhepPage() {
         Hiển thị 50 đơn gần nhất. Phép năm được trừ tự động khi duyệt.
       </div>
 
-      {showNew && (
+      {(showNew || editTarget) && (
         <NewLeaveDialog
-          onClose={() => setShowNew(false)}
+          editing={editTarget}
+          onClose={() => { setShowNew(false); setEditTarget(null); }}
           onSuccess={(item) => {
-            setRequests((prev) => [item, ...prev]);
-            setShowNew(false);
+            setRequests((prev) => editTarget ? prev.map((r) => (r.id === item.id ? { ...r, ...item } : r)) : [item, ...prev]);
+            setShowNew(false); setEditTarget(null);
           }}
         />
       )}
