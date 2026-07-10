@@ -168,6 +168,8 @@ export async function PUT(
   }
 
   // Sửa MÃ NHÂN VIÊN — chỉ người có quyền sửa hồ sơ; kiểm tra trùng (bỏ qua chính mình + bản #DEL#).
+  // Đổi mã thì ĐỒNG BỘ luôn mã chấm công của tài khoản (User.employeeCode + erpCode) để khớp import công.
+  let syncUserCode: string | null = null;
   if (updateData.code !== undefined) {
     if (!canUser(session.user as any, "m1.hoso:edit")) {
       delete updateData.code; // không đủ quyền → bỏ qua, không đổi mã
@@ -176,17 +178,33 @@ export async function PUT(
       if (!newCode || newCode === employee.code) {
         delete updateData.code;
       } else {
-        const dup = await prisma.employee.findFirst({ where: { code: newCode, id: { not: id } }, select: { id: true } });
-        if (dup) return NextResponse.json({ error: { code: "DUPLICATE", message: `Mã nhân viên "${newCode}" đã tồn tại` } }, { status: 409 });
+        const dupEmp = await prisma.employee.findFirst({ where: { code: newCode, id: { not: id } }, select: { id: true } });
+        if (dupEmp) return NextResponse.json({ error: { code: "DUPLICATE", message: `Mã nhân viên "${newCode}" đã tồn tại` } }, { status: 409 });
+        // Trùng trên tài khoản khác (employeeCode / erpCode đều unique).
+        if (employee.userId) {
+          const dupUser = await prisma.user.findFirst({
+            where: { id: { not: employee.userId }, OR: [{ employeeCode: newCode }, { erpCode: newCode }] },
+            select: { id: true },
+          });
+          if (dupUser) return NextResponse.json({ error: { code: "DUPLICATE", message: `Mã "${newCode}" đã dùng cho tài khoản khác` } }, { status: 409 });
+          syncUserCode = newCode;
+        }
         updateData.code = newCode;
       }
     }
   }
 
-  const updated = await prisma.employee.update({
-    where: { id },
-    data: { ...updateData, updatedAt: new Date() },
-    include: { department: true, position: true },
+  const updated = await prisma.$transaction(async (tx) => {
+    const up = await tx.employee.update({
+      where: { id },
+      data: { ...updateData, updatedAt: new Date() },
+      include: { department: true, position: true },
+    });
+    // Đồng bộ mã chấm công (employeeCode + erpCode) sang tài khoản.
+    if (syncUserCode && employee.userId) {
+      await tx.user.update({ where: { id: employee.userId }, data: { employeeCode: syncUserCode, erpCode: syncUserCode } });
+    }
+    return up;
   });
 
   await prisma.auditLog.create({
