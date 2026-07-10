@@ -1521,8 +1521,8 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
             >
               <Pencil size={12} /> Sửa thông tin
             </button>
-            {/* Xóa mềm — CHỈ nhân sự đã Nghỉ việc. Ẩn hẳn + giải phóng CCCD/SĐT/email để tạo lại. */}
-            {employee.status === "RESIGNED" && (
+            {/* Xóa — CHỈ Quản trị HT (ADMIN) hoặc HC nhân sự (HR_ADMIN), và NV đã Nghỉ việc. */}
+            {employee.status === "RESIGNED" && (userRole === "ADMIN" || userRole === "HR_ADMIN") && (
               <button
                 onClick={async () => {
                   if (!confirm(
