@@ -5,7 +5,6 @@ import { canDo } from "@/lib/permissions";
 import { canViewPayroll } from "@/lib/access";
 import { z } from "zod";
 import { hashSync } from "bcryptjs";
-import { randomBytes } from "crypto";
 import { uniqueCompanyEmail } from "@/lib/email-gen";
 
 const CreateEmployeeSchema = z.object({
@@ -77,6 +76,8 @@ export async function GET(request: NextRequest) {
   if (departmentId) where.departmentId = departmentId;
   if (teamId) where.teamId = teamId;
   if (status) where.status = status;
+  // Ẩn nhân sự đã XÓA MỀM (mã gắn tiền tố "#DEL#").
+  where.NOT = { code: { startsWith: "#DEL#" } };
 
   const [data, total] = await Promise.all([
     prisma.employee.findMany({
@@ -143,17 +144,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Get last employee code
-  const lastEmployee = await prisma.employee.findFirst({ orderBy: { code: "desc" } });
-  const lastCode = lastEmployee?.code || "IBS-000";
-  const num = parseInt(lastCode.replace("IBS-", ""), 10);
-  const newCode = `IBS-${String(num + 1).padStart(3, "0")}`;
+  // Sinh mã theo rule NHÂN VIÊN: mã toàn số (vd 190907) → mã mới = max + 1.
+  // BỎ QUA các mã đặc biệt dạng "IBS-xxxx" (tài khoản admin/hệ thống) — trước đây
+  // logic cũ sắp xếp theo chuỗi nên "IBS-1137" > "190906" → sinh nhầm "IBS-1138".
+  const allCodes = await prisma.employee.findMany({ select: { code: true } });
+  const maxNum = allCodes.reduce((mx, e) => {
+    const n = /^\d+$/.test(e.code) ? parseInt(e.code, 10) : NaN;
+    return Number.isNaN(n) ? mx : Math.max(mx, n);
+  }, 190000);
+  const newCode = String(maxNum + 1);
 
   // Email công ty theo tên: <tên><chữ đầu họ+đệm>@ibs.com.vn (sonpt@…), tự thêm số nếu trùng.
   const email = await uniqueCompanyEmail(data.fullName, async (e) => !!(await prisma.user.findFirst({ where: { email: e } })));
 
-  // Secure random password (12-char hex) — force change on first login
-  const defaultPassword = randomBytes(6).toString("hex"); // 12-char hex
+  // Mật khẩu mặc định cho NV mới = "123456" (theo yêu cầu). Buộc đổi lần đăng nhập đầu.
+  const defaultPassword = "123456";
   const passwordHash = hashSync(defaultPassword, 10);
 
   const user = await prisma.user.create({

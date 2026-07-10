@@ -209,7 +209,7 @@ export function OrgChartTabs({
           className="rounded-xl border p-8 overflow-x-auto"
           style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}
         >
-          <div className="min-w-[900px]">
+          <div className="max-w-[1040px] mx-auto">
             {/* HĐQT */}
             <div className="flex justify-center mb-2">
               <div className="rounded-xl px-6 py-3 border text-center"
@@ -236,47 +236,32 @@ export function OrgChartTabs({
               })()}
             </div>
             <div className="flex justify-center"><ConnectorLine vertical /></div>
-            <div className="flex justify-center mb-0">
-              <div style={{ width: "66.67%", height: "1px", background: "var(--ibs-border)" }} />
+            <div className="flex justify-center mb-3">
+              <div style={{ width: "40%", height: "1px", background: "var(--ibs-border)" }} />
             </div>
 
-            {/* Directors */}
-            <div className="grid grid-cols-3 gap-4 mb-2">
-              {directorates.map((dir) => {
-                const color = DIR_COLORS[dir.name] ?? "var(--ibs-accent)";
-                return (
-                  <div key={dir.id} className="flex flex-col items-center">
-                    <ConnectorLine vertical />
-                    <button onClick={() => setSelectedDir(dir)}
-                      className="rounded-xl px-4 py-3 border text-center transition-all hover:-translate-y-0.5"
-                      style={{ background: "var(--ibs-bg-card)", borderColor: color, minWidth: "160px", cursor: "pointer" }}>
-                      <div className="text-[13px] font-semibold" style={{ color }}>{dir.nameVi}</div>
-                      <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
-                        {dir.directors.length} Giám đốc
-                      </div>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Departments per director */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
+            {/* Mỗi KHỐI = 1 hàng đầy đủ chiều rộng: Giám đốc (trái) + phòng ban (phải, NGANG HÀNG).
+                Không dùng cột hẹp nên không cần cuộn ngang; nhiều phòng thì tự xuống dòng TRONG khối. */}
+            <div className="space-y-3">
               {directorates.map((dir) => {
                 const color = DIR_COLORS[dir.name] ?? "var(--ibs-accent)";
                 const depts = deptsByDir[dir.id] ?? [];
                 return (
-                  <div key={dir.id} className="flex flex-col items-center gap-2">
-                    <ConnectorLine vertical />
-                    {depts.length > 1 && (
-                      <div style={{ width: "85%", height: "1px", background: "var(--ibs-border)" }} />
-                    )}
-                    <div className="flex justify-center gap-2 flex-wrap">
-                      {depts.map((dept) => (
-                        <div key={dept.id} className="flex flex-col items-center">
-                          <ConnectorLine vertical />
-                          <DeptCard code={dept.code} name={dept.name} actual={dept.actual} headcount={dept.headcount} color={color} onClick={() => setSelectedDept(dept)} />
-                        </div>
+                  <div key={dir.id} className="flex items-stretch gap-4 rounded-xl border p-3"
+                    style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg)" }}>
+                    {/* Giám đốc khối — bên trái */}
+                    <button onClick={() => setSelectedDir(dir)}
+                      className="rounded-lg px-4 py-3 border text-center flex-shrink-0 flex flex-col justify-center transition-all hover:-translate-y-0.5"
+                      style={{ background: "var(--ibs-bg-card)", borderColor: color, borderLeft: `3px solid ${color}`, width: "185px", cursor: "pointer" }}>
+                      <div className="text-[13px] font-semibold" style={{ color }}>{dir.nameVi}</div>
+                      <div className="text-[11px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>{dir.directors.length} Giám đốc</div>
+                    </button>
+                    {/* Phòng ban — bên phải, ngang hàng nhau */}
+                    <div className="flex-1 flex flex-wrap content-center gap-2">
+                      {depts.length === 0 ? (
+                        <span className="text-[12px] self-center" style={{ color: "var(--ibs-text-dim)" }}>Không có phòng ban trực thuộc</span>
+                      ) : depts.map((dept) => (
+                        <DeptCard key={dept.id} code={dept.code} name={dept.name} actual={dept.actual} headcount={dept.headcount} color={color} onClick={() => setSelectedDept(dept)} />
                       ))}
                     </div>
                   </div>
@@ -407,6 +392,21 @@ type EmpRow = {
   status: string;
 };
 
+// Xếp hạng chức vụ (cao → thấp) để sắp danh sách: Trưởng phòng đứng đầu, giảm dần.
+function roleRank(role?: string | null): number {
+  const r = (role || "").toLowerCase();
+  if (r.includes("giám đốc")) return 100;
+  if (r.includes("phó phòng") || r.includes("phó trưởng")) return 80;
+  if (r.includes("trưởng phòng")) return 90;
+  if (r.includes("xưởng trưởng") || r.includes("quản đốc")) return 75;
+  if (r.includes("tổ phó")) return 55;
+  if (r.includes("tổ trưởng")) return 60;
+  if (r.includes("trưởng")) return 70; // các chức "trưởng" khác
+  if (r.includes("nhân viên")) return 20;
+  if (r.includes("công nhân")) return 10;
+  return 30;
+}
+
 function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void }) {
   const [employees, setEmployees] = useState<EmpRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -415,7 +415,12 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
     setLoading(true);
     fetch(`/api/v1/employees?departmentId=${dept.id}&limit=1000`)
       .then((r) => r.json())
-      .then((json) => setEmployees((json.data ?? []).filter((e: EmpRow) => e.status === "ACTIVE" || e.status === "PROBATION")))
+      .then((json) => setEmployees(
+        (json.data ?? [])
+          .filter((e: EmpRow) => e.status === "ACTIVE" || e.status === "PROBATION")
+          // Trưởng phòng đứng đầu → giảm dần theo chức vụ; cùng hạng thì theo tên.
+          .sort((a: EmpRow, b: EmpRow) => roleRank(b.jobRole) - roleRank(a.jobRole) || a.fullName.localeCompare(b.fullName, "vi"))
+      ))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [dept.id]);

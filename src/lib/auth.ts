@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { effectivePerms } from "@/lib/permission-catalog";
 
 // Chuẩn hoá 1 số về dạng "0xxxxxxxxx": bỏ ký tự thừa, +84/84 -> 0.
 function canonPhone(raw: string): string {
@@ -99,6 +100,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.role = (user as any).role;
         token.employeeCode = (user as any).employeeCode;
         token.forcePasswordChange = (user as any).forcePasswordChange;
+        // Tính quyền hiệu lực 1 lần lúc đăng nhập (gói mẫu của role + ma trận riêng).
+        try {
+          const grant = await prisma.accessGrant.findUnique({ where: { userId: (user as any).id } });
+          token.perms = Array.from(effectivePerms((user as any).role, grant ? grant.perms : null));
+        } catch {
+          token.perms = [];
+        }
       }
       return token;
     },
@@ -108,6 +116,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         (session.user as any).role = token.role;
         (session.user as any).employeeCode = token.employeeCode;
         (session.user as any).forcePasswordChange = token.forcePasswordChange;
+        (session.user as any).perms = (token as any).perms ?? [];
       }
       return session;
     },

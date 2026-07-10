@@ -34,7 +34,8 @@ export async function GET(
     },
   });
 
-  if (!employee) {
+  // Ẩn nhân sự đã XÓA MỀM (mã "#DEL#…") — coi như không tồn tại.
+  if (!employee || employee.code.startsWith("#DEL#")) {
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   }
 

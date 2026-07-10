@@ -10,6 +10,7 @@ import { usePermission } from "@/hooks/use-permission";
 import { isSystemAdmin } from "@/lib/permissions";
 import { useLang, useT } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
+import { PERMISSION_CATALOG, ACTION_LABELS, templatePerms, type Action } from "@/lib/permission-catalog";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type SystemUser = {
@@ -141,8 +142,36 @@ function EditUserModal({
 }) {
   const [role, setRole] = useState(user.role);
   const [isActive, setIsActive] = useState(user.isActive);
+  const [perms, setPerms] = useState<Set<string>>(new Set());
+  const [loadingPerms, setLoadingPerms] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  // Nạp ma trận quyền hiện tại của account (custom → dùng đúng; chưa có → gói mẫu).
+  useEffect(() => {
+    setLoadingPerms(true);
+    fetch(`/api/v1/settings/users/${user.id}/permissions`)
+      .then((r) => r.json())
+      .then((res) => {
+        const d = res.data;
+        setPerms(new Set(d?.perms ?? d?.template ?? []));
+      })
+      .catch(() => setPerms(new Set(templatePerms(user.role))))
+      .finally(() => setLoadingPerms(false));
+  }, [user.id, user.role]);
+
+  // Đổi Nhóm quyền → tự tick sẵn theo gói mẫu (rồi tinh chỉnh tiếp).
+  function changeRole(r: string) {
+    setRole(r);
+    setPerms(new Set(templatePerms(r)));
+  }
+  function togglePerm(key: string) {
+    setPerms((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
 
   async function handleSave() {
     setError("");
@@ -158,6 +187,12 @@ function EditUserModal({
         setError(apiError(res.status, data.error));
         return;
       }
+      // Lưu ma trận quyền chi tiết.
+      await fetch(`/api/v1/settings/users/${user.id}/permissions`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ perms: Array.from(perms) }),
+      });
       onSuccess({ id: user.id, role, isActive });
     } catch {
       setError("Không kết nối được máy chủ");
@@ -165,6 +200,8 @@ function EditUserModal({
       setSubmitting(false);
     }
   }
+
+  const PERM_ACTIONS: Action[] = ["view", "create", "edit", "delete", "approve"];
 
   const selectStyle = {
     background: "var(--ibs-bg)",
@@ -178,7 +215,7 @@ function EditUserModal({
       style={{ background: "rgba(0,0,0,0.75)" }}
     >
       <div
-        className="rounded-2xl border w-full max-w-[460px] mx-4"
+        className="rounded-2xl border w-full max-w-[780px] max-h-[92vh] flex flex-col mx-4"
         style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}
       >
         {/* Header */}
@@ -201,7 +238,7 @@ function EditUserModal({
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="p-6 space-y-5 overflow-y-auto flex-1">
           {/* User info */}
           <div
             className="rounded-lg p-4 space-y-2"
@@ -221,17 +258,17 @@ function EditUserModal({
             </div>
           </div>
 
-          {/* Role select */}
+          {/* Nhóm quyền (gói mẫu) */}
           <div>
             <label
               className="block text-[12px] font-medium mb-1.5"
               style={{ color: "var(--ibs-text-dim)" }}
             >
-              Vai trò hệ thống
+              Nhóm quyền (gói mẫu)
             </label>
             <select
               value={role}
-              onChange={(e) => setRole(e.target.value)}
+              onChange={(e) => changeRole(e.target.value)}
               disabled={!canChangeRole}
               className="w-full px-3 py-2 rounded-lg text-[13px] outline-none border disabled:opacity-50"
               style={selectStyle}
@@ -242,10 +279,72 @@ function EditUserModal({
                 </option>
               ))}
             </select>
-            {!canChangeRole && (
-              <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>
-                Chỉ BOM mới có thể thay đổi vai trò
-              </p>
+            <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>
+              Chọn gói để tick sẵn quyền theo mẫu, rồi tinh chỉnh từng ô bên dưới.
+            </p>
+          </div>
+
+          {/* Ma trận quyền chi tiết */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[12px] font-medium" style={{ color: "var(--ibs-text-dim)" }}>
+                Quyền chi tiết — tick để cấp quyền
+              </label>
+              <button
+                onClick={() => setPerms(new Set(templatePerms(role)))}
+                className="text-[11px] hover:underline"
+                style={{ color: "var(--ibs-accent)" }}
+              >
+                ↺ Áp lại gói mẫu
+              </button>
+            </div>
+            {loadingPerms ? (
+              <div className="py-8 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Đang tải…</div>
+            ) : (
+              <div className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--ibs-border)" }}>
+                <table className="w-full border-collapse text-[12px]">
+                  <thead>
+                    <tr style={{ background: "var(--ibs-bg)" }}>
+                      <th className="text-left px-3 py-2 font-semibold">Module / Tính năng</th>
+                      {PERM_ACTIONS.map((a) => (
+                        <th key={a} className="px-1 py-2 font-semibold text-center w-[48px]">{ACTION_LABELS[a]}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {PERMISSION_CATALOG.flatMap((g) => [
+                      <tr key={g.module + "::h"}>
+                        <td colSpan={6} className="px-3 py-1.5 font-semibold" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-accent)" }}>
+                          {g.module}
+                        </td>
+                      </tr>,
+                      ...g.features.map((f) => (
+                        <tr key={f.key} className="border-t" style={{ borderColor: "var(--ibs-border)" }}>
+                          <td className="px-3 py-2">{f.label}</td>
+                          {PERM_ACTIONS.map((a) => {
+                            const k = `${f.key}:${a}`;
+                            return (
+                              <td key={a} className="px-1 py-2 text-center">
+                                {f.actions.includes(a) ? (
+                                  <input
+                                    type="checkbox"
+                                    checked={perms.has(k)}
+                                    onChange={() => togglePerm(k)}
+                                    className="w-4 h-4 cursor-pointer align-middle"
+                                    style={{ accentColor: "var(--ibs-accent)" }}
+                                  />
+                                ) : (
+                                  <span style={{ color: "var(--ibs-text-dim)" }}>–</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      )),
+                    ])}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
@@ -279,25 +378,26 @@ function EditUserModal({
               {error}
             </div>
           )}
+        </div>
 
-          <div className="flex gap-3 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-2.5 rounded-lg text-[13px] border"
-              style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}
-            >
-              Hủy
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={submitting}
-              className="flex-1 py-2.5 rounded-lg text-[13px] font-semibold text-white disabled:opacity-60"
-              style={{ background: "var(--ibs-accent)" }}
-            >
-              {submitting ? "Đang lưu..." : "Lưu thay đổi"}
-            </button>
-          </div>
+        {/* Footer cố định */}
+        <div className="flex gap-3 px-6 py-4 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-lg text-[13px] border"
+            style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}
+          >
+            Hủy
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={submitting}
+            className="flex-1 py-2.5 rounded-lg text-[13px] font-semibold text-white disabled:opacity-60"
+            style={{ background: "var(--ibs-accent)" }}
+          >
+            {submitting ? "Đang lưu..." : "Lưu thay đổi"}
+          </button>
         </div>
       </div>
     </div>

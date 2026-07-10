@@ -10,9 +10,33 @@ import {
   X, LogOut,
   type LucideIcon,
 } from "lucide-react";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { getInitials } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
+
+// href → quyền "Xem" cần có để hiện trong menu (không map = luôn hiện).
+const NAV_VIEW_PERM: Record<string, string> = {
+  "/ho-so": "m1.hoso:view",
+  "/so-do": "m2.sodo:view",
+  "/cham-cong": "m3.bangcong:view",
+  "/tuyen-dung": "m4.tuyendung:view",
+  "/dao-tao": "m5.daotao:view",
+  "/kpi": "m6.kpi:view",
+  "/ky-luat": "m8.kyluat:view",
+  "/hse": "m9.hse:view",
+  "/hanh-chinh": "m10.phonghop:view",
+  "/hanh-chinh/phong-hop": "m10.phonghop:view",
+  "/hanh-chinh/xe": "m10.xe:view",
+  "/hanh-chinh/vpp": "m10.vpp:view",
+  "/hanh-chinh/nha-an": "m10.nhaan:view",
+  "/hanh-chinh/ve-sinh": "m10.vesinh:view",
+  "/hanh-chinh/khach": "m10.khach:view",
+  "/hanh-chinh/su-kien": "m10.sukien:view",
+  "/hanh-chinh/cong-van-den": "m10.congvan:view",
+  "/hanh-chinh/cong-van-di": "m10.congvan:view",
+  "/bao-cao": "sys.baocao:view",
+  // "/", "/cai-dat", "/luong", "/hanh-chinh/sua-chua" → không lọc theo perm ở đây.
+};
 
 const iconMap: Record<string, LucideIcon> = {
   LayoutDashboard, User, Building2, CalendarDays, Users, GraduationCap,
@@ -120,6 +144,17 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll =
   const { lang } = useLang();
   const L = (vi: string, en?: string) => (lang === "en" && en ? en : vi);
 
+  // Quyền hiệu lực (tính lúc đăng nhập, nằm trong session). Ẩn module không có quyền Xem.
+  const { data: session } = useSession();
+  const perms: string[] = (session?.user as any)?.perms ?? [];
+  const canSee = (href: string) => {
+    if (userRole === "ADMIN") return true;
+    const req = NAV_VIEW_PERM[href];
+    if (!req) return true;                     // không map → luôn hiện (Dashboard, Cài đặt…)
+    if (perms.length === 0) return true;        // session cũ chưa có perms → hiện hết (không phá)
+    return perms.includes(req);
+  };
+
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
     return pathname.startsWith(href);
@@ -177,7 +212,7 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll =
               >
                 {L(section.section, section.sectionEn)}
               </div>
-              {section.items.filter((item) => canViewPayroll || item.href !== "/luong").map((item) => {
+              {section.items.filter((item) => (canViewPayroll || item.href !== "/luong") && canSee(item.href)).map((item) => {
                 const Icon = iconMap[item.icon];
                 const active = isActive(item.href);
                 return (
@@ -208,7 +243,7 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll =
                   </Link>
                 );
               })}
-              {section.subItems?.map((item) => {
+              {section.subItems?.filter((item) => canSee(item.href)).map((item) => {
                 const Icon = iconMap[item.icon];
                 const active = isActive(item.href);
                 return (

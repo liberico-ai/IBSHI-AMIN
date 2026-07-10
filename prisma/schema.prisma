@@ -200,6 +200,20 @@ model User {
   mealRegistrations MealRegistration[] @relation("mealRegistrations")
   mealSuppRequested MealSupplementaryRequest[] @relation("mealSuppRequester")
   mealSuppApproved  MealSupplementaryRequest[] @relation("mealSuppApprover")
+  accessGrant   AccessGrant?
+}
+
+// Ma trận phân quyền chi tiết theo TỪNG account (đè lên gói mẫu của role).
+// perms = danh sách "feature:action" đã tick (vd "m1.hoso:edit"). Rỗng/không có
+// bản ghi = dùng gói mẫu của Nhóm quyền (role).
+model AccessGrant {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  perms     String[] @default([])
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Directorate {

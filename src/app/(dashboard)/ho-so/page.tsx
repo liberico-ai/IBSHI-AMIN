@@ -23,6 +23,7 @@ type Employee = {
   position: { name: string };
   jobRole?: string | null;
   salaryGrade?: number | null;
+  skillLevel?: string | null;
   team?: { id: string; name: string } | null;
   contracts: { contractType: string; status: string; baseSalary: number; insuranceSalary?: number | null; allowance?: number | null; endDate?: string | null }[];
 };
@@ -146,7 +147,8 @@ export default function EmployeesPage() {
   const jobRoleOptions = useMemo(() => uniq(activeEmps.map((e) => e.jobRole)), [activeEmps]);
   const positionOptions = useMemo(() => uniq(activeEmps.map((e) => e.position?.name)), [activeEmps]);
   const teamOptions = useMemo(() => uniq(activeEmps.map((e) => e.team?.name)), [activeEmps]);
-  const gradeOptions = useMemo(() => Array.from(new Set(allEmployees.map((e) => e.salaryGrade).filter((g): g is number => typeof g === "number"))).sort((a, b) => a - b), [allEmployees]);
+  // Lọc theo Bậc THỢ (skillLevel, chuỗi "Bậc 5") — cột được điền đầy đủ, không dùng salaryGrade (bậc lương, gần như trống).
+  const gradeOptions = useMemo(() => Array.from(new Set(allEmployees.map((e) => e.skillLevel).filter((s): s is string => !!s && s.trim() !== ""))).sort((a, b) => (parseInt(a.match(/\d+/)?.[0] || "0")) - (parseInt(b.match(/\d+/)?.[0] || "0"))), [allEmployees]);
 
   // Đếm NV chưa cập nhật thông tin cơ bản (chỉ tính NV đang làm/thử việc)
   const incompleteCount = useMemo(
@@ -184,7 +186,7 @@ export default function EmployeesPage() {
     if (joinFrom && (!emp.startDate || emp.startDate.slice(0, 10) < joinFrom)) return false;
     if (joinTo && (!emp.startDate || emp.startDate.slice(0, 10) > joinTo)) return false;
     // Cấp bậc thợ (bậc lương), vị trí, chức vụ, tổ đội
-    if (gradeFilter && String(emp.salaryGrade ?? "") !== gradeFilter) return false;
+    if (gradeFilter && (emp.skillLevel || "") !== gradeFilter) return false;
     if (jobRoleFilter && (emp.jobRole || "") !== jobRoleFilter) return false;
     if (positionFilter && (emp.position?.name || "") !== positionFilter) return false;
     if (teamFilter && (emp.team?.name || "") !== teamFilter) return false;
@@ -287,7 +289,7 @@ export default function EmployeesPage() {
         team: emp.team?.name || emp.department?.name || "",
         jobRole: emp.jobRole || "",
         position: emp.position?.name || "",
-        grade: emp.salaryGrade ?? "",
+        grade: emp.skillLevel ?? "",
         salary: totalIncome(emp),
       });
     });
@@ -629,10 +631,10 @@ export default function EmployeesPage() {
               </select>
             </div>
             <div>
-              <label className={lCls} style={lSt}>Cấp bậc thợ (bậc lương)</label>
+              <label className={lCls} style={lSt}>Cấp bậc thợ</label>
               <select value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)} className={fCls} style={fSt}>
                 <option value="">Tất cả</option>
-                {gradeOptions.map((g) => <option key={g} value={String(g)}>Bậc {g}</option>)}
+                {gradeOptions.map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
             <div>

@@ -1521,6 +1521,28 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
             >
               <Pencil size={12} /> Sửa thông tin
             </button>
+            {/* Xóa mềm — CHỈ nhân sự đã Nghỉ việc. Ẩn hẳn + giải phóng CCCD/SĐT/email để tạo lại. */}
+            {employee.status === "RESIGNED" && (
+              <button
+                onClick={async () => {
+                  if (!confirm(
+                    `XÓA nhân sự "${employee.fullName}"?\n\n` +
+                    `• Nhân sự sẽ BIẾN MẤT hoàn toàn khỏi hệ thống (khác Nghỉ việc — nghỉ việc vẫn tra được).\n` +
+                    `• CCCD / SĐT / email được GIẢI PHÓNG → có thể tạo lại 1 nhân sự mới cùng thông tin.\n` +
+                    `• Dữ liệu cũ vẫn được giữ ẩn.`
+                  )) return;
+                  const res = await fetch(`/api/v1/employees/${employee.id}/purge`, { method: "POST" });
+                  const data = await res.json().catch(() => null);
+                  if (!res.ok) { alert(data?.error?.message || "Xóa thất bại"); return; }
+                  alert("Đã xóa nhân sự.");
+                  router.push("/ho-so");
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors"
+                style={{ border: "1px solid var(--ibs-danger)", color: "var(--ibs-danger)" }}
+              >
+                <Trash2 size={12} /> Xóa
+              </button>
+            )}
           </div>
           <div className="text-[13px] mb-3" style={{ color: "var(--ibs-text-dim)" }}>
             {employee.code} · {employee.department.name} · {employee.jobRole || employee.position.name}
