@@ -193,6 +193,7 @@ export default function NhaAnPage() {
   const [showRegister, setShowRegister] = useState(false);
   const [editReg, setEditReg] = useState<MealReg | null>(null);
   const [editSubMeal, setEditSubMeal] = useState<{ subcontractorId: string; name: string; lunch: number; dinner: number } | null>(null);
+  const [editGuestTier, setEditGuestTier] = useState<{ price: number; count: number } | null>(null);
   const [showSupplementary, setShowSupplementary] = useState(false);
   const [suppReqs, setSuppReqs] = useState<SupplementaryReq[]>([]);
   const [suppCanApprove, setSuppCanApprove] = useState(false);
@@ -295,6 +296,13 @@ export default function NhaAnPage() {
   async function deleteSubMealDay() {
     if (!(await confirmDialog({ message: "Xóa toàn bộ đăng ký suất ăn thầu phụ ngày này?", tone: "danger", confirmText: "Xóa" }))) return;
     await fetch(`/api/v1/subcontractors/meals?date=${selectedDate}`, { method: "DELETE" });
+    fetchRegs();
+  }
+  // Xóa 1 dòng khách theo đơn giá (mục CHI TIẾT KHÁCH) — áp dụng cả ngày, mọi phòng.
+  async function deleteGuestTier(price: number) {
+    if (!(await confirmDialog({ title: "Xóa dòng khách", message: `Xóa toàn bộ khách ở đơn giá ${price.toLocaleString("vi-VN")}đ trong ngày này?`, tone: "danger", confirmText: "Xóa" }))) return;
+    const res = await fetch(`/api/v1/meals/guests?date=${selectedDate}&price=${price}`, { method: "DELETE" });
+    if (!res.ok) { const d = await res.json().catch(() => null); await alertDialog("Lỗi: " + apiError(res.status, d?.error)); return; }
     fetchRegs();
   }
   // Xóa suất ăn của 1 nhà thầu trong ngày (chi tiết thầu phụ).
@@ -606,7 +614,15 @@ export default function NhaAnPage() {
                 {Array.from(guestPriceTotals.entries()).sort((a, b) => b[0] - a[0]).map(([p, c]) => (
                   <div key={p} className="text-[12px] mb-1 flex items-center justify-between gap-3">
                     <span className="font-medium" style={{ color: "var(--ibs-warning)" }}>{c} khách × {p.toLocaleString("vi-VN")}đ/suất</span>
-                    <span className="font-semibold whitespace-nowrap">{(c * p).toLocaleString("vi-VN")}đ</span>
+                    <span className="flex items-center gap-3 shrink-0">
+                      <span className="font-semibold whitespace-nowrap">{(c * p).toLocaleString("vi-VN")}đ</span>
+                      {isHRAdmin && !isRange && (
+                        <>
+                          <button onClick={() => setEditGuestTier({ price: p, count: c })} className="text-[11px] font-semibold" style={{ color: "var(--ibs-accent)" }}>Sửa</button>
+                          <button onClick={() => deleteGuestTier(p)} className="text-[11px] font-semibold" style={{ color: "var(--ibs-danger)" }}>Xóa</button>
+                        </>
+                      )}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -1408,6 +1424,57 @@ export default function NhaAnPage() {
         <EditSubMealModal sub={editSubMeal} date={selectedDate}
           onClose={() => setEditSubMeal(null)} onSaved={() => { setEditSubMeal(null); fetchRegs(); }} />
       )}
+      {editGuestTier && (
+        <EditGuestTierModal tier={editGuestTier} date={selectedDate}
+          onClose={() => setEditGuestTier(null)} onSaved={() => { setEditGuestTier(null); fetchRegs(); }} />
+      )}
+    </div>
+  );
+}
+
+// Sửa 1 dòng khách theo đơn giá (mục CHI TIẾT KHÁCH) — đổi đơn giá / số khách cho cả ngày.
+function EditGuestTierModal({ tier, date, onClose, onSaved }: { tier: { price: number; count: number }; date: string; onClose: () => void; onSaved: () => void }) {
+  const [price, setPrice] = useState(String(tier.price));
+  const [count, setCount] = useState(String(tier.count));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const inputCls = "w-full px-3 py-2 rounded-lg border text-[13px]";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  async function save() {
+    setError(""); setSaving(true);
+    const res = await fetch("/api/v1/meals/guests", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date, oldPrice: tier.price, newPrice: Number(price) || 0, newCount: Number(count) || 0 }),
+    });
+    setSaving(false);
+    if (res.ok) onSaved();
+    else { const d = await res.json().catch(() => null); setError(apiError(res.status, d?.error) || "Lưu thất bại"); }
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }}>
+      <div className="w-full max-w-sm rounded-2xl p-5" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-[15px] font-bold">Sửa dòng khách</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-4" style={{ color: "var(--ibs-text-dim)" }}>Ngày {formatDate(date)} · áp dụng cho cả ngày (mọi phòng)</div>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>Đơn giá (đ)</label>
+            <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--ibs-text-dim)" }}>Số khách</label>
+            <input type="number" min="0" value={count} onChange={(e) => setCount(e.target.value)} className={inputCls} style={inputStyle} />
+          </div>
+        </div>
+        <div className="text-[11px] mb-4" style={{ color: "var(--ibs-text-dim)" }}>Lưu ý: đổi <b>số khách</b> chỉ được khi dòng này thuộc 1 phòng. Nếu gộp nhiều phòng thì chỉ đổi được <b>đơn giá</b> (sửa số khách trong nút Sửa của từng phòng).</div>
+        {error && <div className="text-[12px] mb-3 p-2 rounded" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.7 : 1 }}>{saving ? "Đang lưu..." : "Lưu"}</button>
+        </div>
+      </div>
     </div>
   );
 }
