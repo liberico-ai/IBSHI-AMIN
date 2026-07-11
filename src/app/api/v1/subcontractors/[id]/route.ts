@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
-
-function canManage(role: string): boolean {
-  return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
-}
 
 const UpdateSchema = z.object({
   name: z.string().min(1).optional(),
@@ -18,8 +15,7 @@ const UpdateSchema = z.object({
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  const role = (session.user as any).role;
-  if (!canManage(role)) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được quản lý nhà thầu" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan.thaufu:edit")) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền sửa nhà thầu" } }, { status: 403 });
 
   const { id } = await params;
   const parsed = UpdateSchema.safeParse(await request.json());
@@ -48,8 +44,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  const role = (session.user as any).role;
-  if (!canManage(role)) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được quản lý nhà thầu" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan.thaufu:delete")) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền xóa nhà thầu" } }, { status: 403 });
 
   const { id } = await params;
   await prisma.subcontractor.delete({ where: { id } });

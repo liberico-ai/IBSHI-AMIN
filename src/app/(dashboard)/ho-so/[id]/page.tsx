@@ -6,6 +6,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatDate, getInitials, formatVND, apiError } from "@/lib/utils";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
+import { useCan } from "@/hooks/use-permission";
 import {
   ArrowLeft,
   Phone,
@@ -1057,7 +1058,8 @@ function EditEmployeeDialog({
   onClose: () => void;
   onSuccess: (updated: Partial<Employee>) => void;
 }) {
-  const isHR = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
+  const can = useCan();
+  const isHR = can("m1.hoso:edit");
   const [form, setForm] = useState({
     code: employee.code || "",
     fullName: employee.fullName || "",
@@ -1407,7 +1409,8 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
   const [canViewPayroll, setCanViewPayroll] = useState(false);
   const [showPhoto, setShowPhoto] = useState(false);
   const [editContract, setEditContract] = useState<any>(null);
-  const isHRUser = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
+  const can = useCan();
+  const isHRUser = can("m1.hopdong:edit");
 
   async function handleDeleteContract(c: any) {
     if (!(await confirmDialog({ message: `Xoá hợp đồng ${c.contractNumber}? (HĐ sẽ chuyển sang "Đã chấm dứt" và ẩn khỏi danh sách)`, tone: "danger", confirmText: "Xoá" }))) return;
@@ -1528,8 +1531,8 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
             >
               <Pencil size={12} /> Sửa thông tin
             </button>
-            {/* Xóa — CHỈ Quản trị HT (ADMIN) hoặc HC nhân sự (HR_ADMIN), và NV đã Nghỉ việc. */}
-            {employee.status === "RESIGNED" && (userRole === "ADMIN" || userRole === "HR_ADMIN") && (
+            {/* Xóa — theo ma trận phân quyền (m1.hoso:delete), và NV đã Nghỉ việc. */}
+            {employee.status === "RESIGNED" && can("m1.hoso:delete") && (
               <button
                 onClick={async () => {
                   if (!confirm(
@@ -1627,7 +1630,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
           employeeId={employee.id}
           employeeName={employee.fullName}
           currentPhoto={employee.photo}
-          canEdit={userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN"}
+          canEdit={can("m1.hoso:edit")}
           onClose={() => setShowPhoto(false)}
           onUpdated={(url) => setEmployee((prev) => (prev ? { ...prev, photo: url } : prev))}
         />

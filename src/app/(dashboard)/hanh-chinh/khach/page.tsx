@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useCan } from "@/hooks/use-permission";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, formatDateTime, apiError } from "@/lib/utils";
@@ -58,7 +59,9 @@ export default function KhachPage() {
   }, []);
   useEffect(() => { fetchVisitors(); }, [filterDate, filterStatus]);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || userRole === "MANAGER";
+  const can = useCan();
+  // Duyệt/quản lý đăng ký khách theo ma trận m10.khach:approve.
+  const canManage = can("m10.khach:approve");
 
   async function handleAction(id: string, action: string) {
     let badge: string | undefined;

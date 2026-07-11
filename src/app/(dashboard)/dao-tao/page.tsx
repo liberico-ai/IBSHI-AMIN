@@ -5,7 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, BookOpen, Users, CheckSquare, AlertTriangle } from "lucide-react";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 import { DateInput } from "@/components/shared/date-input";
@@ -61,7 +61,7 @@ export default function DaoTaoPage() {
   const [plans, setPlans] = useState<TrainingPlan[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
-  const { canDo } = usePermission();
+  const can = useCan();
 
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<TrainingPlan | null>(null);
@@ -97,7 +97,8 @@ export default function DaoTaoPage() {
     fetchPlans();
   }
 
-  const canManage = canDo("training", "create");
+  // Quản lý Đào tạo / Chứng chỉ theo ma trận (cờ chung cho các tab).
+  const canManage = can("m5.daotao:create") || can("m5.chungchi:edit");
 
   const planColumns: Column<TrainingPlan>[] = [
     { key: "title", header: "Tên khóa đào tạo", render: (p) => <span className="font-semibold">{p.title}</span> },

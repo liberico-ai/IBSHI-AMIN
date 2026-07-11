@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { getInitials, apiError } from "@/lib/utils";
 import { viewUrl } from "@/lib/use-presigned-url";
 import { UserPlus, Eye, RefreshCw, X, Download, SlidersHorizontal } from "lucide-react";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { DateInput } from "@/components/shared/date-input";
 import { BankAccountsEditor, type BankAccount } from "@/components/shared/bank-accounts-editor";
 
@@ -97,7 +97,7 @@ function ageFromDob(dob?: string | null): number | null {
 
 export default function EmployeesPage() {
   const router = useRouter();
-  const { canDo } = usePermission();
+  const can = useCan();
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -536,21 +536,21 @@ export default function EmployeesPage() {
           <RefreshCw size={13} /> Làm mới
         </button>
         <div className="ml-auto flex gap-2">
-          {canDo("employees", "readAll") && (
+          {can("m1.hoso:edit") && (
             <button onClick={handleExport}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border transition-colors"
               style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
               <Download size={13} /> Export Excel
             </button>
           )}
-          {canDo("employees", "readAll") && (
+          {can("m1.npt:view") && (
             <button onClick={handleExportDependents}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border transition-colors"
               style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
               <Download size={13} /> Export NPT
             </button>
           )}
-          {canDo("employees", "readAll") && (
+          {can("m1.concai:view") && (
             <button onClick={handleExportChildren}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border transition-colors"
               style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
@@ -564,7 +564,7 @@ export default function EmployeesPage() {
               <Download size={13} /> Export lương
             </button>
           )}
-          {canDo("employees", "create") && (
+          {can("m1.hoso:create") && (
             <button onClick={() => setShowCreate(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white"
               style={{ background: "var(--ibs-accent)" }}>

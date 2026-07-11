@@ -5,7 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, Check, ChevronRight, Users, ClipboardList, FileText, Download } from "lucide-react";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { DateInput } from "@/components/shared/date-input";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
@@ -107,7 +107,7 @@ export default function TuyenDungPage() {
   const [candStatusFilter, setCandStatusFilter] = useState("");
   const [candFrom, setCandFrom] = useState("");
   const [candTo, setCandTo] = useState("");
-  const { canDo, hasRole } = usePermission();
+  const can = useCan();
 
   // Modals
   const [showNewRequest, setShowNewRequest] = useState(false);
@@ -258,7 +258,7 @@ export default function TuyenDungPage() {
     { key: "createdAt", header: "Ngày tạo", render: (r) => formatDate(r.createdAt) },
     { key: "actions", header: "", render: (r) => (
       <div className="flex gap-2">
-        {r.status === "PENDING" && hasRole("BOM") && (
+        {r.status === "PENDING" && can("m4.yeucau:create") && (
           <>
             <button onClick={() => handleApproveRequest(r)} className="text-[11px] px-2 py-1 rounded-lg font-semibold" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}>
               Duyệt
@@ -268,7 +268,7 @@ export default function TuyenDungPage() {
             </button>
           </>
         )}
-        {r.status === "APPROVED" && !isReqExpired(r) && canDo("recruitment", "create") && (
+        {r.status === "APPROVED" && !isReqExpired(r) && can("m4.ungvien:create") && (
           <button onClick={() => { setShowNewCandidate(true); }} className="text-[11px] px-2 py-1 rounded-lg" style={{ background: "rgba(0,180,216,0.1)", color: "var(--ibs-accent)" }}>
             + Ứng viên
           </button>
@@ -344,7 +344,7 @@ export default function TuyenDungPage() {
               <button onClick={fetchRequests} className="p-2 rounded-lg hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}>
                 <RefreshCw size={15} />
               </button>
-              {canDo("recruitment", "read") && (
+              {can("m4.yeucau:create") && (
                 <button onClick={() => setShowNewRequest(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
                   <Plus size={14} /> Đề xuất mới
                 </button>
@@ -364,7 +364,7 @@ export default function TuyenDungPage() {
               <button onClick={fetchCandidates} className="p-2 rounded-lg hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}>
                 <RefreshCw size={15} />
               </button>
-              {canDo("recruitment", "create") && (
+              {can("m4.ungvien:create") && (
                 <button onClick={() => setShowNewCandidate(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
                   <Plus size={14} /> Thêm ứng viên
                 </button>
@@ -433,7 +433,7 @@ export default function TuyenDungPage() {
         <CandidateDetailModal
           candidate={showCandidateDetail.candidate}
           showEvaluation={true}
-          canEdit={canDo("recruitment", "update")}
+          canEdit={can("m4.ungvien:edit")}
           onClose={() => setShowCandidateDetail(null)}
           onUpdateStatus={handleUpdateCandidateStatus}
           onSaveInterview={async (id, data) => {

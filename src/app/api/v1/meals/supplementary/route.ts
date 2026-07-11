@@ -33,9 +33,11 @@ const CreateSchema = z.object({
   specialNote: z.string().optional().nullable(),
 });
 
+// Phân quyền DUYỆT đã chuyển sang ma trận (m10.nhaan.dangky:approve); helper giữ cho tương thích.
 function canApprove(role: string): boolean {
   return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
 }
+void canApprove;
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -48,9 +50,10 @@ export async function GET(request: NextRequest) {
   const from = searchParams.get("from") || "";
   const to = searchParams.get("to") || "";
 
-  // TP HCNS / BOM xem tất cả; người khác chỉ xem phiếu mình tạo.
+  // Người có quyền duyệt (ma trận) xem tất cả; người khác chỉ xem phiếu mình tạo.
+  const canApp = canUser(session.user as any, "m10.nhaan.dangky:approve");
   const where: any = {};
-  if (!canApprove(role)) where.requestedBy = userId;
+  if (!canApp) where.requestedBy = userId;
   if (status) where.status = status;
   if (from || to) {
     const f = from ? new Date(new Date(from).setHours(0, 0, 0, 0)) : undefined;
@@ -67,7 +70,7 @@ export async function GET(request: NextRequest) {
       approver: { select: { id: true, employee: { select: { fullName: true } } } },
     },
   });
-  return NextResponse.json({ data, canApprove: canApprove(role) });
+  return NextResponse.json({ data, canApprove: canApp });
 }
 
 export async function POST(request: NextRequest) {
@@ -85,8 +88,8 @@ export async function POST(request: NextRequest) {
   }
   const b = parsed.data;
 
-  // Chốt giờ 10h30: sau mốc này (hoặc ngày đã qua) chỉ HCNS được thêm/sửa bổ sung.
-  if (!canApprove(role) && isAfterSuppCutoff(b.date)) {
+  // Chốt giờ 10h30: sau mốc này (hoặc ngày đã qua) chỉ người có quyền duyệt (ma trận) được thêm/sửa bổ sung.
+  if (!canUser(session.user as any, "m10.nhaan.dangky:approve") && isAfterSuppCutoff(b.date)) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Đã quá giờ đăng ký bổ sung (10h30). Sau 10h30 chỉ P. HCNS được thêm/cập nhật." } }, { status: 403 });
   }
 

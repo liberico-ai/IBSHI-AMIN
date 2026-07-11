@@ -7,7 +7,7 @@ import { DateInput } from "@/components/shared/date-input";
 import { BUCKETS } from "@/lib/minio-constants";
 import { viewUrl } from "@/lib/use-presigned-url";
 import { formatDate, apiError } from "@/lib/utils";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import {
   Plus, RefreshCw, X, Check, Settings, Trash2, Calendar,
@@ -92,7 +92,7 @@ function isOverdue(o: Onboarding) {
 
 // ============== MAIN PAGE ==============
 export default function OnboardingPage() {
-  const { canDo } = usePermission();
+  const can = useCan();
   const [list, setList] = useState<Onboarding[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<"" | "IN_PROGRESS" | "COMPLETED" | "EXTENDED">("");
@@ -187,17 +187,17 @@ export default function OnboardingPage() {
           <button onClick={fetchList} className="p-2 rounded-lg hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}>
             <RefreshCw size={15} />
           </button>
-          {canDo("recruitment", "update") && (
+          {can("m4.onboarding:edit") && (
             <button onClick={() => setShowConfig(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg border font-medium" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>
               <Settings size={14} /> Cấu hình bằng cấp theo vị trí
             </button>
           )}
-          {canDo("recruitment", "create") && (
+          {can("m4.onboarding:create") && (
             <button onClick={() => setShowProbCreate(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}>
               <FileText size={14} /> Tạo HĐ thử việc
             </button>
           )}
-          {canDo("recruitment", "create") && (
+          {can("m4.onboarding:create") && (
             <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
               <Plus size={14} /> Tạo onboarding
             </button>
@@ -276,7 +276,7 @@ export default function OnboardingPage() {
       {detail && (
         <OnboardingDetailModal
           data={detail}
-          canEdit={canDo("recruitment", "update")}
+          canEdit={can("m4.onboarding:edit")}
           onClose={() => setDetailId(null)}
           onChanged={() => { fetchList(); }}
         />

@@ -5,7 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, FileText, AlertTriangle, Search } from "lucide-react";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 import { viewUrl } from "@/lib/use-presigned-url";
@@ -64,7 +64,7 @@ export default function KyLuatPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingRegs, setLoadingRegs] = useState(true);
   const [loadingActions, setLoadingActions] = useState(true);
-  const { canDo } = usePermission();
+  const can = useCan();
 
   const [showNewRegulation, setShowNewRegulation] = useState(false);
   const [showNewAction, setShowNewAction] = useState(false);
@@ -91,7 +91,8 @@ export default function KyLuatPage() {
     fetchActions();
   }, []);
 
-  const canManage = canDo("discipline", "create");
+  // Quản lý Kỷ luật / Quy định theo ma trận (cờ chung cho 2 tab).
+  const canManage = can("m8.kyluat:create") || can("m8.quydinh:create");
 
   const filteredRegs = regulations.filter((r) =>
     !searchReg ||

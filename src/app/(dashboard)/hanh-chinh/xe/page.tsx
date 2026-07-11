@@ -258,8 +258,9 @@ export default function XePage() {
     fetchMaintenance();
   }, [maintenanceVehicleId, maintFrom, maintTo]);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || userRole === "MANAGER";
-  // Duyệt phiếu đặt xe: chỉ 3 NV được chỉ định (theo employeeCode), không theo role.
+  // Quản lý đội xe (thêm/sửa xe, nhật ký, bảo trì) theo ma trận m10.xe:edit.
+  const canManage = can("m10.xe:edit");
+  // Duyệt phiếu đặt xe: giữ luồng người-duyệt chỉ định (ROOM_VEHICLE_APPROVERS), không theo ma trận phẳng.
   const canApproveBooking = canApproveRoomVehicle(employeeCode, userRole);
 
   async function handleBookingAction(id: string, action: "APPROVE" | "REJECT", driverName?: string): Promise<boolean> {

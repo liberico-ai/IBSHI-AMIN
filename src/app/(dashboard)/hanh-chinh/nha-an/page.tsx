@@ -407,9 +407,10 @@ export default function NhaAnPage() {
     fetchRegs();
   }
 
-  const isHRAdmin = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
-  // NV được cấp riêng toàn quyền tab "Chi phí mua thực phẩm" (food) dù không phải HCNS.
-  const isFoodManager = isHRAdmin || canManageFoodPurchase(myEmployeeCode);
+  // Quản lý nhà ăn theo ma trận: Sửa/Xóa đăng ký (phòng ban / khách / thầu phụ) = m10.nhaan.dangky:edit.
+  const isHRAdmin = can("m10.nhaan.dangky:edit");
+  // Tab "Chi phí mua thực phẩm" theo ma trận m10.nhaan.chiphi:edit.
+  const isFoodManager = can("m10.nhaan.chiphi:edit");
 
   return (
     <div>

@@ -7,7 +7,7 @@ import { DateInput } from "@/components/shared/date-input";
 import { BUCKETS } from "@/lib/minio-constants";
 import { viewUrl } from "@/lib/use-presigned-url";
 import { formatDate, formatVND, apiError } from "@/lib/utils";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { PROBATION_CRITERIA, PROBATION_RATINGS, TIER_LABELS, type RatingKey } from "@/lib/probation-eval";
 import {
@@ -68,7 +68,7 @@ const STATUS_INFO: Record<Evaluation["status"], { label: string; color: string; 
 
 // ============== MAIN ==============
 export default function ProbationEvaluationPage() {
-  const { canDo, hasRole } = usePermission();
+  const can = useCan();
   const [list, setList] = useState<Evaluation[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<"" | Evaluation["status"]>("");
@@ -144,7 +144,7 @@ export default function ProbationEvaluationPage() {
           <button onClick={fetchList} className="p-2 rounded-lg hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}>
             <RefreshCw size={15} />
           </button>
-          {canDo("recruitment", "create") && (
+          {can("m4.thuviec:create") && (
             <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
               <Plus size={14} /> Tạo đánh giá
             </button>
@@ -180,8 +180,8 @@ export default function ProbationEvaluationPage() {
       {detail && (
         <EvalDetailModal
           data={detail}
-          isBOM={hasRole("BOM")}
-          canEdit={canDo("recruitment", "update")}
+          isBOM={can("m4.thuviec:approve")}
+          canEdit={can("m4.thuviec:edit")}
           onClose={() => setDetailId(null)}
           onChanged={() => { fetchList(); }}
         />

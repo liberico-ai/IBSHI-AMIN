@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 
 // Danh mục nhà thầu phụ. Đọc: mọi người dùng đã đăng nhập (form đăng ký suất ăn cần).
-// Thêm/sửa/xóa: HCNS (HR_ADMIN / BOM).
-function canManage(role: string): boolean {
-  return role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
-}
+// Thêm/sửa/xóa: theo ma trận m10.nhaan.thaufu.
 
 const CreateSchema = z.object({
   name: z.string().min(1, "Tên nhà thầu là bắt buộc"),
@@ -28,14 +26,13 @@ export async function GET(request: NextRequest) {
     where: includeInactive ? {} : { active: true },
     orderBy: { name: "asc" },
   });
-  return NextResponse.json({ data, meta: { canManage: canManage((session.user as any).role) } });
+  return NextResponse.json({ data, meta: { canManage: canUser(session.user as any, "m10.nhaan.thaufu:edit") } });
 }
 
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  const role = (session.user as any).role;
-  if (!canManage(role)) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được quản lý nhà thầu" } }, { status: 403 });
+  if (!canUser(session.user as any, "m10.nhaan.thaufu:create")) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền thêm nhà thầu" } }, { status: 403 });
 
   const parsed = CreateSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });

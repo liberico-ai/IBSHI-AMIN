@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 
 // XÓA MỀM nhân sự — KHÁC "Nghỉ việc":
 //   - Ẩn hoàn toàn khỏi mọi danh sách (mã gắn tiền tố "#DEL#" → bị lọc ở API list).
@@ -21,10 +22,9 @@ export async function POST(
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
 
-  // CHỈ Quản trị HT (ADMIN) hoặc HC nhân sự (HR_ADMIN) mới được xóa.
-  const userRole = (session.user as any).role;
-  if (userRole !== "ADMIN" && userRole !== "HR_ADMIN") {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ Quản trị HT hoặc HC nhân sự được xóa nhân sự" } }, { status: 403 });
+  // Quyền xóa nhân sự theo ma trận phân quyền (m1.hoso:delete).
+  if (!canUser(session.user as any, "m1.hoso:delete")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền xóa nhân sự" } }, { status: 403 });
   }
 
   const { id } = await params;

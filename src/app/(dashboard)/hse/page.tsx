@@ -5,7 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, ShieldAlert, AlertTriangle } from "lucide-react";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { FileUpload } from "@/components/shared/file-upload";
 import { BUCKETS } from "@/lib/minio-constants";
 import { DateInput } from "@/components/shared/date-input";
@@ -110,7 +110,7 @@ type Department = { id: string; name: string; code: string };
 
 export default function HsePage() {
   const [activeTab, setActiveTab] = useState<Tab>("incidents");
-  const { canDo } = usePermission();
+  const can = useCan();
 
   const [incidents, setIncidents] = useState<HSEIncident[]>([]);
   const [loadingIncidents, setLoadingIncidents] = useState(true);
@@ -171,7 +171,8 @@ export default function HsePage() {
     fetchBriefings();
   }, []);
 
-  const canManage = canDo("hse", "create");
+  // Quản lý HSE theo ma trận. Cờ chung (giữ thiết kế 1 cờ cho các tab) — dựa trên "Sự cố:Thêm".
+  const canManage = can("m9.suco:create");
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "incidents", label: "Sự cố" },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useCan } from "@/hooks/use-permission";
 import { PageTitle } from "@/components/layout/page-title";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { Plus, RefreshCw, X, CheckCircle, ClipboardList } from "lucide-react";
@@ -95,7 +96,9 @@ export default function VeSinhPage() {
     if (tab === "issues") fetchIssues();
   }, [tab, selectedDate]);
 
-  const canManage = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || userRole === "MANAGER";
+  const can = useCan();
+  // Quản lý vệ sinh (khu vực/lịch/nhật ký/sự cố) theo ma trận m10.vesinh:edit.
+  const canManage = can("m10.vesinh:edit");
 
   async function handleComplete(id: string) {
     await fetch(`/api/v1/cleaning/${id}`, {

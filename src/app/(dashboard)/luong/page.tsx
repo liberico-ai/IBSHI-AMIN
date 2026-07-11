@@ -5,7 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
 import { Plus, RefreshCw, X, Download } from "lucide-react";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { alertDialog } from "@/lib/confirm-dialog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -983,7 +983,7 @@ function ImportBhxhModal({
 export default function LuongPage() {
   const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
   const [loading, setLoading] = useState(true);
-  const { canDo, hasRole } = usePermission();
+  const can = useCan();
   const [showCreate, setShowCreate] = useState(false);
   const [detailPeriod, setDetailPeriod] = useState<PeriodDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -1000,9 +1000,10 @@ export default function LuongPage() {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => setAllowed(!!res.canViewPayroll)).catch(() => setAllowed(false));
   }, []);
 
-  const canManage = canDo("payroll", "calculate");
-  const isBOM = hasRole("BOM");
-  const isHRAdmin = hasRole("HR_ADMIN");
+  // Theo ma trận: quản lý/tính lương = m7.bangluong:run; duyệt kỳ + đánh dấu đã trả = m7.bangluong:approve.
+  const canManage = can("m7.bangluong:run");
+  const isBOM = can("m7.bangluong:approve");
+  const isHRAdmin = can("m7.bangluong:approve");
 
   const fetchPeriods = useCallback(() => {
     setLoading(true);

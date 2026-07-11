@@ -8,7 +8,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
 import { parseLeaveCode, isLeaveToken } from "@/lib/attendance-codes";
 import { ChevronLeft, ChevronRight, Plus, Check, X, RefreshCw, CalendarDays, Clock, Download, Upload } from "lucide-react";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
 
 // Chọn ĐÚNG sheet chứa bảng công khi file có nhiều sheet (vd file Trực tiếp có sheet đầu "foxz" rỗng,
@@ -907,7 +907,7 @@ export default function AttendancePage() {
 }
 
 function AttendancePageInner() {
-  const { canDo } = usePermission();
+  const can = useCan();
   const searchParams = useSearchParams();
   const activeTab = (searchParams.get("tab") === "grid" ? "grid" : "attendance") as Tab;
   const now = new Date();
@@ -1205,7 +1205,7 @@ function AttendancePageInner() {
                 month={month}
                 year={year}
                 onRefresh={() => setGridRefreshKey(k => k + 1)}
-                canImport={canDo("attendance", "bulkUpsert")}
+                canImport={can("m3.bangcong:import")}
               />
               {/* Card: Khối Trực tiếp */}
               <AttendanceGridCard
@@ -1218,7 +1218,7 @@ function AttendancePageInner() {
                 year={year}
                 onExport={() => exportGrid(productionEmployees, "Truc-tiep")}
                 onRefresh={() => setGridRefreshKey(k => k + 1)}
-                canImport={canDo("attendance", "bulkUpsert")}
+                canImport={can("m3.bangcong:import")}
               />
             </>
           )}

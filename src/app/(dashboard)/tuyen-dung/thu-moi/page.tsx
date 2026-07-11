@@ -5,7 +5,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DateInput } from "@/components/shared/date-input";
 import { formatDate, formatVND, apiError } from "@/lib/utils";
 import { viewUrl } from "@/lib/use-presigned-url";
-import { usePermission } from "@/hooks/use-permission";
+import { useCan } from "@/hooks/use-permission";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import {
   Plus, RefreshCw, X, Check, Clock, ClipboardCheck, Send, FileText,
@@ -59,7 +59,7 @@ const STATUS_INFO: Record<OfferLetter["status"], { label: string; color: string;
 
 // ============== MAIN ==============
 export default function OfferLettersPage() {
-  const { canDo, hasRole } = usePermission();
+  const can = useCan();
   const [list, setList] = useState<OfferLetter[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<"" | OfferLetter["status"]>("");
@@ -128,7 +128,7 @@ export default function OfferLettersPage() {
         </div>
         <div className="flex gap-2">
           <button onClick={fetchList} className="p-2 rounded-lg hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}><RefreshCw size={15} /></button>
-          {canDo("recruitment", "create") && (
+          {can("m4.offer:create") && (
             <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
               <Plus size={14} /> Soạn thư mời
             </button>
@@ -156,7 +156,7 @@ export default function OfferLettersPage() {
         <CreateOfferModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); fetchList(); }} />
       )}
       {detail && (
-        <OfferDetailModal data={detail} canEdit={canDo("recruitment", "update")} canApprove={hasRole("MANAGER", "HR_ADMIN", "BOM")}
+        <OfferDetailModal data={detail} canEdit={can("m4.offer:edit")} canApprove={can("m4.offer:approve")}
           onClose={() => setDetailId(null)} onChanged={() => fetchList()} />
       )}
     </div>
