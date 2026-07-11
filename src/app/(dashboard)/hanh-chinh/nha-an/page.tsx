@@ -216,6 +216,8 @@ export default function NhaAnPage() {
   const [editActualDate, setEditActualDate] = useState<ActualRow | null>(null);
   const [foodMonth, setFoodMonth] = useState(now.getMonth() + 1);
   const [foodYear, setFoodYear] = useState(now.getFullYear());
+  // Đang xem tháng QUÁ KHỨ? → danh sách tồn kho hiển thị tồn CUỐI THÁNG đó (không phải tồn hiện tại).
+  const isFoodPastMonth = foodYear * 12 + foodMonth < now.getFullYear() * 12 + (now.getMonth() + 1);
   const [foodRows, setFoodRows] = useState<FoodPurchase[]>([]);
   const [foodTotal, setFoodTotal] = useState(0);
   const [foodCanManage, setFoodCanManage] = useState(false);
@@ -226,6 +228,7 @@ export default function NhaAnPage() {
   type InventoryItem = { name: string; unit: string; quantity: number; value: number };
   type FoodIssueRow = { id: string; date: string; name: string; unit: string; quantity: number; cost: number };
   const [foodInventory, setFoodInventory] = useState<InventoryItem[]>([]);
+  const [foodEndInventory, setFoodEndInventory] = useState<InventoryItem[]>([]); // tồn theo món TỚI CUỐI THÁNG đã chọn (xem tháng quá khứ)
   const [foodEndInvValue, setFoodEndInvValue] = useState(0); // giá trị tồn kho tới cuối tháng đã chọn
   const [foodIssueCostTotal, setFoodIssueCostTotal] = useState(0);
   const [foodIssues, setFoodIssues] = useState<FoodIssueRow[]>([]);
@@ -249,6 +252,7 @@ export default function NhaAnPage() {
       .then(([buy, issue]) => {
         setFoodRows(buy.data || []); setFoodTotal(buy.meta?.total || 0); setFoodCanManage(!!buy.meta?.canManage);
         setFoodInventory(buy.meta?.inventory || []);
+        setFoodEndInventory(buy.meta?.inventoryAtEnd || []);
         setFoodEndInvValue(buy.meta?.endOfMonthInventoryValue || 0);
         setFoodIssueCostTotal(issue.meta?.total || 0);
         setFoodIssues(issue.data || []);
@@ -1123,7 +1127,7 @@ export default function NhaAnPage() {
 
           {/* Thẻ: tiền MUA · THỰC XUẤT (FIFO) · TỒN KHO HIỆN TẠI (+ TỒN CUỐI THÁNG khi xem tháng quá khứ) */}
           {(() => {
-            const isPastMonth = foodYear * 12 + foodMonth < now.getFullYear() * 12 + (now.getMonth() + 1);
+            const isPastMonth = isFoodPastMonth;
             return (
               <div className={`grid grid-cols-1 gap-4 mb-4 ${isPastMonth ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
                 <div className="rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
@@ -1220,13 +1224,16 @@ export default function NhaAnPage() {
                 );
               })()}
 
-              {/* 2) Tồn kho hiện tại (FIFO) */}
+              {/* 2) Tồn kho (FIFO) — tháng hiện tại: tồn HIỆN TẠI; tháng quá khứ: tồn CUỐI THÁNG đó */}
+              {(() => {
+                const invList = isFoodPastMonth ? foodEndInventory : foodInventory;
+                return (
               <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
                 <div className="px-5 py-3 border-b text-[14px] font-semibold flex items-center justify-between" style={{ borderColor: "var(--ibs-border)" }}>
-                  <span>📦 Tồn kho thực phẩm hiện tại</span>
-                  <span className="text-[12px] font-normal" style={{ color: "var(--ibs-text-dim)" }}>Theo FIFO · còn {foodInventory.length} món</span>
+                  <span>📦 {isFoodPastMonth ? `Tồn kho cuối tháng ${foodMonth}/${foodYear}` : "Tồn kho thực phẩm hiện tại"}</span>
+                  <span className="text-[12px] font-normal" style={{ color: "var(--ibs-text-dim)" }}>{isFoodPastMonth ? "Theo FIFO tới ngày cuối tháng" : "Theo FIFO"} · còn {invList.length} món</span>
                 </div>
-                {foodInventory.length === 0 ? (
+                {invList.length === 0 ? (
                   <div className="py-10 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Kho trống — chưa nhập hoặc đã xuất hết</div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -1240,7 +1247,7 @@ export default function NhaAnPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {foodInventory.map((r) => (
+                        {invList.map((r) => (
                           <tr key={r.name + r.unit} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
                             <td className="px-5 py-2.5 font-medium">{r.name}</td>
                             <td className="px-4 py-2.5" style={{ color: "var(--ibs-text-dim)" }}>{r.unit}</td>
@@ -1250,13 +1257,15 @@ export default function NhaAnPage() {
                         ))}
                         <tr style={{ background: "rgba(16,185,129,0.06)" }}>
                           <td className="px-5 py-2.5 font-bold" colSpan={3}>Tổng giá trị tồn</td>
-                          <td className="px-5 py-2.5 text-right font-bold" style={{ color: "#10b981" }}>{fmtNum(foodInventory.reduce((s, r) => s + r.value, 0))}đ</td>
+                          <td className="px-5 py-2.5 text-right font-bold" style={{ color: "#10b981" }}>{fmtNum(invList.reduce((s, r) => s + r.value, 0))}đ</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
                 )}
               </div>
+                );
+              })()}
 
               {/* 3) Thực xuất theo ngày */}
               {(() => {

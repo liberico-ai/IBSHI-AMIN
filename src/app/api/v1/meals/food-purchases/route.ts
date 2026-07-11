@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     data,
-    meta: { month, year, total, issueCostTotal, inventory, inventoryValue, endOfMonthInventoryValue, canManage: canUser(session.user as any, "m10.nhaan.chiphi:edit") },
+    meta: { month, year, total, issueCostTotal, inventory, inventoryValue, endOfMonthInventoryValue, inventoryAtEnd: invAtEnd, canManage: canUser(session.user as any, "m10.nhaan.chiphi:edit") },
   });
 }
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { X, RefreshCw, Shield, Users, FileText, BarChart3, Download, Lock, Globe, Moon, Sun, Check, Eye, EyeOff, UserCircle } from "lucide-react";
+import { X, RefreshCw, Shield, Users, FileText, BarChart3, Download, Lock, Globe, Moon, Sun, Check, Eye, EyeOff, UserCircle, KeyRound } from "lucide-react";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDateTime, apiError } from "@/lib/utils";
@@ -434,6 +435,30 @@ function UsersTab({ isBOM }: { isBOM: boolean }) {
 
   useEffect(() => { fetchUsers(); }, []);
 
+  const [resetting, setResetting] = useState<string | null>(null);
+  async function resetPassword(u: SystemUser) {
+    const name = u.employee?.fullName || u.employeeCode;
+    const ok = await confirmDialog({
+      title: "Reset mật khẩu",
+      message: `Đặt lại mật khẩu của "${name}" (${u.employeeCode}) về 123456? Tài khoản sẽ đăng nhập bằng 123456 và bị bắt đổi mật khẩu ngay lần đầu.`,
+      tone: "danger",
+      confirmText: "Reset về 123456",
+    });
+    if (!ok) return;
+    setResetting(u.id);
+    try {
+      const res = await fetch(`/api/v1/settings/users/${u.id}/reset-password`, { method: "POST" });
+      if (res.ok) {
+        await alertDialog({ title: "Đã reset mật khẩu", message: `Mật khẩu của "${name}" đã về 123456. Người dùng sẽ được yêu cầu đổi mật khẩu ngay lần đăng nhập đầu tiên.` });
+      } else {
+        const data = await res.json().catch(() => null);
+        await alertDialog({ title: "Reset thất bại", message: data?.error?.message || "Không reset được mật khẩu.", tone: "danger" });
+      }
+    } finally {
+      setResetting(null);
+    }
+  }
+
   const filteredUsers = useMemo(() => {
     if (!search) return users;
     const lower = search.toLowerCase();
@@ -511,27 +536,48 @@ function UsersTab({ isBOM }: { isBOM: boolean }) {
     {
       key: "id",
       header: "Thao tác",
-      width: "90px",
+      width: "200px",
       render: (row) => {
         const u = row as unknown as SystemUser;
         return (
-          <button
-            onClick={(e) => { e.stopPropagation(); setEditUser(u); }}
-            className="flex items-center gap-1.5 text-[12px] px-2.5 py-1.5 rounded-lg border transition-colors"
-            style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}
-            onMouseEnter={(e) => {
-              const b = e.currentTarget as HTMLButtonElement;
-              b.style.borderColor = "var(--ibs-accent)";
-              b.style.color = "var(--ibs-accent)";
-            }}
-            onMouseLeave={(e) => {
-              const b = e.currentTarget as HTMLButtonElement;
-              b.style.borderColor = "var(--ibs-border)";
-              b.style.color = "var(--ibs-text-dim)";
-            }}
-          >
-            <Shield size={11} /> Phân quyền
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); setEditUser(u); }}
+              className="flex items-center gap-1.5 text-[12px] px-2.5 py-1.5 rounded-lg border transition-colors"
+              style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}
+              onMouseEnter={(e) => {
+                const b = e.currentTarget as HTMLButtonElement;
+                b.style.borderColor = "var(--ibs-accent)";
+                b.style.color = "var(--ibs-accent)";
+              }}
+              onMouseLeave={(e) => {
+                const b = e.currentTarget as HTMLButtonElement;
+                b.style.borderColor = "var(--ibs-border)";
+                b.style.color = "var(--ibs-text-dim)";
+              }}
+            >
+              <Shield size={11} /> Phân quyền
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); resetPassword(u); }}
+              disabled={resetting === u.id}
+              title="Đặt lại mật khẩu về 123456"
+              className="flex items-center gap-1.5 text-[12px] px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-50"
+              style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}
+              onMouseEnter={(e) => {
+                const b = e.currentTarget as HTMLButtonElement;
+                b.style.borderColor = "var(--ibs-danger)";
+                b.style.color = "var(--ibs-danger)";
+              }}
+              onMouseLeave={(e) => {
+                const b = e.currentTarget as HTMLButtonElement;
+                b.style.borderColor = "var(--ibs-border)";
+                b.style.color = "var(--ibs-text-dim)";
+              }}
+            >
+              <KeyRound size={11} /> {resetting === u.id ? "Đang reset…" : "Reset MK"}
+            </button>
+          </div>
         );
       },
     },
