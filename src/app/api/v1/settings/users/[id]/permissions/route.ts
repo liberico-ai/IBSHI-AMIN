@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { ALL_PERMS, templatePerms } from "@/lib/permission-catalog";
+import { ALL_PERMS, templatePerms, canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
-
-// Ai được quản lý phân quyền: ADMIN (Quản trị HT) hoặc BOM (Ban GĐ).
-function canManagePerms(role: string): boolean {
-  return role === "ADMIN" || role === "BOM";
-}
 
 // GET — lấy ma trận quyền hiện tại của 1 account.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canManagePerms((session.user as any).role)) {
+  if (!canUser(session.user as any, "sys.phanquyen:view")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -37,7 +32,7 @@ const PutSchema = z.object({ perms: z.array(z.string()) });
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canManagePerms((session.user as any).role)) {
+  if (!canUser(session.user as any, "sys.phanquyen:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -65,7 +60,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!canManagePerms((session.user as any).role)) {
+  if (!canUser(session.user as any, "sys.phanquyen:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
   const { id } = await params;

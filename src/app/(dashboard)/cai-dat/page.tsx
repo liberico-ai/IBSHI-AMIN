@@ -7,8 +7,7 @@ import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDateTime, apiError } from "@/lib/utils";
 import { useSession } from "next-auth/react";
-import { usePermission } from "@/hooks/use-permission";
-import { isSystemAdmin } from "@/lib/permissions";
+import { useCan } from "@/hooks/use-permission";
 import { useLang, useT } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { PERMISSION_CATALOG, ACTION_LABELS, templatePerms, type Action } from "@/lib/permission-catalog";
@@ -418,7 +417,7 @@ function EditUserModal({
 }
 
 // ── Tab: Người dùng ────────────────────────────────────────────────────────────
-function UsersTab({ isBOM }: { isBOM: boolean }) {
+function UsersTab({ canEdit }: { canEdit: boolean }) {
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [editUser, setEditUser] = useState<SystemUser | null>(null);
@@ -539,6 +538,8 @@ function UsersTab({ isBOM }: { isBOM: boolean }) {
       width: "200px",
       render: (row) => {
         const u = row as unknown as SystemUser;
+        // Chỉ người có quyền SỬA (sys.phanquyen:edit) mới thấy nút Phân quyền / Reset MK.
+        if (!canEdit) return <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>—</span>;
         return (
           <div className="flex items-center gap-1.5">
             <button
@@ -630,7 +631,7 @@ function UsersTab({ isBOM }: { isBOM: boolean }) {
       {editUser && (
         <EditUserModal
           user={editUser}
-          canChangeRole={isBOM}
+          canChangeRole={canEdit}
           onClose={() => setEditUser(null)}
           onSuccess={handleUpdateSuccess}
         />
@@ -1139,22 +1140,30 @@ function PersonalSettings() {
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function CaiDatPage() {
-  const { role } = usePermission();
+  const can = useCan();
   const { status } = useSession();
   const t = useT();
   const [activeTab, setActiveTab] = useState<"users" | "audit" | "report">("users");
 
-  const isAdmin = isSystemAdmin(role);
+  // Quyền nhóm Hệ thống theo MA TRẬN (ADMIN tự có tất; người khác cấp đích danh).
+  const canUsers = can("sys.phanquyen:view");   // xem danh sách người dùng + ma trận
+  const canEditUsers = can("sys.phanquyen:edit"); // sửa vai trò / phân quyền / reset MK
+  const canAudit = can("sys.audit:view");
+  const canReport = can("sys.baocao:view");
+  const hasSystem = canUsers || canAudit || canReport;
 
   if (status === "loading") {
     return <PageTitle title={t("Cài đặt", "Settings")} description={t("Đang tải…", "Loading…")} />;
   }
 
   const tabs = [
-    { id: "users" as const, label: t("Người dùng", "Users"), icon: Users },
-    { id: "audit" as const, label: "Audit Log", icon: FileText },
-    { id: "report" as const, label: t("Báo cáo hoạt động", "Activity report"), icon: BarChart3 },
-  ];
+    canUsers ? { id: "users" as const, label: t("Người dùng", "Users"), icon: Users } : null,
+    canAudit ? { id: "audit" as const, label: "Audit Log", icon: FileText } : null,
+    canReport ? { id: "report" as const, label: t("Báo cáo hoạt động", "Activity report"), icon: BarChart3 } : null,
+  ].filter(Boolean) as { id: "users" | "audit" | "report"; label: string; icon: typeof Users }[];
+
+  // Tab đang chọn phải nằm trong các tab được phép; nếu không → lấy tab đầu tiên.
+  const effectiveTab = tabs.some((x) => x.id === activeTab) ? activeTab : tabs[0]?.id;
 
   return (
     <div>
@@ -1162,18 +1171,18 @@ export default function CaiDatPage() {
 
       <PersonalSettings />
 
-      {/* Khu Quản trị hệ thống — chỉ ADMIN */}
-      {isAdmin && (
+      {/* Khu Quản trị hệ thống — hiện khi có bất kỳ quyền nhóm Hệ thống (ADMIN hoặc được cấp) */}
+      {hasSystem && (
         <div className="mt-10">
           <div className="flex items-center gap-2 mb-4">
             <Shield size={16} style={{ color: "var(--ibs-accent)" }} />
             <h2 className="text-[16px] font-bold" style={{ color: "var(--ibs-text)" }}>{t("Quản trị hệ thống", "System administration")}</h2>
           </div>
 
-          {/* Tab bar */}
+          {/* Tab bar — chỉ hiện tab được phép */}
           <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
             {tabs.map(({ id, label, icon: Icon }) => {
-              const active = activeTab === id;
+              const active = effectiveTab === id;
               return (
                 <button
                   key={id}
@@ -1188,9 +1197,9 @@ export default function CaiDatPage() {
             })}
           </div>
 
-          {activeTab === "users" && <UsersTab isBOM={true} />}
-          {activeTab === "audit" && <AuditLogTab />}
-          {activeTab === "report" && <ReportTab />}
+          {effectiveTab === "users" && <UsersTab canEdit={canEditUsers} />}
+          {effectiveTab === "audit" && <AuditLogTab />}
+          {effectiveTab === "report" && <ReportTab />}
         </div>
       )}
     </div>

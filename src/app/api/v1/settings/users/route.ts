@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { isSystemAdmin } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  const userRole = (session.user as any).role;
-  if (!isSystemAdmin(userRole)) {
+  // Xem danh sách người dùng: theo ma trận (sys.phanquyen:view). ADMIN tự động có.
+  if (!canUser(session.user as any, "sys.phanquyen:view")) {
     return NextResponse.json(
-      { error: { code: "FORBIDDEN", message: "Chỉ Quản trị hệ thống (ADMIN)" } },
+      { error: { code: "FORBIDDEN", message: "Không có quyền xem danh sách người dùng" } },
       { status: 403 }
     );
   }
@@ -39,10 +39,10 @@ export async function PUT(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  const userRole = (session.user as any).role;
-  if (!isSystemAdmin(userRole)) {
+  // Sửa vai trò/trạng thái tài khoản: theo ma trận (sys.phanquyen:edit). ADMIN tự động có.
+  if (!canUser(session.user as any, "sys.phanquyen:edit")) {
     return NextResponse.json(
-      { error: { code: "FORBIDDEN", message: "Chỉ Quản trị hệ thống (ADMIN) mới sửa được vai trò người dùng" } },
+      { error: { code: "FORBIDDEN", message: "Không có quyền sửa vai trò/tài khoản người dùng" } },
       { status: 403 }
     );
   }

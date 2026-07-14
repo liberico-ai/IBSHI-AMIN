@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { isSystemAdmin } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 
 // GET ?from=YYYY-MM-DD&to=YYYY-MM-DD — báo cáo TỔNG HỢP hoạt động (theo NV + theo module).
 // Mốc ngày tính theo giờ VN (UTC+7).
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!isSystemAdmin((session.user as any).role)) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ Quản trị hệ thống" } }, { status: 403 });
+  // Xem Báo cáo hoạt động: theo ma trận (sys.baocao:view). ADMIN tự động có.
+  if (!canUser(session.user as any, "sys.baocao:view")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền xem Báo cáo hoạt động" } }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);

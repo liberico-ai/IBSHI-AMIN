@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { hash } from "bcryptjs";
-import { isSystemAdmin } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { logAudit } from "@/lib/audit";
 
 // Mật khẩu mặc định khi Quản trị HT reset cho 1 tài khoản.
@@ -12,9 +12,9 @@ const DEFAULT_PASSWORD = "123456";
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  if (!isSystemAdmin((session.user as any).role)) {
+  if (!canUser(session.user as any, "sys.phanquyen:edit")) {
     return NextResponse.json(
-      { error: { code: "FORBIDDEN", message: "Chỉ Quản trị hệ thống (ADMIN) được reset mật khẩu" } },
+      { error: { code: "FORBIDDEN", message: "Không có quyền reset mật khẩu người dùng" } },
       { status: 403 }
     );
   }

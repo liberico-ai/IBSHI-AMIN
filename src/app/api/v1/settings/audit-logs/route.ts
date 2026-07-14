@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { isSystemAdmin } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
-  const userRole = (session.user as any).role;
-  if (!isSystemAdmin(userRole)) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ Quản trị hệ thống" } }, { status: 403 });
+  // Xem Audit Log: theo ma trận (sys.audit:view). ADMIN tự động có.
+  if (!canUser(session.user as any, "sys.audit:view")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Không có quyền xem Audit Log" } }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);

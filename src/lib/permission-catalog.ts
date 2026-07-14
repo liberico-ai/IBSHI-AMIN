@@ -181,8 +181,9 @@ export type PermTemplate = { label: string; perms: Set<string> };
 
 export const PERMISSION_TEMPLATES: Record<string, PermTemplate> = {
   ADMIN: { label: "Toàn quyền (Quản trị HT)", perms: new Set(ALL_PERMS) },
-  // BGĐ chỉ XEM mọi thứ (mọi action bắt đầu bằng "view").
-  BOM: { label: "Ban Giám đốc — chỉ XEM", perms: new Set(permsWhere((_f, a) => a === "view")) },
+  // BGĐ chỉ XEM mọi thứ nghiệp vụ (view), TRỪ module Hệ thống (sys.*) — quyền quản trị/phân quyền
+  // phải cấp đích danh qua ma trận, không mặc định cho cả BGĐ.
+  BOM: { label: "Ban Giám đốc — chỉ XEM", perms: new Set(permsWhere((f, a) => a === "view" && !f.key.startsWith("sys."))) },
   // HCNS: toàn quyền nghiệp vụ (trừ module Hệ thống).
   HR_ADMIN: { label: "HC Nhân sự — toàn quyền nghiệp vụ", perms: new Set(permsWhere((f) => !f.key.startsWith("sys."))) },
   MANAGER: {
