@@ -100,12 +100,22 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.role = (user as any).role;
         token.employeeCode = (user as any).employeeCode;
         token.forcePasswordChange = (user as any).forcePasswordChange;
-        // Tính quyền hiệu lực 1 lần lúc đăng nhập (gói mẫu của role + ma trận riêng).
-        try {
-          const grant = await prisma.accessGrant.findUnique({ where: { userId: (user as any).id } });
-          token.perms = Array.from(effectivePerms((user as any).role, grant ? grant.perms : null));
-        } catch {
+        // QUAN TRỌNG (chống 502): KHÔNG nhồi mảng quyền lớn vào JWT — cookie phình vượt
+        // giới hạn header của proxy (nginx) → 502. Dính các role có gói mẫu lớn (ADMIN 210 quyền,
+        // HR_ADMIN/BOM…). Cơ chế:
+        //  - ADMIN = toàn quyền theo role (canUser/useCan tự nhận ADMIN) → để rỗng, không lưu gì.
+        //  - Account CÓ ma trận riêng → chỉ lưu ĐÚNG bộ quyền riêng đó.
+        //  - Account KHÔNG tùy chỉnh → KHÔNG lưu perms; canUser/useCan tự fallback gói mẫu của role
+        //    (kết quả y hệt) → cookie nhỏ gọn.
+        if ((user as any).role === "ADMIN") {
           token.perms = [];
+        } else {
+          try {
+            const grant = await prisma.accessGrant.findUnique({ where: { userId: (user as any).id } });
+            token.perms = grant ? Array.from(effectivePerms((user as any).role, grant.perms)) : undefined;
+          } catch {
+            token.perms = undefined; // lỗi đọc (vd thiếu bảng) → fallback gói mẫu, KHÔNG khóa nhầm
+          }
         }
       }
       return token;
@@ -116,7 +126,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         (session.user as any).role = token.role;
         (session.user as any).employeeCode = token.employeeCode;
         (session.user as any).forcePasswordChange = token.forcePasswordChange;
-        (session.user as any).perms = (token as any).perms ?? [];
+        // Giữ nguyên: mảng (kể cả []) → dùng đúng nó; undefined (không tùy chỉnh) → để undefined
+        // cho canUser/useCan tự fallback gói mẫu của role. KHÔNG ép thành [] (sẽ khóa nhầm).
+        (session.user as any).perms = Array.isArray((token as any).perms) ? (token as any).perms : undefined;
       }
       return session;
     },
