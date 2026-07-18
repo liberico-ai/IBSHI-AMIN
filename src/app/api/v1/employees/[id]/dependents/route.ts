@@ -88,6 +88,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
 
+  // NPT là CON → tự lưu sang bảng Con cái luôn (bỏ qua nếu đã có con trùng tên để tránh nhân đôi).
+  if (parsed.data.relationship === "Con") {
+    const existed = await prisma.child.findFirst({ where: { employeeId, fullName: parsed.data.fullName } });
+    if (!existed) {
+      await prisma.child.create({
+        data: {
+          employeeId,
+          fullName: parsed.data.fullName,
+          dateOfBirth: parsed.data.dateOfBirth ? new Date(parsed.data.dateOfBirth) : null,
+          taxCode: parsed.data.taxCode || null,
+          documentUrls: parsed.data.documentUrls,
+        },
+      });
+    }
+  }
+
   // Sync Employee.dependents counter (M7 thuế TNCN) — chỉ đếm NPT đang hiệu lực (chưa dừng).
   const count = await prisma.dependent.count({ where: { employeeId, stoppedAt: null } });
   await prisma.employee.update({ where: { id: employeeId }, data: { dependents: count } });
