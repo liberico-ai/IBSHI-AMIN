@@ -478,11 +478,33 @@ export async function calculatePayrollForPeriod(periodId: string) {
     // ── BHXH TỰ TÍNH (chốt 2026-07-01, thay import) ──
     //   Đóng ĐỦ THÁNG khi: NV CHÍNH THỨC (HĐ ≠ Thử việc) VÀ số NGÀY KHÔNG LƯƠNG ≤ 13.
     //   Ngày không lương = CC − (công + phép/lễ) → tự gồm KL + ngày trước khi vào + sau khi nghỉ việc.
+    const dongBhxh = (emp as any).dongBhxh !== false; // false = NV đóng BHXH nơi khác → công ty KHÔNG trừ BHXH
     const bhxhUnpaid = Math.max(0, Math.round(CC - (totalCong + leaveDays)));
-    const payBhxh = !isProbation && bhxhUnpaid <= 13;
-    const bh = payBhxh
+    const payBhxh = dongBhxh && !isProbation && bhxhUnpaid <= 13;
+    let bh = payBhxh
       ? computeBhxh(insuranceSalary)
       : { base: 0, bhxh8: 0, bhyt15: 0, bhtn1: 0, employee: 0, empSocial: 0, empHealth: 0, empUnemp: 0, employer: 0, total: 0 };
+
+    // ── PHÁT SINH BHYT (nghỉ / tạm nghỉ báo trễ) — chốt theo yêu cầu HCNS ──
+    //   Điều kiện: HR đã tích cờ (bhytPhatSinh) + tháng đó KHÔNG đủ ĐK đóng BHXH thường (payBhxh=false)
+    //   NHƯNG NV CÓ đi làm (totalCong>0 → loại tháng nghỉ trọn) + tháng-kỳ nằm trong kỳ nghỉ.
+    //   → Cộng BHYT 4,5% theo NGƯỜI CHỊU: NLD=NLĐ 4,5% | CTY=Cty 4,5% | SPLIT=NLĐ 1,5% + Cty 3%.
+    let phatSinhParty: string | null = null;
+    const bhytFlag = (emp as any).bhytPhatSinh as string | null;
+    if (bhytFlag && dongBhxh && !payBhxh && totalCong > 0) {
+      const rd = (emp as any).resignedDate ? new Date((emp as any).resignedDate) : null;
+      const sf = (emp as any).suspendedFrom ? new Date((emp as any).suspendedFrom) : null;
+      const stp = (emp as any).suspendedTo ? new Date((emp as any).suspendedTo) : null;
+      const inResignMonth = !!rd && rd >= startDate && rd <= endDate;                 // nghỉ hẳn: đúng tháng nghỉ
+      const inLeaveWindow = !!sf && !!stp && sf <= endDate && stp >= startDate;        // tạm nghỉ: kỳ giao khoảng nghỉ
+      if (inResignMonth || inLeaveWindow) {
+        const f = computeBhxh(insuranceSalary); // f.bhyt15 = BHYT 1,5% (NLĐ) · f.empHealth = BHYT 3% (Cty)
+        const nldBhyt = bhytFlag === "CTY" ? 0 : bhytFlag === "SPLIT" ? f.bhyt15 : f.bhyt15 + f.empHealth;
+        const ctyBhyt = bhytFlag === "NLD" ? 0 : bhytFlag === "SPLIT" ? f.empHealth : f.bhyt15 + f.empHealth;
+        bh = { base: f.base, bhxh8: 0, bhyt15: nldBhyt, bhtn1: 0, employee: nldBhyt, empSocial: 0, empHealth: ctyBhyt, empUnemp: 0, employer: ctyBhyt, total: nldBhyt + ctyBhyt };
+        phatSinhParty = bhytFlag;
+      }
+    }
 
     const input: SalaryInput = {
       totalIncome,
@@ -566,6 +588,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
       // Khấu trừ + thuế
       bhxhEmployee: out.bhxhEmployee, bhxh8, bhyt15, bhtn1,
       bhxhEmployer: out.bhxhEmployer,
+      bhytPhatSinh: phatSinhParty,   // ≠null: kỳ này có phát sinh BHYT (NLD/CTY/SPLIT) do nghỉ báo trễ
+
       otTaxExempt: out.otTaxExempt,
       taxableIncome: out.taxableIncome,
       personalDeduction: out.personalDeduction,

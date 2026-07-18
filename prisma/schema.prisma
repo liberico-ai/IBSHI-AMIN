@@ -310,6 +310,8 @@ model Employee {
   resignedDate        DateTime?      // Ngày bắt đầu nghỉ việc (khi status = RESIGNED)
   suspendedFrom       DateTime?      // Tạm nghỉ: từ ngày (khi status = ON_LEAVE) — KHÔNG tính lương
   suspendedTo         DateTime?      // Tạm nghỉ: đến ngày — qua ngày này cron tự chuyển về ACTIVE
+  bhytPhatSinh        String?        // Phát sinh BHYT khi nghỉ/tạm nghỉ báo trễ: null=không | "NLD" | "CTY" | "SPLIT"
+  dongBhxh            Boolean  @default(true) // Có đóng BHXH tại công ty không (false = NV đóng nơi khác → không trừ BHXH)
   salaryGrade         Int? // 1-7
   salaryCoefficient   Float? // Hệ số lương
   taxCode             String?

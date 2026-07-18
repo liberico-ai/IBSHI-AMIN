@@ -1080,12 +1080,14 @@ function EditEmployeeDialog({
     })(),
     taxCode: employee.taxCode || "",
     insuranceNumber: employee.insuranceNumber || "",
+    dongBhxh: (employee as any).dongBhxh !== false,
     emergencyContact: employee.emergencyContact || "",
     emergencyPhone: employee.emergencyPhone || "",
     status: employee.status || "ACTIVE",
     resignedDate: (employee as any).resignedDate ? String((employee as any).resignedDate).slice(0, 10) : "",
     suspendedFrom: (employee as any).suspendedFrom ? String((employee as any).suspendedFrom).slice(0, 10) : "",
     suspendedTo: (employee as any).suspendedTo ? String((employee as any).suspendedTo).slice(0, 10) : "",
+    bhytPhatSinh: (employee as any).bhytPhatSinh || "",
     jobRole: employee.jobRole || "",
     jobPosition: employee.jobPosition || "",
     skillLevel: employee.skillLevel || "",
@@ -1128,12 +1130,15 @@ function EditEmployeeDialog({
         body.bankAccounts = form.bankAccounts;
         body.taxCode = form.taxCode;
         body.insuranceNumber = form.insuranceNumber;
+        body.dongBhxh = form.dongBhxh;
         body.status = form.status;
         if (form.status === "ON_LEAVE") {
           body.suspendedFrom = form.suspendedFrom || null;
           body.suspendedTo = form.suspendedTo || null;
+          body.bhytPhatSinh = form.bhytPhatSinh || null;
         } else if (form.status === "RESIGNED") {
           body.resignedDate = form.resignedDate || null;
+          body.bhytPhatSinh = form.bhytPhatSinh || null;
         }
         body.jobRole = form.jobRole;
         body.jobPosition = form.jobPosition;
@@ -1286,6 +1291,21 @@ function EditEmployeeDialog({
                     </div>
                   </>
                 )}
+                {(form.status === "RESIGNED" || form.status === "ON_LEAVE") && (
+                  <div className="col-span-2">
+                    <label className={labelCls} style={labelStyle}>Có phát sinh BHYT (nghỉ báo trễ)?</label>
+                    <select value={form.bhytPhatSinh} onChange={(e) => handleChange("bhytPhatSinh", e.target.value)}
+                      className={inputCls} style={inputStyle}>
+                      <option value="">Không phát sinh</option>
+                      <option value="NLD">Có — Người lao động chịu (BHYT 4,5%)</option>
+                      <option value="CTY">Có — Công ty chịu (BHYT 4,5%)</option>
+                      <option value="SPLIT">Có — Chia (NLĐ 1,5% + Công ty 3%)</option>
+                    </select>
+                    <div className="text-[11px] leading-snug mt-1" style={{ color: "var(--ibs-text-muted)" }}>
+                      Chỉ áp cho tháng có đi làm nhưng <b>không đủ điều kiện đóng BHXH</b> trong kỳ nghỉ (tháng nghỉ trọn không tính). Cộng BHYT 4,5% theo người chịu.
+                    </div>
+                  </div>
+                )}
                 <div className="col-span-2">
                   <label className={labelCls} style={labelStyle}>Tài khoản ngân hàng (tối đa 5)</label>
                   <BankAccountsEditor value={form.bankAccounts} onChange={(v) => handleChange("bankAccounts", v)} />
@@ -1299,6 +1319,14 @@ function EditEmployeeDialog({
                   <label className={labelCls} style={labelStyle}>Số BHXH</label>
                   <input value={form.insuranceNumber} onChange={(e) => handleChange("insuranceNumber", e.target.value)}
                     className={inputCls} style={inputStyle} />
+                </div>
+                <div>
+                  <label className={labelCls} style={labelStyle}>Đóng BHXH tại công ty?</label>
+                  <select value={form.dongBhxh ? "1" : "0"} onChange={(e) => handleChange("dongBhxh", e.target.value === "1")}
+                    className={inputCls} style={inputStyle}>
+                    <option value="1">Có — đóng bình thường</option>
+                    <option value="0">Không — NV đóng BHXH nơi khác (công ty không trừ BHXH)</option>
+                  </select>
                 </div>
                 <div>
                   <label className={labelCls} style={labelStyle}>Phòng ban</label>

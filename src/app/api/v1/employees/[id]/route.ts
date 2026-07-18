@@ -90,6 +90,8 @@ const UpdateEmployeeSchema = z.object({
   resignedDate: z.string().nullable().optional(),   // ngày bắt đầu nghỉ việc (RESIGNED)
   suspendedFrom: z.string().nullable().optional(),  // tạm nghỉ từ (ON_LEAVE)
   suspendedTo: z.string().nullable().optional(),    // tạm nghỉ đến (ON_LEAVE)
+  bhytPhatSinh: z.enum(["NLD", "CTY", "SPLIT"]).nullable().optional(), // phát sinh BHYT khi nghỉ/tạm nghỉ báo trễ
+  dongBhxh: z.boolean().optional(), // NV có đóng BHXH tại công ty không (false = đóng nơi khác)
 });
 
 export async function PUT(
@@ -125,12 +127,16 @@ export async function PUT(
   }
 
   // Non-HR_ADMIN cannot change status
-  const { dateOfBirth, startDate, resignedDate, suspendedFrom, suspendedTo, ...rest } = parsed.data;
+  const { dateOfBirth, startDate, resignedDate, suspendedFrom, suspendedTo, bhytPhatSinh, ...rest } = parsed.data;
   const updateData: any = { ...rest };
   if (dateOfBirth) updateData.dateOfBirth = new Date(dateOfBirth);
   if (startDate) updateData.startDate = new Date(startDate);
   if (!canUser(session.user as any, "m1.hoso:edit") && updateData.status) {
     delete updateData.status;
+  }
+  // Cờ "đóng BHXH tại công ty" — chỉ người có quyền sửa hồ sơ mới được đổi.
+  if (!canUser(session.user as any, "m1.hoso:edit")) {
+    delete updateData.dongBhxh;
   }
   // Ngày nghỉ việc / tạm nghỉ — chỉ gắn khi NGƯỜI CÓ QUYỀN đổi trạng thái (status còn trong updateData).
   if (updateData.status !== undefined) {
@@ -145,15 +151,18 @@ export async function PUT(
       updateData.suspendedFrom = f;
       updateData.suspendedTo = t;
       updateData.resignedDate = null;
+      updateData.bhytPhatSinh = bhytPhatSinh ?? null; // phát sinh BHYT (nếu HR tích) — áp cho tháng transition trong kỳ nghỉ
     } else if (updateData.status === "RESIGNED" || updateData.status === "TERMINATED") {
       updateData.resignedDate = resignedDate ? new Date(resignedDate) : null;
       updateData.suspendedFrom = null;
       updateData.suspendedTo = null;
+      updateData.bhytPhatSinh = bhytPhatSinh ?? null;
     } else {
-      // ACTIVE / PROBATION → xoá hết ngày nghỉ/tạm nghỉ
+      // ACTIVE / PROBATION → xoá hết ngày nghỉ/tạm nghỉ + cờ phát sinh
       updateData.resignedDate = null;
       updateData.suspendedFrom = null;
       updateData.suspendedTo = null;
+      updateData.bhytPhatSinh = null;
     }
   }
   // Tài khoản ngân hàng (tối đa 5): lọc TK hợp lệ + đồng bộ TK chính vào field cũ.
