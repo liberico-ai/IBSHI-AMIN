@@ -33,6 +33,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/v1/auth") ||
     pathname.startsWith("/api/v1/activity-log") || // endpoint tự kiểm tra quyền
+    pathname.startsWith("/api/v1/cron") ||         // cron: tự bảo vệ bằng x-cron-secret
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon")
   ) {

@@ -53,6 +53,18 @@ export async function GET(request: NextRequest) {
   const byUser = new Map<string, UserAgg>();
   const moduleViews = new Map<string, { views: number; users: Set<string> }>();
 
+  // Chi tiết "họ đã thao tác gì": gộp theo (người + hành động + đối tượng), loại VIEW (đã có ở sheet module).
+  const ACTION_VI: Record<string, string> = {
+    CREATE: "Tạo mới", UPDATE: "Cập nhật", DELETE: "Xóa", APPROVE: "Duyệt", REJECT: "Từ chối",
+    LOGIN: "Đăng nhập", LOGOUT: "Đăng xuất", RESET_PASSWORD: "Đặt lại mật khẩu",
+    IMPORT: "Nhập dữ liệu", EXPORT: "Xuất dữ liệu", RUN: "Chạy/Tính", VIEW: "Xem",
+  };
+  const ENTITY_VI: Record<string, string> = {
+    Employee: "Hồ sơ nhân sự", Auth: "Tài khoản", User: "Người dùng", AccessGrant: "Phân quyền",
+    LeaveRequest: "Đơn nghỉ phép", OTRequest: "Đăng ký tăng ca", Contract: "Hợp đồng", PayrollPeriod: "Kỳ lương",
+  };
+  const actionAgg = new Map<string, { employeeCode: string; fullName: string; department: string; action: string; target: string; count: number }>();
+
   for (const l of logs) {
     const code = l.user?.employeeCode || l.userId;
     let u = byUser.get(l.userId);
@@ -80,6 +92,19 @@ export async function GET(request: NextRequest) {
       u.actions++;
     }
     u.lastActive = l.createdAt.toISOString();
+
+    // Chi tiết thao tác (bỏ VIEW): gộp theo hành động + đối tượng.
+    //   API/Module → entityId là tên module (dễ đọc); còn lại → dùng LOẠI đối tượng (tránh hiện UUID).
+    if (l.action !== "VIEW") {
+      const isModule = l.entityType === "API" || l.entityType === "Module";
+      const target = l.action === "LOGIN" || l.action === "LOGOUT" ? ""
+        : isModule ? (l.entityId || "")
+        : (ENTITY_VI[l.entityType] || l.entityType || "");
+      const key = `${l.userId}|${l.action}|${target}`;
+      const row = actionAgg.get(key);
+      if (row) row.count++;
+      else actionAgg.set(key, { employeeCode: u.employeeCode, fullName: u.fullName, department: u.department, action: ACTION_VI[l.action] || l.action, target, count: 1 });
+    }
   }
 
   const users = Array.from(byUser.values()).sort(
@@ -101,6 +126,8 @@ export async function GET(request: NextRequest) {
       },
       users,
       modules,
+      // "Họ thao tác gì" — sắp theo tên, rồi số lần giảm dần.
+      actionDetail: Array.from(actionAgg.values()).sort((a, b) => a.fullName.localeCompare(b.fullName) || b.count - a.count),
     },
   });
 }

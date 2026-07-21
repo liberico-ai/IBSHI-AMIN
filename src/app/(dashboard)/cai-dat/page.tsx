@@ -837,12 +837,14 @@ type ReportUser = {
   lastActive: string;
 };
 type ReportModule = { module: string; views: number; users: number };
+type ReportActionDetail = { employeeCode: string; fullName: string; department: string; action: string; target: string; count: number };
 type ReportData = {
   from: string;
   to: string;
   totals: { logins: number; views: number; actions: number; activeUsers: number };
   users: ReportUser[];
   modules: ReportModule[];
+  actionDetail: ReportActionDetail[];
 };
 
 const isoToday = () => new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD theo giờ máy
@@ -853,6 +855,19 @@ function ReportTab() {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showExp, setShowExp] = useState(false);
+  const [expDept, setExpDept] = useState("ALL");
+  const [expAction, setExpAction] = useState("ALL");
+  const [allDepts, setAllDepts] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/api/v1/departments").then((r) => r.json()).then((res) => setAllDepts((res.data || []).map((d: any) => d.name).filter(Boolean))).catch(() => {});
+  }, []);
+  // Danh sách phòng ban ĐẦY ĐỦ (từ API) để lọc export; fallback theo dữ liệu nếu API chưa về.
+  const deptList = useMemo(
+    () => (allDepts.length ? allDepts : Array.from(new Set((data?.users || []).map((u) => u.department).filter((d) => d && d !== "—"))).sort()),
+    [allDepts, data]
+  );
+  const actionList = useMemo(() => Array.from(new Set((data?.actionDetail || []).map((a) => a.action))).sort(), [data]);
 
   const load = (f = from, t = to) => {
     setLoading(true);
@@ -864,54 +879,72 @@ function ReportTab() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
-  const quick = (kind: "today" | "week" | "month") => {
-    const now = new Date();
-    let f = new Date(now);
-    if (kind === "week") f.setDate(now.getDate() - 6);
-    if (kind === "month") f = new Date(now.getFullYear(), now.getMonth(), 1);
-    const fs = f.toLocaleDateString("en-CA");
-    const ts = now.toLocaleDateString("en-CA");
-    setFrom(fs); setTo(ts); load(fs, ts);
-  };
-
-  const exportExcel = async () => {
+  const exportExcel = async (opts?: { dept?: string; action?: string }) => {
     if (!data) return;
+    const expDept = opts?.dept ?? "ALL";
+    const expAction = opts?.action ?? "ALL";
     setExporting(true);
     try {
       const ExcelJS = (await import("exceljs")).default;
       const wb = new ExcelJS.Workbook();
       const range = data.from === data.to ? data.from : `${data.from}_${data.to}`;
+      const used = new Set<string>();
+      const safeName = (n: string) => {
+        const base = (n.replace(/[[\]:*?/\\]/g, " ").trim().slice(0, 31)) || "Sheet";
+        let c = base, i = 2;
+        while (used.has(c.toLowerCase())) c = base.slice(0, 27) + " (" + i++ + ")";
+        used.add(c.toLowerCase());
+        return c;
+      };
 
-      const s1 = wb.addWorksheet("Theo nhân sự");
+      // 1) Theo nhân sự (lọc theo phòng nếu chọn)
+      const users = expDept === "ALL" ? data.users : data.users.filter((u) => u.department === expDept);
+      const s1 = wb.addWorksheet(safeName("Theo nhân sự"));
       s1.columns = [
-        { header: "Mã NV", key: "code", width: 12 },
-        { header: "Họ tên", key: "name", width: 26 },
-        { header: "Phòng ban", key: "dept", width: 24 },
-        { header: "Số lần đăng nhập", key: "logins", width: 16 },
-        { header: "Lượt truy cập module", key: "views", width: 18 },
-        { header: "Số thao tác", key: "actions", width: 14 },
-        { header: "Hoạt động gần nhất", key: "last", width: 20 },
+        { header: "Mã NV", key: "code", width: 12 }, { header: "Họ tên", key: "name", width: 26 }, { header: "Phòng ban", key: "dept", width: 24 },
+        { header: "Số lần đăng nhập", key: "logins", width: 16 }, { header: "Lượt truy cập module", key: "views", width: 18 }, { header: "Số thao tác", key: "actions", width: 14 }, { header: "Hoạt động gần nhất", key: "last", width: 20 },
       ];
-      data.users.forEach((u) =>
-        s1.addRow({ code: u.employeeCode, name: u.fullName, dept: u.department, logins: u.logins, views: u.views, actions: u.actions, last: formatDateTime(u.lastActive) })
-      );
+      users.forEach((u) => s1.addRow({ code: u.employeeCode, name: u.fullName, dept: u.department, logins: u.logins, views: u.views, actions: u.actions, last: formatDateTime(u.lastActive) }));
       s1.getRow(1).font = { bold: true };
 
-      const s2 = wb.addWorksheet("Theo module");
-      s2.columns = [
-        { header: "Module", key: "module", width: 30 },
-        { header: "Lượt truy cập", key: "views", width: 16 },
-        { header: "Số NV sử dụng", key: "users", width: 16 },
-      ];
+      // 2) Theo module (tổng quan)
+      const s2 = wb.addWorksheet(safeName("Theo module"));
+      s2.columns = [{ header: "Module", key: "module", width: 30 }, { header: "Lượt truy cập", key: "views", width: 16 }, { header: "Số NV sử dụng", key: "users", width: 16 }];
       data.modules.forEach((m) => s2.addRow({ module: m.module, views: m.views, users: m.users }));
       s2.getRow(1).font = { bold: true };
+
+      // 3) HỌ THAO TÁC GÌ — lọc theo phòng + hành động; chọn "Tất cả phòng" → sheet Tổng hợp + mỗi phòng 1 sheet.
+      let detail = data.actionDetail || [];
+      if (expDept !== "ALL") detail = detail.filter((a) => a.department === expDept);
+      if (expAction !== "ALL") detail = detail.filter((a) => a.action === expAction);
+      const detailCols = [
+        { header: "Mã NV", key: "code", width: 12 }, { header: "Họ tên", key: "name", width: 24 },
+        { header: "Hành động", key: "action", width: 16 }, { header: "Đối tượng", key: "target", width: 26 }, { header: "Số lần", key: "count", width: 9 },
+      ];
+      if (expDept === "ALL") {
+        const sSum = wb.addWorksheet(safeName("Tổng hợp thao tác"));
+        sSum.columns = [{ header: "Phòng ban", key: "dept", width: 22 }, ...detailCols];
+        [...detail].sort((a, b) => a.department.localeCompare(b.department) || a.fullName.localeCompare(b.fullName)).forEach((a) => sSum.addRow({ dept: a.department, code: a.employeeCode, name: a.fullName, action: a.action, target: a.target || "—", count: a.count }));
+        sSum.getRow(1).font = { bold: true };
+        for (const d of Array.from(new Set(detail.map((a) => a.department))).sort()) {
+          const sd = wb.addWorksheet(safeName(d));
+          sd.columns = detailCols;
+          detail.filter((a) => a.department === d).forEach((a) => sd.addRow({ code: a.employeeCode, name: a.fullName, action: a.action, target: a.target || "—", count: a.count }));
+          sd.getRow(1).font = { bold: true };
+        }
+      } else {
+        const sd = wb.addWorksheet(safeName("Chi tiết thao tác"));
+        sd.columns = detailCols;
+        detail.forEach((a) => sd.addRow({ code: a.employeeCode, name: a.fullName, action: a.action, target: a.target || "—", count: a.count }));
+        sd.getRow(1).font = { bold: true };
+      }
 
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `bao-cao-hoat-dong-${range}.xlsx`;
+      a.download = `bao-cao-hoat-dong-${range}${expDept !== "ALL" ? "_" + expDept : ""}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
@@ -956,14 +989,39 @@ function ReportTab() {
         <button onClick={() => load()} className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
           <RefreshCw size={14} /> Xem
         </button>
-        <div className="flex gap-1">
-          <button onClick={() => quick("today")} className="px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hôm nay</button>
-          <button onClick={() => quick("week")} className="px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text-dim)" }}>7 ngày</button>
-          <button onClick={() => quick("month")} className="px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Tháng này</button>
+        <div className="relative ml-auto">
+          <button onClick={() => setShowExp((v) => !v)} disabled={exporting || !data} className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium" style={{ background: "#10b981", color: "#fff", opacity: exporting || !data ? 0.6 : 1 }}>
+            <Download size={14} /> {exporting ? "Đang xuất…" : "Export Excel"}
+          </button>
+          {showExp && (
+            <>
+              <div onClick={() => setShowExp(false)} className="fixed inset-0 z-40" />
+              <div className="absolute right-0 z-50 mt-2 w-[300px] rounded-xl border p-4" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", boxShadow: "0 10px 30px rgba(0,0,0,.18)" }}>
+                <div className="text-[13px] font-bold mb-3" style={{ color: "var(--ibs-text)" }}>Xuất Excel theo bộ lọc</div>
+                <div className="mb-3">
+                  <label className="block text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>Phòng ban</label>
+                  <select value={expDept} onChange={(e) => setExpDept(e.target.value)} className="w-full px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }}>
+                    <option value="ALL">Tất cả phòng ban</option>
+                    {deptList.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div className="mb-3">
+                  <label className="block text-[11px] font-semibold mb-1" style={{ color: "var(--ibs-text-dim)" }}>Hành động</label>
+                  <select value={expAction} onChange={(e) => setExpAction(e.target.value)} className="w-full px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" }}>
+                    <option value="ALL">Tất cả hành động</option>
+                    {actionList.map((a) => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+                <p className="text-[11px] leading-snug mb-3" style={{ color: "var(--ibs-text-dim)" }}>
+                  Chọn &quot;Tất cả phòng ban&quot; → file tách <b>mỗi phòng 1 sheet</b> + sheet <b>Tổng hợp</b>. Khoảng thời gian lấy theo Từ/Đến ngày ở trên.
+                </p>
+                <button onClick={() => { setShowExp(false); exportExcel({ dept: expDept, action: expAction }); }} disabled={exporting} className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: exporting ? 0.6 : 1 }}>
+                  <Download size={14} /> {exporting ? "Đang xuất…" : "Tải file .xlsx"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
-        <button onClick={exportExcel} disabled={exporting || !data} className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium ml-auto" style={{ background: "#10b981", color: "#fff", opacity: exporting || !data ? 0.6 : 1 }}>
-          <Download size={14} /> {exporting ? "Đang xuất…" : "Export Excel"}
-        </button>
       </div>
 
       {/* Thẻ tổng hợp */}
