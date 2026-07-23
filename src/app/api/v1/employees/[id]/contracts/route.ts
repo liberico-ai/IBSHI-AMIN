@@ -55,14 +55,7 @@ export async function POST(
   const { contractNumber, contractType, position, startDate, endDate, baseSalary, insuranceSalary, allowance, allowances, documentHtml, skillLevel, fileUrl } = parsed.data;
   const isPublish = parsed.data.status === "WAITING_SIGN"; // PHÁT HÀNH (đợi ký) — chưa hiệu lực
 
-  // Check duplicate contract number
-  const existing = await prisma.contract.findFirst({ where: { contractNumber } });
-  if (existing) {
-    return NextResponse.json(
-      { error: { code: "DUPLICATE", message: "Số hợp đồng đã tồn tại" } },
-      { status: 409 }
-    );
-  }
+  // Cho phép TRÙNG số hợp đồng (bỏ chặn duplicate theo yêu cầu nghiệp vụ).
 
   try {
     const newStart = new Date(startDate);
