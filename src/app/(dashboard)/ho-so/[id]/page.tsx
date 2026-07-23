@@ -1434,7 +1434,6 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
   const [viewDocsDep, setViewDocsDep] = useState<any>(null);
   const [showChildForm, setShowChildForm] = useState<null | { mode: "create" } | { mode: "edit"; child: any }>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
-  const [canViewPayroll, setCanViewPayroll] = useState(false);
   const [showPhoto, setShowPhoto] = useState(false);
   const [editContract, setEditContract] = useState<any>(null);
   const can = useCan();
@@ -1450,7 +1449,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
   useEffect(() => {
     fetch("/api/v1/me")
       .then((r) => r.json())
-      .then((res) => { if (res.role) setUserRole(res.role); setCanViewPayroll(!!res.canViewPayroll); })
+      .then((res) => { if (res.role) setUserRole(res.role); })
       .catch(() => {});
   }, []);
 
@@ -1488,7 +1487,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
 
   const tabs: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: "info", label: "Thông tin cá nhân", icon: User },
-    ...(canViewPayroll ? [{ key: "contracts" as Tab, label: "Hợp đồng", icon: FileText, count: employee.contracts.filter((c) => c.status !== "TERMINATED").length }] : []),
+    ...(can("m1.hopdong:view") ? [{ key: "contracts" as Tab, label: "Hợp đồng", icon: FileText, count: employee.contracts.filter((c) => c.status !== "TERMINATED").length }] : []),
     { key: "certificates", label: "Chứng chỉ", icon: Award, count: employee.certificates.length },
     { key: "history", label: "Lịch sử công tác", icon: History, count: employee.workHistory.length },
   ];
