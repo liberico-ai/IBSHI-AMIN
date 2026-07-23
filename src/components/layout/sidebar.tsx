@@ -134,12 +134,13 @@ const ROLE_LABELS_EN: Record<string, string> = {
 interface SidebarProps {
   userName?: string;
   userRole?: string;
+  userTitle?: string | null;
   canViewPayroll?: boolean;
   open?: boolean;
   onClose?: () => void;
 }
 
-export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll = false, open = true, onClose }: SidebarProps) {
+export function Sidebar({ userName = "Admin", userRole = "BOM", userTitle = null, canViewPayroll = false, open = true, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { lang } = useLang();
   const L = (vi: string, en?: string) => (lang === "en" && en ? en : vi);
@@ -297,7 +298,8 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", canViewPayroll =
               {userName}
             </div>
             <div className="text-[11px]" style={{ color: "rgba(255,255,255,0.5)" }}>
-              {(lang === "en" ? ROLE_LABELS_EN[userRole] : ROLE_LABELS[userRole]) || userRole}
+              {/* Ưu tiên hiển thị CHỨC VỤ (từ hồ sơ); chưa có thì mới rơi về nhãn vai trò. */}
+              {userTitle || (lang === "en" ? ROLE_LABELS_EN[userRole] : ROLE_LABELS[userRole]) || userRole}
             </div>
           </div>
           <button

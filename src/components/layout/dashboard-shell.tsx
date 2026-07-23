@@ -7,11 +7,12 @@ import { Header } from "./header";
 interface DashboardShellProps {
   userName: string;
   userRole: string;
+  userTitle?: string | null;
   canViewPayroll?: boolean;
   children: React.ReactNode;
 }
 
-export function DashboardShell({ userName, userRole, canViewPayroll, children }: DashboardShellProps) {
+export function DashboardShell({ userName, userRole, userTitle, canViewPayroll, children }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
@@ -19,6 +20,7 @@ export function DashboardShell({ userName, userRole, canViewPayroll, children }:
       <Sidebar
         userName={userName}
         userRole={userRole}
+        userTitle={userTitle}
         canViewPayroll={canViewPayroll}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
