@@ -610,6 +610,7 @@ export default function XePage() {
                     <span>{VEHICLE_TYPE_LABELS[v.type] || v.type}</span>
                     <span>{v.seats} chỗ</span>
                   </div>
+                  <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>ODO hiện tại: <span className="font-semibold" style={{ color: "var(--ibs-accent)" }}>{v.currentMileage.toLocaleString("vi-VN")} km</span></div>
                   {v.owner && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Chủ sở hữu: <span style={{ color: "var(--ibs-text)" }}>{v.owner}</span></div>}
                   {v.driverName && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Lái xe: <span style={{ color: "var(--ibs-text)" }}>{v.driverName}</span></div>}
                   {v.nextMaintenanceDate && <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Bảo dưỡng: <span style={{ color: "var(--ibs-warning)" }}>{formatDate(v.nextMaintenanceDate)}</span></div>}
@@ -1210,10 +1211,13 @@ function AssignDriverModal({ booking, vehicles, onClose, onApprove }: {
 function DriverConfirmModal({ trip, onClose, onSuccess }: {
   trip: MyTrip; onClose: () => void; onSuccess: () => void;
 }) {
-  const [odoStart, setOdoStart] = useState("");
+  // Mặc định lấy ODO hiện tại của xe làm ODO lúc đi (chuyến trước xong đã cập nhật).
+  const [odoStart, setOdoStart] = useState(trip.vehicle.currentMileage > 0 ? String(trip.vehicle.currentMileage) : "");
   const [odoEnd, setOdoEnd] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fmtOdo = (s: string) => (s === "" ? "" : Number(s).toLocaleString("vi-VN")); // hiển thị 123.130 cho dễ đọc
+  const onlyDigits = (v: string) => v.replace(/\D/g, "");
 
   async function submit() {
     setError(null);
@@ -1251,10 +1255,10 @@ function DriverConfirmModal({ trip, onClose, onSuccess }: {
           <div>{formatDate(trip.startDate)} · {trip.vehicle.model}</div>
           <div>Số km hiện tại của xe: <b style={{ color: "var(--ibs-text)" }}>{trip.vehicle.currentMileage.toLocaleString("vi-VN")} km</b></div>
         </div>
-        <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Số odo lúc đi (km) *</label>
-        <input type="number" inputMode="numeric" value={odoStart} onChange={(e) => setOdoStart(e.target.value)} placeholder="VD: 125000" className={inputCls} style={inputStyle} />
+        <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Số odo lúc đi (km) * <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>— mặc định = ODO hiện tại của xe</span></label>
+        <input type="text" inputMode="numeric" value={fmtOdo(odoStart)} onChange={(e) => setOdoStart(onlyDigits(e.target.value))} placeholder="VD: 125.000" className={inputCls} style={inputStyle} />
         <label className="text-[12px] font-medium mb-1 mt-3 block" style={{ color: "var(--ibs-text-dim)" }}>Số odo lúc về (km) *</label>
-        <input type="number" inputMode="numeric" value={odoEnd} onChange={(e) => setOdoEnd(e.target.value)} placeholder="VD: 125042" className={inputCls} style={inputStyle} />
+        <input type="text" inputMode="numeric" value={fmtOdo(odoEnd)} onChange={(e) => setOdoEnd(onlyDigits(e.target.value))} placeholder="VD: 125.042" className={inputCls} style={inputStyle} />
         {diff != null && diff > 0 && (
           <div className="text-[12px] mt-2" style={{ color: "var(--ibs-text-dim)" }}>Quãng đường: <b style={{ color: "var(--ibs-accent)" }}>{diff.toLocaleString("vi-VN")} km</b></div>
         )}
