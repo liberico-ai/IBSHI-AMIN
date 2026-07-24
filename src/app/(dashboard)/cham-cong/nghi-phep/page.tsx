@@ -84,7 +84,13 @@ function NewLeaveDialog({ onClose, onSuccess, editing }: { onClose: () => void; 
     endDate: editing ? String(editing.endDate).slice(0, 10) : "",
     reason: editing?.reason || "",
     proofUrls: (editing?.proofUrls || []) as string[],
+    halfDay: !!editing && editing.totalDays === 0.5,   // nghỉ nửa ngày (0,5 công)
   });
+  // Bật/tắt nửa ngày: ép ngày kết thúc = ngày bắt đầu (nửa ngày chỉ 1 ngày).
+  function setHalfDay(on: boolean) {
+    setForm((f) => ({ ...f, halfDay: on, endDate: on ? f.startDate : f.endDate }));
+    setError(null);
+  }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -149,20 +155,34 @@ function NewLeaveDialog({ onClose, onSuccess, editing }: { onClose: () => void; 
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <label className="flex items-center gap-2 text-[13px] font-medium cursor-pointer" style={{ color: "var(--ibs-text)" }}>
+            <input type="checkbox" checked={form.halfDay} onChange={(e) => setHalfDay(e.target.checked)} style={{ accentColor: "var(--ibs-accent)" }} />
+            Nghỉ nửa ngày (0,5 công)
+          </label>
+
+          {form.halfDay ? (
             <div>
-              <label className={labelCls} style={labelStyle}>Ngày bắt đầu *</label>
+              <label className={labelCls} style={labelStyle}>Ngày nghỉ *</label>
               <DateInput required value={form.startDate}
-                onChange={(e) => handleChange("startDate", e.target.value)}
+                onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value, endDate: e.target.value }))}
                 className={inputCls} style={inputStyle} />
             </div>
-            <div>
-              <label className={labelCls} style={labelStyle}>Ngày kết thúc *</label>
-              <DateInput required value={form.endDate} min={form.startDate}
-                onChange={(e) => handleChange("endDate", e.target.value)}
-                className={inputCls} style={inputStyle} />
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls} style={labelStyle}>Ngày bắt đầu *</label>
+                <DateInput required value={form.startDate}
+                  onChange={(e) => handleChange("startDate", e.target.value)}
+                  className={inputCls} style={inputStyle} />
+              </div>
+              <div>
+                <label className={labelCls} style={labelStyle}>Ngày kết thúc *</label>
+                <DateInput required value={form.endDate} min={form.startDate}
+                  onChange={(e) => handleChange("endDate", e.target.value)}
+                  className={inputCls} style={inputStyle} />
+              </div>
             </div>
-          </div>
+          )}
 
           <div>
             <label className={labelCls} style={labelStyle}>Lý do *</label>

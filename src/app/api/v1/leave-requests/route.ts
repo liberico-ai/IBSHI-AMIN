@@ -10,6 +10,7 @@ const CreateLeaveSchema = z.object({
   endDate: z.string().transform((s) => new Date(s)),
   reason: z.string().min(5, "Lý do phải ít nhất 5 ký tự"),
   proofUrls: z.array(z.string()).optional(),
+  halfDay: z.boolean().optional(),   // Nghỉ NỬA NGÀY (0,5 công) — chỉ áp dụng cho 1 ngày.
 });
 
 export async function GET(request: NextRequest) {
@@ -64,7 +65,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { leaveType, startDate, endDate, reason, proofUrls } = parsed.data;
+  const { leaveType, startDate, endDate, reason, proofUrls, halfDay } = parsed.data;
+
+  if (halfDay && startDate.getTime() !== endDate.getTime()) {
+    return NextResponse.json(
+      { error: { code: "VALIDATION_ERROR", message: "Nghỉ nửa ngày chỉ áp dụng cho 1 ngày (ngày bắt đầu = ngày kết thúc)" } },
+      { status: 422 }
+    );
+  }
 
   if (endDate < startDate) {
     return NextResponse.json(
@@ -100,10 +108,14 @@ export async function POST(request: NextRequest) {
   // Tính số ngày nghỉ: tính cả 2 đầu mút (30/5→30/5 = 1 ngày, 30/5→31/5 = 2 ngày),
   // chỉ KHÔNG tính Chủ Nhật (IBS làm việc cả Thứ 7).
   let totalDays = 0;
-  const cur = new Date(startDate);
-  while (cur <= endDate) {
-    if (cur.getDay() !== 0) totalDays += 1; // 0 = Chủ Nhật
-    cur.setDate(cur.getDate() + 1);
+  if (halfDay) {
+    totalDays = 0.5; // nghỉ nửa ngày = 0,5 công (1 ngày duy nhất)
+  } else {
+    const cur = new Date(startDate);
+    while (cur <= endDate) {
+      if (cur.getDay() !== 0) totalDays += 1; // 0 = Chủ Nhật
+      cur.setDate(cur.getDate() + 1);
+    }
   }
 
   // Check overlapping approved leave requests

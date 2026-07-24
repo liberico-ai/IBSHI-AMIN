@@ -64,14 +64,19 @@ export async function PUT(
     if (!isOwner && !canUser(session.user as any, "m3.nghiphep:edit")) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ đơn hoặc người có quyền sửa mới sửa được" } }, { status: 403 });
     }
-    const { leaveType, startDate, endDate, reason } = body as any;
+    const { leaveType, startDate, endDate, reason, halfDay } = body as any;
     const sd = new Date(startDate), ed = new Date(endDate);
     if (isNaN(sd.getTime()) || isNaN(ed.getTime())) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Ngày không hợp lệ" } }, { status: 400 });
     if (ed < sd) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Ngày kết thúc phải sau ngày bắt đầu" } }, { status: 400 });
+    if (halfDay && sd.getTime() !== ed.getTime()) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Nghỉ nửa ngày chỉ áp dụng cho 1 ngày" } }, { status: 400 });
     if (!reason || String(reason).trim().length < 5) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Lý do phải ít nhất 5 ký tự" } }, { status: 400 });
     let totalDays = 0;
-    const cur = new Date(sd);
-    while (cur <= ed) { if (cur.getDay() !== 0) totalDays += 1; cur.setDate(cur.getDate() + 1); }
+    if (halfDay) {
+      totalDays = 0.5;
+    } else {
+      const cur = new Date(sd);
+      while (cur <= ed) { if (cur.getDay() !== 0) totalDays += 1; cur.setDate(cur.getDate() + 1); }
+    }
     const updated = await prisma.leaveRequest.update({
       where: { id },
       data: { ...(leaveType ? { leaveType } : {}), startDate: sd, endDate: ed, reason: String(reason).trim(), totalDays },
