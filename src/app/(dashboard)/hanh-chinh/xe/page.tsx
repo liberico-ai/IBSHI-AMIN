@@ -263,10 +263,10 @@ export default function XePage() {
   // Duyệt phiếu đặt xe: giữ luồng người-duyệt chỉ định (ROOM_VEHICLE_APPROVERS), không theo ma trận phẳng.
   const canApproveBooking = canApproveRoomVehicle(employeeCode, userRole);
 
-  async function handleBookingAction(id: string, action: "APPROVE" | "REJECT", driverName?: string): Promise<boolean> {
+  async function handleBookingAction(id: string, action: "APPROVE" | "REJECT", driverName?: string, vehicleId?: string): Promise<boolean> {
     const res = await fetch(`/api/v1/vehicles/bookings/${id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ...(driverName ? { driverName } : {}) }),
+      body: JSON.stringify({ action, ...(driverName ? { driverName } : {}), ...(vehicleId ? { vehicleId } : {}) }),
     });
     if (!res.ok) {
       const j = await res.json().catch(() => null);
@@ -857,9 +857,9 @@ export default function XePage() {
           onSuccess={() => { setShowNewBooking(false); setEditBooking(null); fetchBookings(); }} />
       )}
       {assignTarget && (
-        <AssignDriverModal booking={assignTarget}
+        <AssignDriverModal booking={assignTarget} vehicles={vehicles}
           onClose={() => setAssignTarget(null)}
-          onApprove={async (driver) => { const ok = await handleBookingAction(assignTarget.id, "APPROVE", driver); if (ok) setAssignTarget(null); }} />
+          onApprove={async (driver, vehicleId) => { const ok = await handleBookingAction(assignTarget.id, "APPROVE", driver, vehicleId); if (ok) setAssignTarget(null); }} />
       )}
       {showExport && <ExportVehicleBookingsModal onClose={() => setShowExport(false)} />}
       {showNewVehicle && (
@@ -1158,16 +1158,17 @@ function CompleteBookingModal({ booking, onClose, onSuccess }: {
   );
 }
 
-function AssignDriverModal({ booking, onClose, onApprove }: {
-  booking: VehicleBooking; onClose: () => void; onApprove: (driver: string) => void | Promise<void>;
+function AssignDriverModal({ booking, vehicles, onClose, onApprove }: {
+  booking: VehicleBooking; vehicles: Vehicle[]; onClose: () => void; onApprove: (driver: string, vehicleId: string) => void | Promise<void>;
 }) {
   const [driver, setDriver] = useState(booking.driverName || "");
+  const [vehicleId, setVehicleId] = useState(booking.vehicleId);   // mặc định = xe user xin
   const [saving, setSaving] = useState(false);
 
   async function submit() {
-    if (!driver) return;
+    if (!driver || !vehicleId) return;
     setSaving(true);
-    try { await onApprove(driver); } finally { setSaving(false); }
+    try { await onApprove(driver, vehicleId); } finally { setSaving(false); }
   }
 
   return (
@@ -1178,18 +1179,25 @@ function AssignDriverModal({ booking, onClose, onApprove }: {
           <button onClick={onClose}><X size={18} /></button>
         </div>
         <div className="text-[12px] mb-4 rounded-lg px-3 py-2" style={{ background: "var(--ibs-bg)", color: "var(--ibs-text-dim)" }}>
-          <div><b style={{ color: "var(--ibs-text)" }}>{booking.vehicle.licensePlate}</b> · {booking.destination}</div>
+          <div>Xe user xin: <b style={{ color: "var(--ibs-text)" }}>{booking.vehicle.licensePlate}</b> · {booking.destination}</div>
           <div>{formatDateTime(booking.startDate)} → {formatDateTime(booking.endDate)}</div>
           <div>Người đặt: {booking.requester.fullName} ({booking.requester.department.name})</div>
         </div>
-        <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Lái xe *</label>
+        <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Xe (chỉ định) *</label>
+        <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+          {vehicles.map((v) => <option key={v.id} value={v.id}>{v.licensePlate} — {v.model}</option>)}
+        </select>
+        {vehicleId !== booking.vehicleId && (
+          <div className="text-[11px] mt-1" style={{ color: "var(--ibs-warning)" }}>⚠️ Đang đổi xe khác với xe user yêu cầu.</div>
+        )}
+        <label className="text-[12px] font-medium mb-1 mt-3 block" style={{ color: "var(--ibs-text-dim)" }}>Lái xe *</label>
         <select value={driver} onChange={(e) => setDriver(e.target.value)} className="w-full rounded-lg px-3 py-2 text-[13px] border" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
           <option value="">Chọn lái xe...</option>
           {VEHICLE_DRIVERS.map((d) => <option key={d} value={d}>{d}</option>)}
         </select>
         <div className="flex gap-2 justify-end mt-5">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
-          <button type="button" onClick={submit} disabled={!driver || saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold flex items-center gap-1" style={{ background: "var(--ibs-success)", color: "#fff", opacity: (!driver || saving) ? 0.5 : 1, cursor: (!driver || saving) ? "not-allowed" : "pointer" }}>
+          <button type="button" onClick={submit} disabled={!driver || !vehicleId || saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold flex items-center gap-1" style={{ background: "var(--ibs-success)", color: "#fff", opacity: (!driver || !vehicleId || saving) ? 0.5 : 1, cursor: (!driver || !vehicleId || saving) ? "not-allowed" : "pointer" }}>
             <Check size={14} /> {saving ? "Đang duyệt..." : "Duyệt"}
           </button>
         </div>

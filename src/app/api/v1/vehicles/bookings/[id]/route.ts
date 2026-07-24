@@ -99,6 +99,8 @@ export async function PUT(
   }
   if (rejectedReason && action === "REJECT") updateData.rejectedReason = rejectedReason;
   if (action === "APPROVE" && driverName) updateData.driverName = driverName.trim();
+  // Người duyệt CHỈ ĐỊNH XE (đổi xe khác nếu xe user xin không hợp lý) — lưu vào chính vehicleId.
+  if (action === "APPROVE" && parsed.data.vehicleId) updateData.vehicleId = parsed.data.vehicleId;
   if (actualKm !== undefined) updateData.actualKm = actualKm;
   if (returnTime !== undefined) updateData.returnTime = returnTime;
 
