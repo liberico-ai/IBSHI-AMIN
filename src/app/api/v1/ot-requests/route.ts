@@ -13,6 +13,7 @@ const CreateOTSchema = z.object({
   otRate: z.number().optional(),
   teamId: z.string().optional().nullable(),
   teamName: z.string().optional().nullable(),
+  projectCode: z.string().optional().nullable(),   // Dự án của đợt tăng ca
   memberIds: z.array(z.string()).optional(),
   memberNames: z.array(z.string()).optional(),
 });
@@ -80,7 +81,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { date, startTime, endTime, reason, otRate, teamId, teamName, memberIds, memberNames } = parsed.data;
+  const { date, startTime, endTime, reason, otRate, teamId, teamName, projectCode, memberIds, memberNames } = parsed.data;
 
   if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
     return NextResponse.json(
@@ -137,6 +138,7 @@ export async function POST(request: NextRequest) {
       otRate: rate,
       teamId: teamId || null,
       teamName: teamName || null,
+      projectCode: projectCode || null,
       memberIds: memberIds ?? [],
       memberNames: memberNames ?? [],
       status: "PENDING",

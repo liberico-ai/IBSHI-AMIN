@@ -579,6 +579,7 @@ model OTRequest {
   otRate     Float // 1.5, 2.0, 3.0
   teamId      String?  // Tổ được đề xuất tăng ca
   teamName    String?  // Tên tổ (snapshot)
+  projectCode String?  // Dự án của đợt tăng ca (tạm fix cứng; sau nối QLSX + tính lương SP)
   memberIds   String[] @default([]) // NV trong đơn OT nhóm
   memberNames String[] @default([]) // Tên NV (snapshot) để hiển thị
   status     ApprovalStatus @default(DRAFT)

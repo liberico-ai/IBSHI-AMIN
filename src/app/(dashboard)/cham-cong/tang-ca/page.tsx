@@ -9,6 +9,7 @@ import { Plus, X, Clock, Calendar, Lock, Pencil, Trash2 } from "lucide-react";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
 import { canSeeOTTab } from "@/lib/ot-access";
 import { useCan } from "@/hooks/use-permission";
+import { OT_PROJECTS } from "@/lib/projects";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 
 type OTRequest = {
@@ -22,6 +23,7 @@ type OTRequest = {
   status: string;
   createdAt: string;
   teamName?: string | null;
+  projectCode?: string | null;
   memberIds?: string[];
   memberNames?: string[];
   employee: {
@@ -47,7 +49,7 @@ const OT_RATE_LABELS: Record<string, string> = {
 
 // ── New OT Dialog ──────────────────────────────────────────────────────────────
 function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (item: OTRequest) => void }) {
-  const [form, setForm] = useState({ date: "", startTime: "17:30", endTime: "20:00", reason: "" });
+  const [form, setForm] = useState({ date: "", startTime: "17:30", endTime: "20:00", reason: "", projectCode: "" });
   const [emps, setEmps] = useState<{ id: string; fullName: string; team?: { id: string; name: string } | null; department?: { id: string; name: string } | null }[]>([]);
   const [empsLoaded, setEmpsLoaded] = useState(false);
   const [groupKey, setGroupKey] = useState(""); // "dept:<id>" hoặc "team:<id>"
@@ -197,6 +199,14 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               </div>
             </div>
           )}
+
+          <div>
+            <label className={labelCls} style={labelStyle}>Dự án <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>(cho danh sách này)</span></label>
+            <select value={form.projectCode} onChange={(e) => handleChange("projectCode", e.target.value)} className={inputCls} style={inputStyle}>
+              <option value="">-- Chọn dự án --</option>
+              {OT_PROJECTS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
 
           <div>
             <label className={labelCls} style={labelStyle}>Ngày tăng ca *</label>
@@ -424,6 +434,7 @@ export default function TangCaPage() {
                           </div>
                         </>
                       )}
+                      {r.projectCode && <div className="text-[10px] mt-1 inline-block px-1.5 py-0.5 rounded font-medium" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>📁 {r.projectCode}</div>}
                     </td>
                     <td className="px-4 py-3 text-[13px]">
                       <span className="flex items-center gap-1" style={{ color: "var(--ibs-text-muted)" }}>
