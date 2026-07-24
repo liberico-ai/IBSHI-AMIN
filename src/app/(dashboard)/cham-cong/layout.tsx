@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { ModuleTabs, type ModuleTab } from "@/components/shared/module-tabs";
 import { canSeeOTTab } from "@/lib/ot-access";
+import { canUser } from "@/lib/permission-catalog";
 
 export default async function ChamCongLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -13,7 +14,9 @@ export default async function ChamCongLayout({ children }: { children: React.Rea
     const emp = await prisma.employee.findFirst({ where: { userId }, select: { jobRole: true } });
     jobRole = emp?.jobRole ?? null;
   }
-  const showOT = canSeeOTTab({ jobRole, role });
+  // Hiện tab Tăng ca khi: có quyền ma trận m3.tangca:view (cấp qua checkbox) HOẶC theo luồng cũ
+  // (chức vụ Tổ trưởng/Trưởng phòng, role Quản lý/HCNS/BGĐ) — cấp đích danh vẫn có tác dụng.
+  const showOT = canUser(session?.user as any, "m3.tangca:view") || canSeeOTTab({ jobRole, role });
 
   const TABS: ModuleTab[] = [
     { href: "/cham-cong", label: "Tổng hợp hôm nay" },

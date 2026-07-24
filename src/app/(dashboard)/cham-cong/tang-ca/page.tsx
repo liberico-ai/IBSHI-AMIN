@@ -8,6 +8,7 @@ import { formatDate, apiError } from "@/lib/utils";
 import { Plus, X, Clock, Calendar, Lock, Pencil, Trash2 } from "lucide-react";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
 import { canSeeOTTab } from "@/lib/ot-access";
+import { useCan } from "@/hooks/use-permission";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 
 type OTRequest = {
@@ -268,6 +269,7 @@ export default function TangCaPage() {
   const [myDeptId, setMyDeptId] = useState<string | null>(null);
   const [meLoaded, setMeLoaded] = useState(false);
   const [editTarget, setEditTarget] = useState<OTRequest | null>(null);
+  const can = useCan();
 
   useEffect(() => {
     fetch("/api/v1/me").then((r) => r.json()).then((res) => {
@@ -277,7 +279,8 @@ export default function TangCaPage() {
     }).catch(() => {}).finally(() => setMeLoaded(true));
   }, []);
 
-  const canSee = canSeeOTTab({ jobRole, role: userRole });
+  // Cấp quyền qua ma trận (m3.tangca:view) vẫn xem được, dù role/chức vụ không thuộc luồng cũ.
+  const canSee = can("m3.tangca:view") || canSeeOTTab({ jobRole, role: userRole });
 
   useEffect(() => {
     const params = new URLSearchParams();
