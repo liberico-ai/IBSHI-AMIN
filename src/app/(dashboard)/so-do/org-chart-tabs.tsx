@@ -388,7 +388,8 @@ type EmpRow = {
   jobRole?: string | null;
   position: { name: string } | string | null;
   email: string | null;
-  phone?: string | null;
+  phone?: string | null;          // giữ nguyên dữ liệu liên lạc (không xóa), chỉ đổi HIỂN THỊ
+  startDate?: string | null;      // Ngày vào làm — hiển thị thay cho SĐT
   status: string;
 };
 
@@ -463,7 +464,7 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
             <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  {["Mã NV", "Họ và tên", "Chức vụ", "SĐT", "Trạng thái"].map((h) => (
+                  {["Mã NV", "Họ và tên", "Chức vụ", "Ngày vào làm", "Trạng thái"].map((h) => (
                     <th key={h}
                       className="text-left px-4 py-2.5 text-[11px] uppercase tracking-[0.8px] font-semibold border-b"
                       style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>
@@ -481,7 +482,7 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
                     <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>
                       {emp.jobRole || (emp.position == null ? "—" : (emp.position as any).name ?? (emp.position as string))}
                     </td>
-                    <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>{emp.phone ?? "—"}</td>
+                    <td className="px-4 py-3 text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>{emp.startDate ? new Date(emp.startDate).toLocaleDateString("vi-VN") : "—"}</td>
                     <td className="px-4 py-3">
                       <span
                         className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold"
