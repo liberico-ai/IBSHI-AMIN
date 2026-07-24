@@ -456,6 +456,13 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
     await fetch(`/api/v1/room-bookings/${id}/cancel`, { method: "POST" });
     load();
   }
+  // Xác nhận cuộc họp đã xong sớm → rút giờ kết thúc về hiện tại, trả phòng về trống.
+  async function completeOne(id: string) {
+    if (!(await confirmDialog("Xác nhận cuộc họp đã XONG? Phòng sẽ được trả về trống cho khoảng thời gian còn lại."))) return;
+    const res = await fetch(`/api/v1/room-bookings/${id}/complete`, { method: "POST" });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); void alertDialog(apiError(res.status, d?.error)); return; }
+    load();
+  }
   async function cancelEntireSeries(seriesId: string) {
     if (!(await confirmDialog({ message: "Huỷ TẤT CẢ phiếu trong series này?\n\nMọi phiếu Chờ duyệt / Đã duyệt sẽ chuyển sang Đã huỷ.", tone: "danger", confirmText: "Huỷ cả series" }))) return;
     await fetch(`/api/v1/room-bookings/series/${seriesId}/cancel`, { method: "POST" });
@@ -552,6 +559,8 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
           const start = new Date(b.startTime), end = new Date(b.endTime);
           const st = BOOKING_STATUS[b.status] || { label: b.status, color: "#6b7280", bg: "rgba(0,0,0,0.05)" };
           const isPending = b.status === "PENDING_APPROVAL";
+          // Đang diễn ra (đã duyệt + hiện tại nằm trong khung giờ) → cho phép "Xác nhận Xong" sớm.
+          const isOngoing = b.status === "APPROVED" && start.getTime() <= Date.now() && Date.now() < end.getTime();
           const info = b.seriesId ? seriesInfo[b.seriesId] : null;
           // Format thời gian: series → "07:00–08:00 · T2, T4 hàng tuần"; lẻ → "06/06/2026 07:00–08:00"
           const timeStr = info
@@ -593,6 +602,11 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
                         <XCircle size={12} /> Từ chối
                       </button>
                     </>
+                  )}
+                  {isOwner && isOngoing && (
+                    <button onClick={() => completeOne(b.id)} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "#10b981" }} title="Xác nhận đã xong — trả phòng về trống cho thời gian còn lại">
+                      <Check size={12} /> Xác nhận Xong
+                    </button>
                   )}
                   {isOwner && (b.status === "PENDING_APPROVAL" || b.status === "APPROVED") && (
                     b.seriesId ? (
