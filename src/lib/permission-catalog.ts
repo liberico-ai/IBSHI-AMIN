@@ -10,7 +10,7 @@
 export type Action =
   | "view" | "create" | "edit" | "delete"
   | "approve" | "approve1" | "approve2"
-  | "import" | "run";
+  | "import" | "run" | "proxy";
 
 export const ACTION_LABELS: Record<Action, string> = {
   view: "Xem",
@@ -22,6 +22,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   approve2: "Duyệt C2",
   import: "Import",
   run: "Chạy",
+  proxy: "ĐK hộ",
 };
 
 export type Feature = {
@@ -65,7 +66,7 @@ export const PERMISSION_CATALOG: ModuleGroup[] = [
     module: "M3 · Chấm công",
     features: [
       { key: "m3.bangcong", label: "Bảng chấm công", actions: ["view", "edit", "import"] },
-      { key: "m3.nghiphep", label: "Nghỉ phép", actions: ["view", "create", "edit", "delete", "approve1", "approve2"] },
+      { key: "m3.nghiphep", label: "Nghỉ phép", actions: ["view", "create", "edit", "delete", "approve1", "approve2", "proxy"] },
       { key: "m3.tangca", label: "Tăng ca (OT)", actions: ["view", "create", "edit", "delete", "approve"] },
     ],
   },
@@ -185,7 +186,8 @@ export const PERMISSION_TEMPLATES: Record<string, PermTemplate> = {
   // phải cấp đích danh qua ma trận, không mặc định cho cả BGĐ.
   BOM: { label: "Ban Giám đốc — chỉ XEM", perms: new Set(permsWhere((f, a) => a === "view" && !f.key.startsWith("sys."))) },
   // HCNS: toàn quyền nghiệp vụ (trừ module Hệ thống).
-  HR_ADMIN: { label: "HC Nhân sự — toàn quyền nghiệp vụ", perms: new Set(permsWhere((f) => !f.key.startsWith("sys."))) },
+  // "ĐK hộ" (proxy) KHÔNG cấp mặc định cho ai (kể cả HR) — admin tick đích danh; ADMIN superset đương nhiên có.
+  HR_ADMIN: { label: "HC Nhân sự — toàn quyền nghiệp vụ", perms: new Set(permsWhere((f, a) => !f.key.startsWith("sys.") && a !== "proxy")) },
   MANAGER: {
     label: "Trưởng bộ phận — dept của mình",
     perms: new Set([

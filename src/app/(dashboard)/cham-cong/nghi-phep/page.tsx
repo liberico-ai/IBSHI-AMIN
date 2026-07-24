@@ -26,6 +26,8 @@ type LeaveRequest = {
   proofUrls?: string[];
   proofDeadline?: string | null;
   proofSubmittedAt?: string | null;
+  registeredById?: string | null;
+  registeredByName?: string | null;
   createdAt: string;
   employee: {
     id: string;
@@ -34,6 +36,8 @@ type LeaveRequest = {
     department: { name: string };
   };
 };
+
+type RegEmployee = { id: string; code: string; fullName: string; department?: { name: string } | null };
 
 const LEAVE_TYPE_LABELS: Record<string, string> = {
   ANNUAL: "Phép năm",
@@ -77,7 +81,7 @@ const STATUS_OPTIONS = [
 ];
 
 // ── New Leave Request Dialog ──────────────────────────────────────────────────
-function NewLeaveDialog({ onClose, onSuccess, editing }: { onClose: () => void; onSuccess: (item: LeaveRequest) => void; editing?: LeaveRequest | null }) {
+function NewLeaveDialog({ onClose, onSuccess, editing, proxy }: { onClose: () => void; onSuccess: (item: LeaveRequest) => void; editing?: LeaveRequest | null; proxy?: boolean }) {
   const [form, setForm] = useState({
     leaveType: editing?.leaveType || "ANNUAL",
     startDate: editing ? String(editing.startDate).slice(0, 10) : "",
@@ -86,6 +90,13 @@ function NewLeaveDialog({ onClose, onSuccess, editing }: { onClose: () => void; 
     proofUrls: (editing?.proofUrls || []) as string[],
     halfDay: !!editing && editing.totalDays === 0.5,   // nghỉ nửa ngày (0,5 công)
   });
+  // ĐĂNG KÝ HỘ: chọn nhân sự được nghỉ.
+  const [targetEmployeeId, setTargetEmployeeId] = useState("");
+  const [regEmps, setRegEmps] = useState<RegEmployee[]>([]);
+  useEffect(() => {
+    if (!proxy) return;
+    fetch("/api/v1/leave-requests/registerable-employees").then((r) => r.json()).then((res) => setRegEmps(res.data || [])).catch(() => {});
+  }, [proxy]);
   // Bật/tắt nửa ngày: ép ngày kết thúc = ngày bắt đầu (nửa ngày chỉ 1 ngày).
   function setHalfDay(on: boolean) {
     setForm((f) => ({ ...f, halfDay: on, endDate: on ? f.startDate : f.endDate }));
@@ -102,6 +113,7 @@ function NewLeaveDialog({ onClose, onSuccess, editing }: { onClose: () => void; 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (proxy && !editing && !targetEmployeeId) { setError("Vui lòng chọn nhân sự cần đăng ký hộ"); return; }
     setSaving(true);
     try {
       const res = await fetch(
@@ -109,7 +121,7 @@ function NewLeaveDialog({ onClose, onSuccess, editing }: { onClose: () => void; 
         {
           method: editing ? "PUT" : "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(editing ? { action: "EDIT", ...form } : form),
+          body: JSON.stringify(editing ? { action: "EDIT", ...form } : { ...form, ...(proxy && targetEmployeeId ? { targetEmployeeId } : {}) }),
         }
       );
       const json = await res.json();
@@ -134,7 +146,7 @@ function NewLeaveDialog({ onClose, onSuccess, editing }: { onClose: () => void; 
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
       <div className="w-full max-w-[480px] rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
-          <h3 className="text-[15px] font-semibold">{editing ? "Sửa đơn xin nghỉ" : "Tạo đơn xin nghỉ"}</h3>
+          <h3 className="text-[15px] font-semibold">{editing ? "Sửa đơn xin nghỉ" : proxy ? "Đăng ký nghỉ hộ" : "Tạo đơn xin nghỉ"}</h3>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
 
@@ -142,6 +154,17 @@ function NewLeaveDialog({ onClose, onSuccess, editing }: { onClose: () => void; 
           {error && (
             <div className="text-[13px] px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>
               {error}
+            </div>
+          )}
+
+          {proxy && !editing && (
+            <div className="rounded-lg p-3" style={{ background: "rgba(0,180,216,0.06)", border: "1px solid var(--ibs-accent)" }}>
+              <label className={labelCls} style={{ color: "var(--ibs-accent)" }}>🤝 Nhân sự nghỉ (đăng ký hộ) *</label>
+              <select required value={targetEmployeeId} onChange={(e) => setTargetEmployeeId(e.target.value)} className={inputCls} style={inputStyle}>
+                <option value="">-- Chọn nhân sự --</option>
+                {regEmps.map((e2) => <option key={e2.id} value={e2.id}>{e2.fullName} ({e2.code}{e2.department?.name ? " · " + e2.department.name : ""})</option>)}
+              </select>
+              <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Đơn sẽ đứng tên nhân sự này; cả bạn và họ đều thấy đơn.</p>
             </div>
           )}
 
@@ -331,6 +354,7 @@ export default function NghiPhepPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [showProxy, setShowProxy] = useState(false);   // đăng ký nghỉ hộ
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
   const can = useCan();
@@ -357,6 +381,8 @@ export default function NghiPhepPage() {
   }, [statusFilter]);
 
   const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
+  // Đăng ký nghỉ hộ: quyền riêng m3.nghiphep:proxy ("ĐK hộ") — admin tick đích danh, tách khỏi Sửa.
+  const canProxy = can("m3.nghiphep:proxy");
   const isHR = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
 
   async function exportExcel() {
@@ -478,6 +504,16 @@ export default function NghiPhepPage() {
               <Download size={13} /> Export Excel
             </button>
           )}
+          {canProxy && (
+            <button
+              onClick={() => setShowProxy(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium border"
+              style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}
+              title="Đăng ký nghỉ hộ người khác (Xưởng trưởng / người được chỉ định)"
+            >
+              🤝 Đăng ký giúp
+            </button>
+          )}
           <button
             onClick={() => setShowNew(true)}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white"
@@ -516,6 +552,13 @@ export default function NghiPhepPage() {
                       <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>
                         {r.employee.code} · {r.employee.department.name}
                       </div>
+                      {r.registeredByName ? (
+                        <div className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: "rgba(245,158,11,0.15)", color: "var(--ibs-warning)" }} title={`Đơn do ${r.registeredByName} đăng ký hộ`}>
+                          🤝 Đăng ký hộ bởi {r.registeredByName}
+                        </div>
+                      ) : (
+                        <div className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded" style={{ background: "rgba(148,163,184,0.12)", color: "var(--ibs-text-dim)" }}>Tự đăng ký</div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-[13px]">
                       <div>{LEAVE_TYPE_LABELS[r.leaveType] || r.leaveType}</div>
@@ -602,13 +645,14 @@ export default function NghiPhepPage() {
         Hiển thị 50 đơn gần nhất. Phép năm được trừ tự động khi duyệt.
       </div>
 
-      {(showNew || editTarget) && (
+      {(showNew || showProxy || editTarget) && (
         <NewLeaveDialog
           editing={editTarget}
-          onClose={() => { setShowNew(false); setEditTarget(null); }}
+          proxy={showProxy}
+          onClose={() => { setShowNew(false); setShowProxy(false); setEditTarget(null); }}
           onSuccess={(item) => {
             setRequests((prev) => editTarget ? prev.map((r) => (r.id === item.id ? { ...r, ...item } : r)) : [item, ...prev]);
-            setShowNew(false); setEditTarget(null);
+            setShowNew(false); setShowProxy(false); setEditTarget(null);
           }}
         />
       )}

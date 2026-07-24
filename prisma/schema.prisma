@@ -553,6 +553,8 @@ model LeaveRequest {
   endDate        DateTime
   totalDays      Float // Can be 0.5
   reason         String
+  registeredById   String?  // NV đăng ký HỘ (Xưởng trưởng/người chỉ định); null = tự đăng ký
+  registeredByName String?  // Tên người đăng ký hộ (snapshot) để hiển thị
   status         ApprovalStatus @default(DRAFT)
   approvedBy     String?
   approvedAt     DateTime?

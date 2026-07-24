@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { leaveRequiresProof, proofDeadlineFrom } from "@/lib/leave-proof";
+import { canUser } from "@/lib/permission-catalog";
 
 const CreateLeaveSchema = z.object({
   leaveType: z.enum(["ANNUAL", "SICK", "PERSONAL", "WEDDING", "FUNERAL", "MATERNITY", "PATERNITY", "UNPAID", "WORK_ACCIDENT", "STUDY"]),
@@ -11,7 +12,14 @@ const CreateLeaveSchema = z.object({
   reason: z.string().min(5, "Lý do phải ít nhất 5 ký tự"),
   proofUrls: z.array(z.string()).optional(),
   halfDay: z.boolean().optional(),   // Nghỉ NỬA NGÀY (0,5 công) — chỉ áp dụng cho 1 ngày.
+  targetEmployeeId: z.string().optional(),   // ĐĂNG KÝ HỘ: NV được nghỉ (khác người đăng nhập).
 });
+
+// Ai được đăng ký nghỉ HỘ người khác: người được cấp quyền riêng m3.nghiphep:proxy ("ĐK hộ").
+// Tách hẳn khỏi quyền Sửa (edit) — ai cũng phải được admin tick đích danh.
+function canProxyLeave(user: any): boolean {
+  return canUser(user, "m3.nghiphep:proxy");
+}
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -28,7 +36,8 @@ export async function GET(request: NextRequest) {
 
   if (userRole === "EMPLOYEE" || userRole === "TEAM_LEAD") {
     const emp = await prisma.employee.findFirst({ where: { userId } });
-    if (emp) where.employeeId = emp.id;
+    // Thấy đơn của mình + đơn mình đăng ký HỘ người khác (để cả 2 bên đều thấy).
+    if (emp) where.OR = [{ employeeId: emp.id }, { registeredById: emp.id }];
   } else if (userRole === "MANAGER") {
     const emp = await prisma.employee.findFirst({ where: { userId } });
     if (emp) {
@@ -65,7 +74,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { leaveType, startDate, endDate, reason, proofUrls, halfDay } = parsed.data;
+  const { leaveType, startDate, endDate, reason, proofUrls, halfDay, targetEmployeeId } = parsed.data;
 
   if (halfDay && startDate.getTime() !== endDate.getTime()) {
     return NextResponse.json(
@@ -96,13 +105,29 @@ export async function POST(request: NextRequest) {
   }
 
   const userId = (session.user as any).id;
-  const employee = await prisma.employee.findFirst({
+  const creator = await prisma.employee.findFirst({
     where: { userId },
     include: { department: true },
   });
-
-  if (!employee) {
+  if (!creator) {
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy nhân viên" } }, { status: 404 });
+  }
+
+  // Mặc định tự đăng ký. Nếu có targetEmployeeId (đăng ký HỘ) → đơn thuộc về NV đó.
+  let employee = creator;
+  let registeredById: string | null = null;
+  let registeredByName: string | null = null;
+  if (targetEmployeeId && targetEmployeeId !== creator.id) {
+    if (!canProxyLeave(session.user as any)) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền đăng ký nghỉ hộ người khác" } }, { status: 403 });
+    }
+    const target = await prisma.employee.findUnique({ where: { id: targetEmployeeId }, include: { department: true } });
+    if (!target) {
+      return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy nhân sự cần đăng ký hộ" } }, { status: 404 });
+    }
+    employee = target;
+    registeredById = creator.id;
+    registeredByName = creator.fullName;
   }
 
   // Tính số ngày nghỉ: tính cả 2 đầu mút (30/5→30/5 = 1 ngày, 30/5→31/5 = 2 ngày),
@@ -193,6 +218,8 @@ export async function POST(request: NextRequest) {
       endDate,
       totalDays,
       reason,
+      registeredById,
+      registeredByName,
       status: "PENDING",
       proofUrls: proofUrls ?? [],
       proofDeadline: needsProof ? proofDeadlineFrom(endDate) : null,
