@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const CreateCertificateSchema = z.object({
@@ -27,14 +28,14 @@ export async function GET(request: NextRequest) {
 
   const where: Record<string, unknown> = {};
 
-  // Non-admins can only see their own certificates
-  if (!canUser(session.user as any, "m5.chungchi:edit")) {
-    const emp = await prisma.employee.findFirst({ where: { userId } });
-    if (emp) where.employeeId = emp.id;
-    else return NextResponse.json({ data: [] });
-  } else if (employeeId) {
-    where.employeeId = employeeId;
-  }
+  // Phạm vi dữ liệu (Chứng chỉ): mặc định NV = của mình, TP = phòng mình, HR = tất cả.
+  const scope = await resolveScope(userId, userRole, "m5.chungchi");
+  applyScope(where, scopeWhere(scope, {
+    deptPath: (ids) => ({ employee: { departmentId: { in: ids } } }),
+    selfPath: (empId) => ({ employeeId: empId }),
+  }));
+  // Người có quyền Sửa (HR) có thể lọc theo 1 NV cụ thể.
+  if (employeeId && canUser(session.user as any, "m5.chungchi:edit")) where.employeeId = employeeId;
 
   if (expiringOnly) {
     const thirtyDays = new Date();

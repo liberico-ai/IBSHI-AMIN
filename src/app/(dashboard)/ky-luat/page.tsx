@@ -148,10 +148,15 @@ export default function KyLuatPage() {
     fetchRegulations();
   }
 
-  const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: "regulations", label: "Văn bản quy định", icon: <FileText size={15} /> },
-    { key: "disciplinary", label: "Biên bản kỷ luật", icon: <AlertTriangle size={15} /> },
-  ];
+  // Mỗi tab gate bằng 1 quyền :view riêng.
+  const tabs = ([
+    { key: "regulations", label: "Văn bản quy định", icon: <FileText size={15} />, perm: "m8.quydinh:view" },
+    { key: "disciplinary", label: "Biên bản kỷ luật", icon: <AlertTriangle size={15} />, perm: "m8.kyluat:view" },
+  ] as { key: Tab; label: string; icon: React.ReactNode; perm: string }[]).filter((t) => can(t.perm));
+
+  useEffect(() => {
+    if (tabs.length && !tabs.some((t) => t.key === activeTab)) setActiveTab(tabs[0].key);
+  }, [tabs.map((t) => t.key).join(","), activeTab]);
 
   return (
     <div>

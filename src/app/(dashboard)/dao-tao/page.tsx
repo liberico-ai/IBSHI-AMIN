@@ -123,11 +123,16 @@ export default function DaoTaoPage() {
     )},
   ];
 
-  const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: "plans", label: "Kế hoạch đào tạo", icon: <BookOpen size={15} /> },
-    { key: "attendance", label: "Điểm danh", icon: <CheckSquare size={15} /> },
-    { key: "certificates", label: "Chứng chỉ", icon: <AlertTriangle size={15} /> },
-  ];
+  // Mỗi tab gate bằng 1 quyền :view riêng.
+  const tabs = ([
+    { key: "plans", label: "Kế hoạch đào tạo", icon: <BookOpen size={15} />, perm: "m5.daotao:view" },
+    { key: "attendance", label: "Điểm danh", icon: <CheckSquare size={15} />, perm: "m5.daotao:view" },
+    { key: "certificates", label: "Chứng chỉ", icon: <AlertTriangle size={15} />, perm: "m5.chungchi:view" },
+  ] as { key: Tab; label: string; icon: React.ReactNode; perm: string }[]).filter((t) => can(t.perm));
+
+  useEffect(() => {
+    if (tabs.length && !tabs.some((t) => t.key === activeTab)) setActiveTab(tabs[0].key);
+  }, [tabs.map((t) => t.key).join(","), activeTab]);
 
   return (
     <div>

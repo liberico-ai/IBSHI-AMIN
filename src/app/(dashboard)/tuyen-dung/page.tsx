@@ -175,10 +175,15 @@ export default function TuyenDungPage() {
     }
   }
 
-  const tabs: { key: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
-    { key: "requests", label: "Đề xuất tuyển", icon: <ClipboardList size={15} />, count: requests.filter(r => r.status === "PENDING").length },
-    { key: "pipeline", label: "Pipeline ứng viên", icon: <Users size={15} />, count: candidates.filter(c => !["ACCEPTED","REJECTED","WITHDRAWN"].includes(c.status)).length },
-  ];
+  // Mỗi tab gate bằng 1 quyền :view riêng.
+  const tabs = ([
+    { key: "requests", label: "Đề xuất tuyển", icon: <ClipboardList size={15} />, count: requests.filter(r => r.status === "PENDING").length, perm: "m4.yeucau:view" },
+    { key: "pipeline", label: "Pipeline ứng viên", icon: <Users size={15} />, count: candidates.filter(c => !["ACCEPTED","REJECTED","WITHDRAWN"].includes(c.status)).length, perm: "m4.ungvien:view" },
+  ] as { key: Tab; label: string; icon: React.ReactNode; count?: number; perm: string }[]).filter((t) => can(t.perm));
+
+  useEffect(() => {
+    if (tabs.length && !tabs.some((t) => t.key === activeTab)) setActiveTab(tabs[0].key);
+  }, [tabs.map((t) => t.key).join(","), activeTab]);
 
   // Lọc ứng viên theo trạng thái + ngày nộp.
   const filteredCandidates = useMemo(() => candidates.filter((c) => {

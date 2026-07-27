@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -18,6 +19,8 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
+  const userId = (session.user as any).id;
+  const userRole = (session.user as any).role;
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status") || "";
   const severity = searchParams.get("severity") || "";
@@ -25,6 +28,13 @@ export async function GET(request: NextRequest) {
   const where: any = {};
   if (status) where.status = status;
   if (severity) where.severity = severity;
+
+  // Phạm vi dữ liệu (Sự cố HSE): theo phòng của NGƯỜI BÁO CÁO. Mặc định NV = mình báo, TP = phòng mình, HR = tất cả.
+  const scope = await resolveScope(userId, userRole, "m9.suco");
+  applyScope(where, scopeWhere(scope, {
+    deptPath: (ids) => ({ reporter: { departmentId: { in: ids } } }),
+    selfPath: (empId) => ({ reportedBy: empId }),
+  }));
 
   const data = await prisma.hSEIncident.findMany({
     where,

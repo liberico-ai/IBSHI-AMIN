@@ -4,15 +4,22 @@
 export type ResolvedScope = { all: true } | { deptIds: string[]; selfEmpId: string | null };
 
 // Danh sách feature ĐÃ áp phạm vi (đã wire ở backend). UI chỉ hiện nút "Phạm vi" cho các mục này.
-// Nhà ăn (m10.nhaan.dangky) chưa wire (GET là báo cáo tổng hợp — xử lý riêng sau).
 export const SCOPED_FEATURES = new Set<string>([
   "m1.hoso",          // Hồ sơ nhân sự
   "m3.bangcong",      // Chấm công
   "m3.nghiphep",      // Nghỉ phép
   "m3.tangca",        // Tăng ca
+  "m5.daotao",        // Kế hoạch đào tạo
+  "m5.chungchi",      // Chứng chỉ nhân sự
+  "m6.chamdiem",      // Đánh giá KPI
+  "m7.dongia",        // Đơn giá khoán
+  "m8.kyluat",        // Kỷ luật
+  "m9.suco",          // Sự cố HSE
   "m10.xe.datxe",     // Đặt xe
   "m10.phonghop.dat", // Phòng họp
   "m10.vpp.denghi",   // VPP đề nghị
+  "m10.nhaan.dangky", // Đăng ký suất ăn
+  "m10.khach",        // Đăng ký khách
 ]);
 
 // Dựng mảnh Prisma `where` cho danh sách (records thuộc phòng trong scope HOẶC của chính mình).

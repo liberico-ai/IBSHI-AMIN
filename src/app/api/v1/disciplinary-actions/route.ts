@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -19,6 +20,8 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
+  const userId = (session.user as any).id;
+  const userRole = (session.user as any).role;
   const { searchParams } = new URL(request.url);
   const employeeId = searchParams.get("employeeId") || "";
   const status = searchParams.get("status") || "";
@@ -26,6 +29,13 @@ export async function GET(request: NextRequest) {
   const where: any = {};
   if (employeeId) where.employeeId = employeeId;
   if (status) where.status = status;
+
+  // Phạm vi dữ liệu (Kỷ luật): mặc định NV = của mình, TP = phòng mình, HR = tất cả.
+  const scope = await resolveScope(userId, userRole, "m8.kyluat");
+  applyScope(where, scopeWhere(scope, {
+    deptPath: (ids) => ({ employee: { departmentId: { in: ids } } }),
+    selfPath: (empId) => ({ employeeId: empId }),
+  }));
 
   const data = await prisma.disciplinaryAction.findMany({
     where,

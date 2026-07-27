@@ -1485,11 +1485,12 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
     );
   }
 
+  // "Thông tin cá nhân" luôn mở; các tab còn lại gate bằng 1 quyền :view riêng.
   const tabs: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: "info", label: "Thông tin cá nhân", icon: User },
     ...(can("m1.hopdong:view") ? [{ key: "contracts" as Tab, label: "Hợp đồng", icon: FileText, count: employee.contracts.filter((c) => c.status !== "TERMINATED").length }] : []),
-    { key: "certificates", label: "Chứng chỉ", icon: Award, count: employee.certificates.length },
-    { key: "history", label: "Lịch sử công tác", icon: History, count: employee.workHistory.length },
+    ...(can("m5.chungchi:view") ? [{ key: "certificates" as Tab, label: "Chứng chỉ", icon: Award, count: employee.certificates.length }] : []),
+    ...(can("m1.lichsu:view") ? [{ key: "history" as Tab, label: "Lịch sử công tác", icon: History, count: employee.workHistory.length }] : []),
   ];
 
   // Quỹ phép năm — chỉ áp dụng cho NV ĐANG LÀM (ACTIVE). NV thử việc chưa có phép năm.

@@ -79,18 +79,25 @@ export default function VppPage() {
     });
   }, []);
 
+  const can = useCan();
   const canSeeStockIn = canManageVpp(me?.role, me?.employeeCode);
+
+  // Mỗi tab gate bằng 1 quyền :view riêng.
+  const vppTabs = ([
+    { k: "stock", label: "Danh sách VPP", icon: Package, show: can("m10.vpp.danhmuc:view") },
+    { k: "stockIn", label: "Danh sách yêu cầu VPP", icon: FileText, show: canSeeStockIn },
+    { k: "requests", label: "Phiếu xuất VPP", icon: FileText, show: can("m10.vpp.denghi:view") },
+  ] as { k: "stock" | "stockIn" | "requests"; label: string; icon: any; show: boolean }[]).filter((t) => t.show);
+  useEffect(() => {
+    if (vppTabs.length && !vppTabs.some((t) => t.k === tab)) setTab(vppTabs[0].k);
+  }, [vppTabs.map((t) => t.k).join(","), tab]);
 
   return (
     <div>
       <PageHeader title="M10.3 — Văn phòng phẩm" subtitle="Danh sách VPP, tạo yêu cầu VPP, phiếu yêu cầu xuất VPP" />
 
       <div className="flex gap-2 mb-4">
-        {[
-          { k: "stock", label: "Danh sách VPP", icon: Package },
-          ...(canSeeStockIn ? [{ k: "stockIn", label: "Danh sách yêu cầu VPP", icon: FileText }] : []),
-          { k: "requests", label: "Phiếu xuất VPP", icon: FileText },
-        ].map((t) => {
+        {vppTabs.map((t) => {
           const Icon = t.icon;
           const active = tab === t.k;
           return (

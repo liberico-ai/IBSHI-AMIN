@@ -52,6 +52,7 @@ export const PERMISSION_CATALOG: ModuleGroup[] = [
       { key: "m1.npt", label: "Người phụ thuộc (giảm trừ)", actions: CRUD },
       { key: "m1.hopdong", label: "Hợp đồng lao động", actions: CRUDA },
       { key: "m1.phuluc", label: "Phụ lục hợp đồng", actions: ["view", "create", "edit", "approve"] },
+      { key: "m1.lichsu", label: "Lịch sử công tác", actions: ["view"] },
     ],
   },
   {
@@ -68,6 +69,10 @@ export const PERMISSION_CATALOG: ModuleGroup[] = [
       { key: "m3.bangcong", label: "Bảng chấm công", actions: ["view", "edit", "import"] },
       { key: "m3.nghiphep", label: "Nghỉ phép", actions: ["view", "create", "edit", "delete", "approve1", "approve2", "proxy"] },
       { key: "m3.tangca", label: "Tăng ca (OT)", actions: ["view", "create", "edit", "delete", "approve"] },
+      { key: "m3.phieuto", label: "Phiếu kê khai tổ", actions: ["view", "create", "edit"] },
+      { key: "m3.doisoat", label: "Đối soát chấm công", actions: ["view"] },
+      { key: "m3.giaitrinh", label: "Đơn giải trình", actions: ["view", "create", "approve"] },
+      { key: "m3.tonghop", label: "Tổng hợp công tháng", actions: ["view"] },
     ],
   },
   {
@@ -144,12 +149,14 @@ export const PERMISSION_CATALOG: ModuleGroup[] = [
       { key: "m10.vpp.baocao", label: "Báo cáo sử dụng VPP", group: "Văn phòng phẩm", actions: ["view"] },
       // Nhà ăn
       { key: "m10.nhaan.dangky", label: "Đăng ký suất ăn", group: "Nhà ăn", actions: ["view", "create", "edit", "delete", "approve"] },
+      { key: "m10.nhaan.khaosat", label: "Khảo sát chất lượng bữa ăn", group: "Nhà ăn", actions: ["view"] },
       { key: "m10.nhaan.chiphi", label: "Chi phí thực phẩm", group: "Nhà ăn", actions: CRUD },
       { key: "m10.nhaan.thucxuat", label: "Thực xuất", group: "Nhà ăn", actions: ["view", "edit", "delete"] },
       { key: "m10.nhaan.thucte", label: "Suất thực tế", group: "Nhà ăn", actions: ["view", "edit"] },
       { key: "m10.nhaan.thucdon", label: "Thực đơn tuần", group: "Nhà ăn", actions: CRUD },
       { key: "m10.nhaan.thaufu", label: "Nhà thầu phụ", group: "Nhà ăn", actions: CRUD },
       // Còn lại
+      { key: "m10.suachua", label: "Cấp phát / sửa chữa thiết bị VP", group: "Khác", actions: CRUDA },
       { key: "m10.vesinh", label: "Vệ sinh", group: "Khác", actions: CRUD },
       { key: "m10.khach", label: "Đăng ký khách", group: "Khác", actions: ["view", "create", "approve"] },
       { key: "m10.sukien", label: "Sự kiện", group: "Khác", actions: CRUD },
@@ -194,6 +201,8 @@ export const PERMISSION_TEMPLATES: Record<string, PermTemplate> = {
       "m1.hoso:view", "m2.sodo:view",
       "m3.nghiphep:view", "m3.nghiphep:approve1",           // TP duyệt cấp 1 nghỉ phép
       "m3.tangca:view", "m3.tangca:approve",
+      "m3.phieuto:view", "m3.doisoat:view", "m3.giaitrinh:view", "m3.giaitrinh:approve", "m3.tonghop:view",
+      "m10.suachua:view", "m10.suachua:create",
       "m10.xe.datxe:view", "m10.xe.datxe:create", "m10.xe.datxe:approve1",
       "m10.phonghop.dat:view", "m10.phonghop.dat:create",
       "m10.vpp.denghi:view", "m10.vpp.denghi:create",
@@ -202,14 +211,22 @@ export const PERMISSION_TEMPLATES: Record<string, PermTemplate> = {
   },
   TEAM_LEAD: {
     label: "Tổ trưởng",
-    perms: new Set(["m1.hoso:view", "m3.tangca:view", "m3.tangca:approve"]),
+    perms: new Set([
+      "m1.hoso:view", "m1.lichsu:view",
+      "m3.tangca:view", "m3.tangca:approve",
+      "m3.phieuto:view", "m3.phieuto:create", "m3.phieuto:edit",   // Tổ trưởng khai phiếu tổ
+      "m3.giaitrinh:view", "m3.giaitrinh:create",
+      "m10.suachua:view", "m10.suachua:create",
+    ]),
   },
   EMPLOYEE: {
     label: "Nhân viên — cơ bản",
     perms: new Set([
-      "m1.hoso:view", "m2.sodo:view",
+      "m1.hoso:view", "m1.lichsu:view", "m2.sodo:view",
       "m3.nghiphep:view", "m3.nghiphep:create", "m3.tangca:view", "m3.tangca:create",
-      "m5.daotao:view", "m7.phieuluong:view",
+      "m3.giaitrinh:view", "m3.giaitrinh:create",           // NV tự nộp đơn giải trình
+      "m5.daotao:view", "m5.chungchi:view",                 // xem chứng chỉ của chính mình (API scope self)
+      "m7.phieuluong:view", "m10.suachua:view", "m10.suachua:create",  // NV tự yêu cầu cấp phát/sửa chữa
       "m10.xe.datxe:view", "m10.xe.datxe:create",
       "m10.phonghop.dat:view", "m10.phonghop.dat:create",
       "m10.nhaan.dangky:view", "m10.nhaan.dangky:create",

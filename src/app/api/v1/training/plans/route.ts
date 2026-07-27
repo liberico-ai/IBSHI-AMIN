@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
+import { resolveScope, applyScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -29,6 +30,23 @@ export async function GET(request: NextRequest) {
   if (type) where.type = type;
   if (status) where.status = status;
   if (departmentId) where.departmentId = departmentId;
+
+  // Phạm vi dữ liệu (Kế hoạch đào tạo): thấy KH của phòng trong phạm vi + KH toàn công ty (không gắn phòng)
+  //  + KH mình có tham gia. HR = tất cả. NV thường mặc định = phòng mình + toàn công ty.
+  const userId = (session.user as any).id;
+  const userRole = (session.user as any).role;
+  const scope = await resolveScope(userId, userRole, "m5.daotao");
+  if (!("all" in scope)) {
+    let deptIds = scope.deptIds;
+    if (deptIds.length === 0) {
+      const me = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
+      if (me?.departmentId) deptIds = [me.departmentId];
+    }
+    const or: any[] = [{ departmentId: null }];
+    if (deptIds.length) or.push({ departmentId: { in: deptIds } });
+    if (scope.selfEmpId) or.push({ records: { some: { employeeId: scope.selfEmpId } } });
+    applyScope(where, { OR: or });
+  }
 
   const data = await prisma.trainingPlan.findMany({
     where,

@@ -509,12 +509,21 @@ export default function XePage() {
         ))}
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — mỗi tab gate bằng 1 quyền :view riêng ("Chuyến của tôi" chỉ cho tài xế). */}
       <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
-        {(["bookings", "calendar", "fleet", "fuel", "maintenance", "my-trips"] as const).filter((t) => t !== "my-trips" || isDriver).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
-            style={{ background: tab === t ? "var(--ibs-accent)" : "transparent", color: tab === t ? "#fff" : "var(--ibs-text-dim)" }}>
-            {t === "bookings" ? "Đặt xe" : t === "calendar" ? "Lịch" : t === "fleet" ? "Đội xe" : t === "fuel" ? "Nhiên liệu" : t === "maintenance" ? "Bảo trì" : "Chuyến của tôi"}
+        {([
+          { key: "bookings", label: "Đặt xe", perm: "m10.xe.datxe:view" },
+          { key: "calendar", label: "Lịch", perm: "m10.xe.datxe:view" },
+          { key: "fleet", label: "Đội xe", perm: "m10.xe.doixe:view" },
+          { key: "fuel", label: "Nhiên liệu", perm: "m10.xe.nhienlieu:view" },
+          { key: "maintenance", label: "Bảo trì", perm: "m10.xe.baotri:view" },
+          { key: "my-trips", label: "Chuyến của tôi", show: isDriver },
+        ] as { key: typeof tab; label: string; perm?: string; show?: boolean }[])
+          .filter((t) => (t.show !== undefined ? t.show : t.perm ? can(t.perm) : true))
+          .map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
+            style={{ background: tab === t.key ? "var(--ibs-accent)" : "transparent", color: tab === t.key ? "#fff" : "var(--ibs-text-dim)" }}>
+            {t.label}
           </button>
         ))}
       </div>

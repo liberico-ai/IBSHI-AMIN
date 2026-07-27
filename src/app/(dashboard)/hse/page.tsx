@@ -174,12 +174,18 @@ export default function HsePage() {
   // Quản lý HSE theo ma trận. Cờ chung (giữ thiết kế 1 cờ cho các tab) — dựa trên "Sự cố:Thêm".
   const canManage = can("m9.suco:create");
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "incidents", label: "Sự cố" },
-    { key: "inductions", label: "Induction" },
-    { key: "ppe", label: "PPE" },
-    { key: "briefings", label: `Briefing${briefings.filter(b => b.lowAttendance).length > 0 ? ` ⚠${briefings.filter(b => b.lowAttendance).length}` : ""}` },
-  ];
+  // Mỗi tab gate bằng 1 quyền :view riêng.
+  const tabs = ([
+    { key: "incidents", label: "Sự cố", perm: "m9.suco:view" },
+    { key: "inductions", label: "Induction", perm: "m9.huanluyen:view" },
+    { key: "ppe", label: "PPE", perm: "m9.ppe:view" },
+    { key: "briefings", label: `Briefing${briefings.filter(b => b.lowAttendance).length > 0 ? ` ⚠${briefings.filter(b => b.lowAttendance).length}` : ""}`, perm: "m9.briefing:view" },
+  ] as { key: Tab; label: string; perm: string }[]).filter((t) => can(t.perm));
+
+  // Nếu tab đang chọn bị ẩn (không có quyền) → nhảy về tab đầu tiên còn hiện.
+  useEffect(() => {
+    if (tabs.length && !tabs.some((t) => t.key === activeTab)) setActiveTab(tabs[0].key);
+  }, [tabs.map((t) => t.key).join(","), activeTab]);
 
   return (
     <div>

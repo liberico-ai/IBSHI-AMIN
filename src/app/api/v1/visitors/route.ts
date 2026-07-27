@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const VisitorPurposeEnum = z.enum(["FACTORY_TOUR", "AUDIT", "SURVEY", "BUSINESS", "DELIVERY", "OTHER"]);
@@ -19,6 +20,8 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
+  const userId = (session.user as any).id;
+  const userRole = (session.user as any).role;
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status") || "";
   const date = searchParams.get("date") || "";
@@ -29,6 +32,13 @@ export async function GET(request: NextRequest) {
     const d = new Date(date);
     where.visitDate = { gte: new Date(d.setHours(0,0,0,0)), lte: new Date(d.setHours(23,59,59,999)) };
   }
+
+  // Phạm vi dữ liệu (Đăng ký khách): theo phòng của NGƯỜI TIẾP (host). Mặc định NV = mình tiếp, TP = phòng mình, HR = tất cả.
+  const scope = await resolveScope(userId, userRole, "m10.khach");
+  applyScope(where, scopeWhere(scope, {
+    deptPath: (ids) => ({ host: { departmentId: { in: ids } } }),
+    selfPath: (empId) => ({ hostEmployeeId: empId }),
+  }));
 
   const data = await prisma.visitorRequest.findMany({
     where,

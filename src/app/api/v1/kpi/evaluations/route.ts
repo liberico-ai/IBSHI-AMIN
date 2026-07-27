@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const EVAL_CRITERIA = ["leadership", "teamwork", "technical", "communication", "punctuality"];
@@ -34,13 +35,12 @@ export async function GET(request: NextRequest) {
   if (employeeId && isHR) {
     where.employeeId = employeeId;
   } else {
-    // Find this user's employee record
-    const myEmployee = await prisma.employee.findFirst({
-      where: { userId },
-      select: { id: true },
-    });
-    if (!myEmployee) return NextResponse.json({ data: [] });
-    where.employeeId = myEmployee.id;
+    // Phạm vi dữ liệu (Đánh giá KPI): mặc định NV = của mình, TP = phòng mình, HR = tất cả.
+    const scope = await resolveScope(userId, userRole, "m6.chamdiem");
+    applyScope(where, scopeWhere(scope, {
+      deptPath: (ids) => ({ employee: { departmentId: { in: ids } } }),
+      selfPath: (empId) => ({ employeeId: empId }),
+    }));
   }
 
   const evaluations = await prisma.evaluation360.findMany({

@@ -29,6 +29,7 @@ const NAV_VIEW_PERM: Record<string, string> = {
   "/hanh-chinh/xe": "m10.xe.datxe:view",
   "/hanh-chinh/vpp": "m10.vpp.denghi:view",
   "/hanh-chinh/nha-an": "m10.nhaan.dangky:view",
+  "/hanh-chinh/sua-chua": "m10.suachua:view",
   "/hanh-chinh/ve-sinh": "m10.vesinh:view",
   "/hanh-chinh/khach": "m10.khach:view",
   "/hanh-chinh/su-kien": "m10.sukien:view",

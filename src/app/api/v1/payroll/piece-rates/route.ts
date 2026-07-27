@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 import { canViewPayroll } from "@/lib/access";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -35,6 +36,15 @@ export async function GET(request: NextRequest) {
   if (month) where.month = month;
   if (year) where.year = year;
   if (teamId) where.teamId = teamId;
+
+  // Phạm vi dữ liệu (Đơn giá khoán): theo XƯỞNG (departmentId) hoặc TỔ (team.departmentId — bản ghi cũ).
+  //  Mặc định NV = đợt khoán mình có tham gia, TP = xưởng/phòng mình, HR = tất cả.
+  const userId = (session.user as any).id;
+  const scope = await resolveScope(userId, userRole, "m7.dongia");
+  applyScope(where, scopeWhere(scope, {
+    deptPath: (ids) => ({ OR: [{ departmentId: { in: ids } }, { team: { departmentId: { in: ids } } }] }),
+    selfPath: (empId) => ({ members: { some: { id: empId } } }),
+  }));
 
   const records = await prisma.pieceRateRecord.findMany({
     where,

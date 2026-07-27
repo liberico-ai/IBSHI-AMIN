@@ -489,15 +489,22 @@ export default function NhaAnPage() {
         )}
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — mỗi tab gate bằng 1 quyền :view riêng. */}
       <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
-        {(["registrations", "supplementary", "feedback", "food", "cost", "subcontractors"] as const)
-          .filter((t) => t === "food" ? isFoodManager : (["cost", "subcontractors"].includes(t) ? isHRAdmin : true))
+        {([
+          { k: "registrations", label: "Đăng ký suất ăn", perm: "m10.nhaan.dangky:view" },
+          { k: "supplementary", label: "Đăng ký bổ sung", perm: "m10.nhaan.dangky:view" },
+          { k: "feedback", label: "Khảo sát chất lượng", perm: "m10.nhaan.khaosat:view" },
+          { k: "food", label: "Chi phí mua thực phẩm", perm: "m10.nhaan.chiphi:view" },
+          { k: "cost", label: "Chi phí", perm: "m10.nhaan.chiphi:view" },
+          { k: "subcontractors", label: "Thầu phụ", perm: "m10.nhaan.thaufu:view" },
+        ] as { k: typeof tab; label: string; perm: string }[])
+          .filter((t) => can(t.perm))
           .map((t) => (
-          <button key={t} onClick={() => { setTab(t); if (t === "supplementary") fetchSupplementary(); if (t === "cost") fetchCostReport(); if (t === "food") fetchFood(); if (t === "subcontractors") fetchSubcontractors(); }}
+          <button key={t.k} onClick={() => { setTab(t.k); if (t.k === "supplementary") fetchSupplementary(); if (t.k === "cost") fetchCostReport(); if (t.k === "food") fetchFood(); if (t.k === "subcontractors") fetchSubcontractors(); }}
             className="text-[13px] px-4 py-1.5 rounded-lg font-medium transition-colors"
-            style={{ background: tab === t ? "var(--ibs-accent)" : "transparent", color: tab === t ? "#fff" : "var(--ibs-text-dim)" }}>
-            {t === "registrations" ? "Đăng ký suất ăn" : t === "supplementary" ? "Đăng ký bổ sung" : t === "feedback" ? "Khảo sát chất lượng" : t === "food" ? "Chi phí mua thực phẩm" : t === "cost" ? "Chi phí" : "Thầu phụ"}
+            style={{ background: tab === t.k ? "var(--ibs-accent)" : "transparent", color: tab === t.k ? "#fff" : "var(--ibs-text-dim)" }}>
+            {t.label}
           </button>
         ))}
       </div>

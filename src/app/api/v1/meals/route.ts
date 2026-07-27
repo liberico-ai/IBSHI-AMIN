@@ -7,6 +7,7 @@ import { z } from "zod";
 import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR, guestMealCost } from "@/lib/constants";
 import { computeFifo } from "@/lib/food-inventory";
 import { isAfterMealCutoff } from "@/services/meal.service";
+import { resolveScope, applyScope } from "@/lib/data-scope.server";
 
 const RegisterSchema = z.object({
   departmentId: z.string().uuid(),
@@ -253,6 +254,20 @@ export async function GET(request: NextRequest) {
   // Chỉ lấy đăng ký của phòng ban THẬT (loại phòng ban ẩn "Thầu phụ" — suất thầu phụ
   // nay lưu ở bảng SubcontractorMeal riêng và hiển thị thành dòng tổng hợp riêng).
   where.department = { isActive: true };
+
+  // Phạm vi dữ liệu (Đăng ký suất ăn): mức PHÒNG (đăng ký gắn phòng, không có NV chủ).
+  // HR = tất cả; TP/phạm vi = phòng được cấp; còn lại = phòng của chính mình.
+  const userId = (session.user as any).id;
+  const userRole = (session.user as any).role;
+  const scope = await resolveScope(userId, userRole, "m10.nhaan.dangky");
+  if (!("all" in scope)) {
+    let deptIds = scope.deptIds;
+    if (deptIds.length === 0) {
+      const me = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
+      if (me?.departmentId) deptIds = [me.departmentId];
+    }
+    applyScope(where, deptIds.length ? { departmentId: { in: deptIds } } : { id: "__none__" });
+  }
 
   const data = await prisma.mealRegistration.findMany({
     where,
