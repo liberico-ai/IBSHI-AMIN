@@ -57,7 +57,7 @@ export const PERMISSION_CATALOG: ModuleGroup[] = [
   {
     module: "M2 · Sơ đồ tổ chức",
     features: [
-      { key: "m2.sodo", label: "Sơ đồ / Ảnh chụp tổ chức", actions: ["view", "create", "delete"] },
+      { key: "m2.sodo", label: "Sơ đồ / Ảnh chụp tổ chức", actions: ["view", "create", "edit", "delete"] },
       { key: "m2.phongban", label: "Phòng ban", actions: CRUD },
       { key: "m2.chucdanh", label: "Chức danh", actions: CRUD },
     ],

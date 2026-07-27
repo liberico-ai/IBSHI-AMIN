@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { X, Loader2, Pencil, Trash2, Plus } from "lucide-react";
+import { useCan } from "@/hooks/use-permission";
+import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
+import { apiError } from "@/lib/utils";
 
 type Dept = {
   id: string;
@@ -35,13 +39,13 @@ function ConnectorLine({ vertical = false }: { vertical?: boolean }) {
   );
 }
 
-function DeptCard({ code, name, actual, headcount, color, onClick }: {
-  code: string; name: string; actual: number; headcount: number; color: string; onClick?: () => void;
+function DeptCard({ code, name, actual, headcount, color, onClick, onEdit, onDelete }: {
+  code: string; name: string; actual: number; headcount: number; color: string; onClick?: () => void; onEdit?: () => void; onDelete?: () => void;
 }) {
   return (
     <div
       onClick={onClick}
-      className="rounded-xl border p-3 text-center transition-all duration-200 hover:-translate-y-0.5"
+      className="group relative rounded-xl border p-3 text-center transition-all duration-200 hover:-translate-y-0.5"
       style={{
         background: "var(--ibs-bg-card)",
         borderColor: "var(--ibs-border)",
@@ -50,10 +54,89 @@ function DeptCard({ code, name, actual, headcount, color, onClick }: {
         cursor: onClick ? "pointer" : "default",
       }}
     >
+      {(onEdit || onDelete) && (
+        <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {onEdit && <button title="Sửa phòng ban" onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-1 rounded" style={{ background: "rgba(59,130,246,0.15)", color: "#2563eb" }}><Pencil size={11} /></button>}
+          {onDelete && <button title="Xóa phòng ban" onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1 rounded" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}><Trash2 size={11} /></button>}
+        </div>
+      )}
       <div className="text-[11px] font-bold mb-0.5" style={{ color }}>{code}</div>
       <div className="text-[12px] font-medium mb-1">{name}</div>
       <div className="text-[10px]" style={{ color: "var(--ibs-text-dim)" }}>
         {actual} CBNV
+      </div>
+    </div>
+  );
+}
+
+// ── Modal Thêm / Sửa phòng ban ────────────────────────────────────────────────
+function DeptFormModal({ mode, dept, directorates, onClose, onSaved }: {
+  mode: "add" | "edit"; dept?: Dept; directorates: Directorate[]; onClose: () => void; onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: dept?.name ?? "",
+    code: dept?.code ?? "",
+    directorateId: dept?.directorateId ?? "",
+    headcount: dept ? String(dept.headcount) : "0",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: string, v: string) => { setForm((f) => ({ ...f, [k]: v })); setError(null); };
+  const inputCls = "w-full px-3 py-2 rounded-lg text-[13px] border outline-none";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+
+  async function submit() {
+    if (!form.name.trim() || !form.code.trim()) { setError("Nhập đủ Tên và Mã phòng ban"); return; }
+    setSaving(true);
+    try {
+      const body = { name: form.name.trim(), code: form.code.trim(), directorateId: form.directorateId || null, headcount: parseInt(form.headcount || "0", 10) || 0 };
+      const res = await fetch(mode === "add" ? "/api/v1/departments" : `/api/v1/departments/${dept!.id}`, {
+        method: mode === "add" ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      onSaved();
+    } catch { setError("Lỗi kết nối"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div className="rounded-2xl border w-full max-w-[420px]" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <h3 className="text-[15px] font-semibold">{mode === "add" ? "Thêm phòng ban" : "Sửa phòng ban"}</h3>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          {error && <div className="text-[13px] px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+          <div>
+            <label className="block text-[12px] font-medium mb-1" style={{ color: "var(--ibs-text-muted)" }}>Tên phòng ban *</label>
+            <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="VD: P. Sản xuất" className={inputCls} style={inputStyle} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[12px] font-medium mb-1" style={{ color: "var(--ibs-text-muted)" }}>Mã phòng *</label>
+              <input value={form.code} onChange={(e) => set("code", e.target.value)} placeholder="VD: SX" className={inputCls} style={inputStyle} />
+            </div>
+            <div>
+              <label className="block text-[12px] font-medium mb-1" style={{ color: "var(--ibs-text-muted)" }}>Biên chế</label>
+              <input type="number" min={0} value={form.headcount} onChange={(e) => set("headcount", e.target.value)} className={inputCls} style={inputStyle} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium mb-1" style={{ color: "var(--ibs-text-muted)" }}>Khối</label>
+            <select value={form.directorateId} onChange={(e) => set("directorateId", e.target.value)} className={inputCls} style={inputStyle}>
+              <option value="">-- Không thuộc khối --</option>
+              {directorates.map((d) => <option key={d.id} value={d.id}>{d.nameVi || d.name}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end px-5 py-4 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Đang lưu..." : mode === "add" ? "Thêm phòng ban" : "Lưu"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -79,6 +162,17 @@ export function OrgChartTabs({
   const [snapMap, setSnapMap] = useState<Record<string, number> | null>(null);
   const [canManage, setCanManage] = useState(false);
   const [busy, setBusy] = useState(false);
+  const router = useRouter();
+  const can = useCan();
+  const canCreate = can("m2.sodo:create"), canEdit = can("m2.sodo:edit"), canDelete = can("m2.sodo:delete");
+  const [deptForm, setDeptForm] = useState<{ mode: "add" | "edit"; dept?: Dept } | null>(null);
+
+  async function deleteDept(dept: Dept) {
+    if (!(await confirmDialog({ message: `Xóa phòng ban "${dept.name}"? (Phòng còn nhân sự sẽ bị chặn)`, tone: "danger", confirmText: "Xóa" }))) return;
+    const res = await fetch(`/api/v1/departments/${dept.id}`, { method: "DELETE" });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); void alertDialog(apiError(res.status, d?.error)); return; }
+    router.refresh();
+  }
 
   useEffect(() => {
     fetch("/api/v1/org-snapshots").then((r) => r.json()).then((res) => setPeriods(res.data || [])).catch(() => {});
@@ -189,6 +283,13 @@ export function OrgChartTabs({
             đã chốt {period}
           </span>
         )}
+        {canCreate && (
+          <button onClick={() => setDeptForm({ mode: "add" })}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-white"
+            style={{ background: "var(--ibs-success)" }}>
+            <Plus size={14} /> Thêm phòng ban
+          </button>
+        )}
         <button onClick={exportChart}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] border"
           style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
@@ -261,7 +362,9 @@ export function OrgChartTabs({
                       {depts.length === 0 ? (
                         <span className="text-[12px] self-center" style={{ color: "var(--ibs-text-dim)" }}>Không có phòng ban trực thuộc</span>
                       ) : depts.map((dept) => (
-                        <DeptCard key={dept.id} code={dept.code} name={dept.name} actual={dept.actual} headcount={dept.headcount} color={color} onClick={() => setSelectedDept(dept)} />
+                        <DeptCard key={dept.id} code={dept.code} name={dept.name} actual={dept.actual} headcount={dept.headcount} color={color} onClick={() => setSelectedDept(dept)}
+                          onEdit={canEdit ? () => setDeptForm({ mode: "edit", dept }) : undefined}
+                          onDelete={canDelete ? () => deleteDept(dept) : undefined} />
                       ))}
                     </div>
                   </div>
@@ -300,7 +403,14 @@ export function OrgChartTabs({
 
       {/* Dept employees modal */}
       {selectedDept && (
-        <DeptEmployeesModal dept={selectedDept} onClose={() => setSelectedDept(null)} />
+        <DeptEmployeesModal dept={selectedDept} onClose={() => setSelectedDept(null)} onChanged={() => router.refresh()} canManage={can("m1.hoso:create") || can("m1.hoso:edit")} />
+      )}
+
+      {/* Thêm / sửa phòng ban */}
+      {deptForm && (
+        <DeptFormModal mode={deptForm.mode} dept={deptForm.dept} directorates={directorates}
+          onClose={() => setDeptForm(null)}
+          onSaved={() => { setDeptForm(null); router.refresh(); }} />
       )}
 
       {/* Directors modal — danh sách Giám đốc trong khối */}
@@ -408,11 +518,121 @@ function roleRank(role?: string | null): number {
   return 30;
 }
 
-function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void }) {
+// ── Modal Thêm nhân sự vào phòng: Điều chuyển (NV sẵn có) HOẶC Thêm mới ──────────
+function AddOrTransferEmpModal({ dept, onClose, onDone }: { dept: Dept; onClose: () => void; onDone: () => void }) {
+  const [tab, setTab] = useState<"transfer" | "new">("transfer");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const inputCls = "w-full px-3 py-2 rounded-lg text-[13px] border outline-none";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const lbl = "block text-[12px] font-medium mb-1";
+  const lblStyle = { color: "var(--ibs-text-muted)" };
+
+  // Điều chuyển: NV đang làm ở phòng KHÁC
+  const [allEmps, setAllEmps] = useState<{ id: string; code: string; fullName: string; departmentId?: string | null; department?: { name: string } | null }[]>([]);
+  const [q, setQ] = useState("");
+  const [pickId, setPickId] = useState("");
+  useEffect(() => {
+    fetch(`/api/v1/employees?limit=1000`).then((r) => r.json())
+      .then((json) => setAllEmps((json.data || []).filter((e: any) => (e.status === "ACTIVE" || e.status === "PROBATION") && e.departmentId !== dept.id)))
+      .catch(() => {});
+  }, [dept.id]);
+  const filtered = allEmps.filter((e) => !q || e.fullName.toLowerCase().includes(q.toLowerCase()) || (e.code || "").toLowerCase().includes(q.toLowerCase())).slice(0, 40);
+
+  async function transfer() {
+    if (!pickId) { setError("Chọn nhân sự cần điều chuyển"); return; }
+    setError(null); setSaving(true);
+    try {
+      const res = await fetch(`/api/v1/employees/${pickId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ departmentId: dept.id }) });
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      onDone();
+    } catch { setError("Lỗi kết nối"); } finally { setSaving(false); }
+  }
+
+  // Thêm mới
+  const [f, setF] = useState({ fullName: "", gender: "MALE", dateOfBirth: "", idNumber: "", phone: "", address: "", startDate: "", jobRole: "" });
+  const setNew = (k: string, v: string) => { setF((p) => ({ ...p, [k]: v })); setError(null); };
+  async function createNew() {
+    if (!f.fullName || !f.dateOfBirth || !f.idNumber || !f.phone || !f.address || !f.startDate) { setError("Nhập đủ các trường có dấu *"); return; }
+    setError(null); setSaving(true);
+    try {
+      const res = await fetch(`/api/v1/employees`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...f, jobRole: f.jobRole || undefined, departmentId: dept.id }) });
+      const json = await res.json();
+      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      onDone();
+    } catch { setError("Lỗi kết nối"); } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div className="rounded-2xl border w-full max-w-[460px] max-h-[88vh] flex flex-col" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <h3 className="text-[15px] font-semibold">Thêm nhân sự · {dept.name}</h3>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="flex gap-1 px-5 pt-3">
+          {[{ k: "transfer", l: "🔄 Điều chuyển" }, { k: "new", l: "➕ Thêm mới" }].map((t) => (
+            <button key={t.k} onClick={() => { setTab(t.k as any); setError(null); }} className="px-3 py-1.5 text-[13px] font-semibold rounded-t-lg border-b-2"
+              style={{ borderBottomColor: tab === t.k ? "var(--ibs-accent)" : "transparent", color: tab === t.k ? "var(--ibs-accent)" : "var(--ibs-text-dim)" }}>{t.l}</button>
+          ))}
+        </div>
+        <div className="p-5 overflow-y-auto flex-1 space-y-3">
+          {error && <div className="text-[13px] px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+
+          {tab === "transfer" ? (
+            <>
+              <p className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Chọn nhân sự đang ở phòng khác để chuyển về <b style={{ color: "var(--ibs-text)" }}>{dept.name}</b>.</p>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm theo tên / mã NV..." className={inputCls} style={inputStyle} />
+              <div className="rounded-lg border max-h-[260px] overflow-y-auto" style={{ borderColor: "var(--ibs-border)" }}>
+                {filtered.length === 0 ? <div className="px-3 py-4 text-[12px] text-center" style={{ color: "var(--ibs-text-dim)" }}>Không có nhân sự phù hợp</div>
+                  : filtered.map((e) => (
+                    <label key={e.id} className="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-white/[0.04] border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }}>
+                      <input type="radio" name="pick" checked={pickId === e.id} onChange={() => { setPickId(e.id); setError(null); }} />
+                      <span className="font-mono text-[11px]" style={{ color: "var(--ibs-accent)" }}>{e.code}</span> {e.fullName}
+                      <span className="ml-auto text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{e.department?.name ?? "—"}</span>
+                    </label>
+                  ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div><label className={lbl} style={lblStyle}>Họ tên *</label><input value={f.fullName} onChange={(e) => setNew("fullName", e.target.value)} className={inputCls} style={inputStyle} /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl} style={lblStyle}>Giới tính *</label>
+                  <select value={f.gender} onChange={(e) => setNew("gender", e.target.value)} className={inputCls} style={inputStyle}><option value="MALE">Nam</option><option value="FEMALE">Nữ</option></select></div>
+                <div><label className={lbl} style={lblStyle}>Ngày sinh *</label><input type="date" value={f.dateOfBirth} onChange={(e) => setNew("dateOfBirth", e.target.value)} className={inputCls} style={inputStyle} /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl} style={lblStyle}>CCCD * (9-12 số)</label><input value={f.idNumber} onChange={(e) => setNew("idNumber", e.target.value)} className={inputCls} style={inputStyle} /></div>
+                <div><label className={lbl} style={lblStyle}>SĐT * (0xxxxxxxxx)</label><input value={f.phone} onChange={(e) => setNew("phone", e.target.value)} className={inputCls} style={inputStyle} /></div>
+              </div>
+              <div><label className={lbl} style={lblStyle}>Địa chỉ thường trú *</label><input value={f.address} onChange={(e) => setNew("address", e.target.value)} className={inputCls} style={inputStyle} /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl} style={lblStyle}>Ngày vào làm *</label><input type="date" value={f.startDate} onChange={(e) => setNew("startDate", e.target.value)} className={inputCls} style={inputStyle} /></div>
+                <div><label className={lbl} style={lblStyle}>Chức vụ</label><input value={f.jobRole} onChange={(e) => setNew("jobRole", e.target.value)} placeholder="VD: Nhân viên" className={inputCls} style={inputStyle} /></div>
+              </div>
+              <p className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>NV mới sẽ thuộc phòng <b style={{ color: "var(--ibs-text)" }}>{dept.name}</b>. Mật khẩu mặc định = 6 số cuối CCCD.</p>
+            </>
+          )}
+        </div>
+        <div className="flex gap-2 justify-end px-5 py-4 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button onClick={tab === "transfer" ? transfer : createNew} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Đang lưu..." : tab === "transfer" ? "Điều chuyển" : "Thêm nhân sự"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeptEmployeesModal({ dept, onClose, onChanged, canManage }: { dept: Dept; onClose: () => void; onChanged?: () => void; canManage?: boolean }) {
   const [employees, setEmployees] = useState<EmpRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAddEmp, setShowAddEmp] = useState(false);
 
-  useEffect(() => {
+  function load() {
     setLoading(true);
     fetch(`/api/v1/employees?departmentId=${dept.id}&limit=1000`)
       .then((r) => r.json())
@@ -424,7 +644,8 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
       ))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [dept.id]);
+  }
+  useEffect(() => { load(); }, [dept.id]);
 
   return (
     <div
@@ -445,10 +666,21 @@ function DeptEmployeesModal({ dept, onClose }: { dept: Dept; onClose: () => void
               {dept.actual} CBNV
             </p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 transition-colors">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            {canManage && (
+              <button onClick={() => setShowAddEmp(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold text-white" style={{ background: "var(--ibs-success)" }}>
+                <Plus size={13} /> Thêm nhân sự
+              </button>
+            )}
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 transition-colors">
+              <X size={18} />
+            </button>
+          </div>
         </div>
+        {showAddEmp && (
+          <AddOrTransferEmpModal dept={dept} onClose={() => setShowAddEmp(false)}
+            onDone={() => { setShowAddEmp(false); load(); onChanged?.(); }} />
+        )}
 
         {/* Body */}
         <div className="overflow-y-auto flex-1">
