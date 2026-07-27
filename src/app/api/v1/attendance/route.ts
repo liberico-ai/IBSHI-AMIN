@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canUser } from "@/lib/permission-catalog";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -69,15 +70,12 @@ export async function GET(request: NextRequest) {
     date: { gte: startDate, lte: endDate },
   };
 
-  if (userRole === "EMPLOYEE" || userRole === "TEAM_LEAD") {
-    const emp = await prisma.employee.findFirst({ where: { userId } });
-    if (emp) where.employeeId = emp.id;
-  } else if (userRole === "MANAGER") {
-    const emp = await prisma.employee.findFirst({ where: { userId } });
-    if (emp) {
-      where.employee = { departmentId: emp.departmentId };
-    }
-  }
+  // Phạm vi dữ liệu (Chấm công): thấy công của phòng trong phạm vi + của chính mình.
+  const scope = await resolveScope(userId, userRole, "m3.bangcong");
+  applyScope(where, scopeWhere(scope, {
+    deptPath: (ids) => ({ employee: { departmentId: { in: ids } } }),
+    selfPath: (empId) => ({ employeeId: empId }),
+  }));
 
   if (departmentId && canDo(userRole, "attendance", "readDept")) {
     where.employee = { departmentId };

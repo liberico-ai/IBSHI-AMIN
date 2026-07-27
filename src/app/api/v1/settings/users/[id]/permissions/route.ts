@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { ALL_PERMS, templatePerms, canUser } from "@/lib/permission-catalog";
+import { SCOPED_FEATURES } from "@/lib/data-scope";
 import { z } from "zod";
 
 // GET — lấy ma trận quyền hiện tại của 1 account.
@@ -21,12 +22,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       role: user.role,
       custom: !!user.accessGrant,                             // đã tùy chỉnh riêng chưa
       perms: user.accessGrant ? user.accessGrant.perms : null, // null = theo gói mẫu
+      dataScopes: (user.accessGrant?.dataScopes ?? null),      // phạm vi dữ liệu theo module
       template: Array.from(templatePerms(user.role)),          // gợi ý mặc định của Nhóm quyền
     },
   });
 }
 
-const PutSchema = z.object({ perms: z.array(z.string()) });
+const PutSchema = z.object({
+  perms: z.array(z.string()),
+  dataScopes: z.record(z.string(), z.union([z.literal("all"), z.array(z.string())])).optional().nullable(),
+});
 
 // PUT — lưu ma trận riêng cho account (đè lên gói mẫu).
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -43,14 +48,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   // Chỉ giữ các ô quyền HỢP LỆ (có trong danh mục).
   const valid = new Set(ALL_PERMS);
   const perms = Array.from(new Set(parsed.data.perms.filter((p) => valid.has(p))));
+  // Phạm vi dữ liệu: chỉ giữ entry của feature có áp scope; bỏ entry rỗng.
+  const rawScopes = parsed.data.dataScopes ?? {};
+  const dataScopes: Record<string, "all" | string[]> = {};
+  for (const [feat, val] of Object.entries(rawScopes)) {
+    if (!SCOPED_FEATURES.has(feat)) continue;
+    if (val === "all") dataScopes[feat] = "all";
+    else if (Array.isArray(val) && val.length) dataScopes[feat] = val;
+  }
 
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
   await prisma.accessGrant.upsert({
     where: { userId: id },
-    create: { userId: id, perms, updatedBy: (session.user as any).id },
-    update: { perms, updatedBy: (session.user as any).id },
+    create: { userId: id, perms, dataScopes, updatedBy: (session.user as any).id },
+    update: { perms, dataScopes, updatedBy: (session.user as any).id },
   });
 
   return NextResponse.json({ data: { success: true, perms } });

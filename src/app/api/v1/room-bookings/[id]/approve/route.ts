@@ -2,17 +2,32 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canApproveRoomVehicle } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
+import { resolveScope, scopeAllowsDept } from "@/lib/data-scope.server";
 
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const employeeCode = (session.user as any).employeeCode;
-  if (!canApproveRoomVehicle(employeeCode, (session.user as any).role))
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền duyệt phiếu đặt phòng họp" } }, { status: 403 });
+  const userId = (session.user as any).id;
 
   const { id } = await params;
-  const b = await prisma.roomBooking.findUnique({ where: { id } });
+  const b = await prisma.roomBooking.findUnique({
+    where: { id },
+    include: { requester: { select: { departmentId: true } } },
+  });
   if (!b) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+
+  // Duyệt được khi: (a) allowlist/role cũ, HOẶC (b) có quyền ma trận m10.phonghop.dat:approve
+  //  và phiếu thuộc PHẠM VI dữ liệu của người duyệt.
+  let canApprove = canApproveRoomVehicle(employeeCode, (session.user as any).role);
+  if (!canApprove && canUser(session.user as any, "m10.phonghop.dat:approve")) {
+    const scope = await resolveScope(userId, (session.user as any).role, "m10.phonghop.dat");
+    canApprove = scopeAllowsDept(scope, b.requester?.departmentId);
+  }
+  if (!canApprove)
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền duyệt phiếu đặt phòng họp" } }, { status: 403 });
+
   if (b.status !== "PENDING_APPROVAL")
     return NextResponse.json({ error: { code: "INVALID_STATE" } }, { status: 400 });
 
@@ -31,7 +46,6 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     error: { code: "CONFLICT", message: `Phòng đã có lịch APPROVED khác trong khung giờ: "${conflict.title}"` },
   }, { status: 409 });
 
-  const userId = (session.user as any).id;
   const data = await prisma.roomBooking.update({
     where: { id },
     data: { status: "APPROVED", approvedById: userId, approvedAt: new Date() },

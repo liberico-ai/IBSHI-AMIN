@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { isStationeryApprover } from "@/lib/stationery";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 
 const ItemSchema = z.object({
   itemId: z.string().uuid(),
@@ -23,14 +24,15 @@ export async function GET(request: NextRequest) {
   const userId = (session.user as any).id;
   const canApprove = await isStationeryApprover(userId);
 
-  // Toàn quyền (3 người chỉ định + BGĐ) → thấy TẤT CẢ.
-  // Nhân sự thường → chỉ thấy yêu cầu + lịch sử của PHÒNG mình (theo phòng của người yêu cầu).
+  // Toàn quyền (3 người chỉ định + BGĐ) → thấy TẤT CẢ. Còn lại theo PHẠM VI dữ liệu.
+  const userRole = (session.user as any).role;
   let where: any = {};
   if (!canApprove) {
-    const meEmp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
-    where = meEmp?.departmentId
-      ? { requester: { departmentId: meEmp.departmentId } }
-      : { createdById: userId }; // không có phòng → chỉ thấy phiếu của mình
+    const scope = await resolveScope(userId, userRole, "m10.vpp.denghi");
+    applyScope(where, scopeWhere(scope, {
+      deptPath: (ids) => ({ requester: { departmentId: { in: ids } } }),
+      selfPath: (empId) => ({ requesterEmployeeId: empId }),
+    }));
   }
 
   // Filter theo trạng thái + khoảng ngày (createdAt).

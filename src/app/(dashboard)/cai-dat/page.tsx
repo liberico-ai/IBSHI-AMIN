@@ -11,6 +11,7 @@ import { useCan } from "@/hooks/use-permission";
 import { useLang, useT } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { PERMISSION_CATALOG, ACTION_LABELS, templatePerms, type Action } from "@/lib/permission-catalog";
+import { SCOPED_FEATURES } from "@/lib/data-scope";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type SystemUser = {
@@ -143,6 +144,9 @@ function EditUserModal({
   const [role, setRole] = useState(user.role);
   const [isActive, setIsActive] = useState(user.isActive);
   const [perms, setPerms] = useState<Set<string>>(new Set());
+  const [scopes, setScopes] = useState<Record<string, "all" | string[]>>({}); // Phạm vi dữ liệu theo feature
+  const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
+  const [scopeFeat, setScopeFeat] = useState<string | null>(null);            // feature đang mở popup Phạm vi
   const [loadingPerms, setLoadingPerms] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -155,10 +159,15 @@ function EditUserModal({
       .then((res) => {
         const d = res.data;
         setPerms(new Set(d?.perms ?? d?.template ?? []));
+        setScopes((d?.dataScopes as Record<string, "all" | string[]>) ?? {});
       })
       .catch(() => setPerms(new Set(templatePerms(user.role))))
       .finally(() => setLoadingPerms(false));
   }, [user.id, user.role]);
+
+  useEffect(() => {
+    fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepts((res.data || []).map((x: any) => ({ id: x.id, name: x.name })))).catch(() => {});
+  }, []);
 
   // Đổi Nhóm quyền → tự tick sẵn theo gói mẫu (rồi tinh chỉnh tiếp).
   function changeRole(r: string) {
@@ -187,11 +196,11 @@ function EditUserModal({
         setError(apiError(res.status, data.error));
         return;
       }
-      // Lưu ma trận quyền chi tiết.
+      // Lưu ma trận quyền chi tiết + phạm vi dữ liệu.
       await fetch(`/api/v1/settings/users/${user.id}/permissions`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ perms: Array.from(perms) }),
+        body: JSON.stringify({ perms: Array.from(perms), dataScopes: scopes }),
       });
       onSuccess({ id: user.id, role, isActive });
     } catch {
@@ -324,6 +333,14 @@ function EditUserModal({
                             <div className="flex items-start justify-between gap-3 px-3 py-2 border-t" style={{ borderColor: "var(--ibs-border)" }}>
                               <span className="text-[12.5px] pt-1 leading-tight">{f.label}</span>
                               <div className="flex flex-wrap gap-1.5 justify-end shrink-0">
+                                {SCOPED_FEATURES.has(f.key) && (
+                                  <button type="button" onClick={() => setScopeFeat(f.key)}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border"
+                                    style={{ borderColor: "var(--ibs-warning)", color: "var(--ibs-warning)", background: "rgba(245,158,11,0.08)" }}
+                                    title="Phạm vi dữ liệu — phòng ban áp cho MỌI quyền của mục này">
+                                    📍 {scopes[f.key] === "all" ? "Tất cả" : Array.isArray(scopes[f.key]) ? `${(scopes[f.key] as string[]).length} phòng` : "Mặc định"}
+                                  </button>
+                                )}
                                 {f.actions.map((a) => {
                                   const k = `${f.key}:${a}`;
                                   const on = perms.has(k);
@@ -409,6 +426,76 @@ function EditUserModal({
             style={{ background: "var(--ibs-accent)" }}
           >
             {submitting ? "Đang lưu..." : "Lưu thay đổi"}
+          </button>
+        </div>
+      </div>
+
+      {scopeFeat && (
+        <ScopePopup
+          value={scopes[scopeFeat]}
+          depts={depts}
+          onClose={() => setScopeFeat(null)}
+          onSave={(v) => {
+            setScopes((s) => {
+              const n = { ...s };
+              if (v == null) delete n[scopeFeat]; else n[scopeFeat] = v;
+              return n;
+            });
+            setScopeFeat(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Popup chọn Phạm vi dữ liệu cho 1 module: Mặc định (theo role) / Tất cả / Chọn phòng ban.
+function ScopePopup({ value, depts, onClose, onSave }: {
+  value: "all" | string[] | undefined;
+  depts: { id: string; name: string }[];
+  onClose: () => void;
+  onSave: (v: "all" | string[] | null) => void;
+}) {
+  const initMode = value === "all" ? "all" : Array.isArray(value) ? "depts" : "default";
+  const [mode, setMode] = useState<"default" | "all" | "depts">(initMode);
+  const [sel, setSel] = useState<Set<string>>(new Set(Array.isArray(value) ? value : []));
+  const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div className="rounded-2xl border w-full max-w-[420px] max-h-[85vh] flex flex-col" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <div className="text-[15px] font-semibold">📍 Phạm vi dữ liệu</div>
+          <div className="text-[12px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>Áp cho MỌI quyền (Xem/Sửa/Duyệt…) của mục này.</div>
+        </div>
+        <div className="p-5 space-y-2 overflow-y-auto">
+          {[
+            { k: "default", l: "Mặc định theo vai trò", d: "TP → phòng mình; Xưởng trưởng → xưởng mình; nhân viên → của mình." },
+            { k: "all", l: "Tất cả phòng ban", d: "Thấy & thao tác trên mọi phòng ban trong hệ thống." },
+            { k: "depts", l: "Chọn phòng ban cụ thể", d: "Chỉ các phòng ban đã chọn bên dưới." },
+          ].map((o) => (
+            <label key={o.k} className="flex items-start gap-2 p-2 rounded-lg cursor-pointer border" style={{ borderColor: mode === o.k ? "var(--ibs-accent)" : "var(--ibs-border)" }}>
+              <input type="radio" name="scopemode" checked={mode === o.k} onChange={() => setMode(o.k as any)} className="mt-0.5" />
+              <div><div className="text-[13px] font-medium">{o.l}</div><div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{o.d}</div></div>
+            </label>
+          ))}
+          {mode === "depts" && (
+            <div className="mt-1 rounded-lg border max-h-[240px] overflow-y-auto" style={{ borderColor: "var(--ibs-border)" }}>
+              {depts.length === 0 ? <div className="px-3 py-3 text-[12px] text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải phòng ban…</div>
+                : depts.map((d) => (
+                  <label key={d.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer hover:bg-white/[0.04] border-b last:border-b-0" style={{ borderColor: "var(--ibs-border)" }}>
+                    <input type="checkbox" checked={sel.has(d.id)} onChange={() => toggle(d.id)} />
+                    {d.name}
+                  </label>
+                ))}
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2 justify-end px-5 py-4 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button onClick={() => onSave(mode === "all" ? "all" : mode === "depts" ? Array.from(sel) : null)}
+            className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)" }}>
+            Áp dụng
           </button>
         </div>
       </div>

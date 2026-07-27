@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canUser } from "@/lib/permission-catalog";
+import { resolveScope, scopeAllowsDept } from "@/lib/data-scope.server";
 
 export async function GET(
   _request: NextRequest,
@@ -36,6 +37,7 @@ export async function PUT(
   }
 
   const userRole = (session.user as any).role;
+  const userId = (session.user as any).id;
   const { id } = await params;
 
   const leaveRequest = await prisma.leaveRequest.findUnique({
@@ -84,8 +86,13 @@ export async function PUT(
     return NextResponse.json({ data: updated });
   }
 
+  // Được duyệt/từ chối nếu: role có quyền (cũ) HOẶC có quyền Duyệt ma trận + đơn thuộc PHẠM VI của mình.
+  const lscope = await resolveScope(userId, userRole, "m3.nghiphep");
+  const hasMatrixApprove = (canUser(session.user as any, "m3.nghiphep:approve1") || canUser(session.user as any, "m3.nghiphep:approve2"))
+    && scopeAllowsDept(lscope, leaveRequest.employee.departmentId);
+
   if (action === "APPROVE") {
-    if (!canDo(userRole, "leaveRequests", "approve1")) {
+    if (!(canDo(userRole, "leaveRequests", "approve1") || hasMatrixApprove)) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
     }
 
@@ -128,7 +135,7 @@ export async function PUT(
   }
 
   if (action === "REJECT") {
-    if (!canDo(userRole, "leaveRequests", "reject")) {
+    if (!(canDo(userRole, "leaveRequests", "reject") || hasMatrixApprove)) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
     }
 

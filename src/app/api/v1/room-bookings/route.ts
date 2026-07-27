@@ -5,6 +5,7 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { generateDates, applyTimeToDate } from "@/lib/recurrence";
 import { autoCancelExpiredBookings } from "@/lib/booking-autocancel";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 
 const CreateSchema = z.object({
   roomId: z.string().uuid(),
@@ -54,6 +55,12 @@ export async function GET(request: NextRequest) {
         ...(to && { lte: new Date(new Date(to).setHours(23, 59, 59, 999)) }),
       };
     }
+    // Phạm vi dữ liệu (Phòng họp): thấy phiếu của phòng trong phạm vi + phiếu của mình.
+    const scope = await resolveScope(userId, (session.user as any).role, "m10.phonghop.dat");
+    applyScope(where, scopeWhere(scope, {
+      deptPath: (ids) => ({ requester: { departmentId: { in: ids } } }),
+      selfPath: (empId) => ({ requesterId: empId }),
+    }));
   }
 
   const data = await prisma.roomBooking.findMany({

@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { leaveRequiresProof, proofDeadlineFrom } from "@/lib/leave-proof";
 import { canUser } from "@/lib/permission-catalog";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 
 const CreateLeaveSchema = z.object({
   leaveType: z.enum(["ANNUAL", "SICK", "PERSONAL", "WEDDING", "FUNERAL", "MATERNITY", "PATERNITY", "UNPAID", "WORK_ACCIDENT", "STUDY"]),
@@ -34,16 +35,12 @@ export async function GET(request: NextRequest) {
 
   const where: Record<string, unknown> = {};
 
-  if (userRole === "EMPLOYEE" || userRole === "TEAM_LEAD") {
-    const emp = await prisma.employee.findFirst({ where: { userId } });
-    // Thấy đơn của mình + đơn mình đăng ký HỘ người khác (để cả 2 bên đều thấy).
-    if (emp) where.OR = [{ employeeId: emp.id }, { registeredById: emp.id }];
-  } else if (userRole === "MANAGER") {
-    const emp = await prisma.employee.findFirst({ where: { userId } });
-    if (emp) {
-      where.employee = { departmentId: emp.departmentId };
-    }
-  }
+  // Phạm vi dữ liệu (Nghỉ phép): thấy đơn của phòng trong phạm vi + đơn của mình + đơn mình đăng ký hộ.
+  const scope = await resolveScope(userId, userRole, "m3.nghiphep");
+  applyScope(where, scopeWhere(scope, {
+    deptPath: (ids) => ({ employee: { departmentId: { in: ids } } }),
+    selfPath: (empId) => ({ OR: [{ employeeId: empId }, { registeredById: empId }] }),
+  }));
 
   if (statusFilter) where.status = statusFilter;
 

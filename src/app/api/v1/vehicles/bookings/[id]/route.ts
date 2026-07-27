@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { canApproveRoomVehicle } from "@/lib/access";
 import { canUser } from "@/lib/permission-catalog";
+import { resolveScope, scopeAllowsDept } from "@/lib/data-scope.server";
 
 const UpdateSchema = z.object({
   action: z.enum(["APPROVE", "REJECT", "COMPLETE", "CANCEL", "EDIT"]).optional(),
@@ -33,7 +34,7 @@ export async function PUT(
 
   const employeeCode = (session.user as any).employeeCode;
   const userId = (session.user as any).id;
-  const isApprover = canApproveRoomVehicle(employeeCode, (session.user as any).role);
+  const role = (session.user as any).role;
 
   const { id } = await params;
   const booking = await prisma.vehicleBooking.findUnique({
@@ -41,6 +42,12 @@ export async function PUT(
     include: { requester: { include: { user: true } } },
   });
   if (!booking) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+
+  // Duyệt được nếu: người duyệt chỉ định (cũ) HOẶC có quyền Duyệt qua ma trận + phiếu thuộc PHẠM VI của mình.
+  const vscope = await resolveScope(userId, role, "m10.xe.datxe");
+  const isApprover = canApproveRoomVehicle(employeeCode, role)
+    || ((canUser(session.user as any, "m10.xe.datxe:approve1") || canUser(session.user as any, "m10.xe.datxe:approve2"))
+        && scopeAllowsDept(vscope, (booking.requester as any)?.departmentId ?? null));
 
   const body = await request.json();
   const parsed = UpdateSchema.safeParse(body);

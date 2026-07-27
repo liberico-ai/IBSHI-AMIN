@@ -380,7 +380,8 @@ export default function NghiPhepPage() {
       .finally(() => setLoading(false));
   }, [statusFilter]);
 
-  const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
+  // Duyệt nghỉ phép: theo role duyệt (cũ) HOẶC có quyền Duyệt qua ma trận (C1/C2) — ai có quyền là thấy + duyệt.
+  const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || can("m3.nghiphep:approve1") || can("m3.nghiphep:approve2");
   // Đăng ký nghỉ hộ: quyền riêng m3.nghiphep:proxy ("ĐK hộ") — admin tick đích danh, tách khỏi Sửa.
   const canProxy = can("m3.nghiphep:proxy");
   const isHR = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";

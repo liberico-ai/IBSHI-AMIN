@@ -5,6 +5,7 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { generateDates, applyTimeToDate } from "@/lib/recurrence";
 import { autoCancelExpiredBookings } from "@/lib/booking-autocancel";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 
 const VehiclePurposeEnum = z.enum(["DELIVERY", "CLIENT_PICKUP", "BUSINESS_TRIP", "PROCUREMENT", "OTHER"]);
 
@@ -50,14 +51,12 @@ export async function GET(request: NextRequest) {
   // Tự động hủy phiếu chưa duyệt đã qua ngày (đảm bảo trạng thái luôn đúng khi xem).
   await autoCancelExpiredBookings();
 
-  // MANAGER sees only their department's bookings
-  if (userRole === "MANAGER") {
-    const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
-    if (emp) where.requester = { departmentId: emp.departmentId };
-  } else if (userRole === "EMPLOYEE" || userRole === "TEAM_LEAD") {
-    const emp = await prisma.employee.findFirst({ where: { userId }, select: { id: true } });
-    if (emp) where.requestedBy = emp.id;
-  }
+  // Phạm vi dữ liệu theo module (Đặt xe): thấy lịch của các phòng trong phạm vi + của chính mình.
+  const scope = await resolveScope(userId, userRole, "m10.xe.datxe");
+  applyScope(where, scopeWhere(scope, {
+    deptPath: (ids) => ({ requester: { departmentId: { in: ids } } }),
+    selfPath: (id) => ({ requestedBy: id }),
+  }));
 
   const data = await prisma.vehicleBooking.findMany({
     where,

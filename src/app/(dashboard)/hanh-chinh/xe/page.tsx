@@ -261,7 +261,8 @@ export default function XePage() {
   // Quản lý đội xe (thêm/sửa xe, nhật ký, bảo trì) theo ma trận m10.xe:edit.
   const canManage = can("m10.xe:edit");
   // Duyệt phiếu đặt xe: giữ luồng người-duyệt chỉ định (ROOM_VEHICLE_APPROVERS), không theo ma trận phẳng.
-  const canApproveBooking = canApproveRoomVehicle(employeeCode, userRole);
+  // Duyệt đặt xe: người duyệt được chỉ định (cũ) HOẶC có quyền Duyệt qua ma trận (C1/C2).
+  const canApproveBooking = canApproveRoomVehicle(employeeCode, userRole) || can("m10.xe.datxe:approve1") || can("m10.xe.datxe:approve2");
 
   async function handleBookingAction(id: string, action: "APPROVE" | "REJECT", driverName?: string, vehicleId?: string): Promise<boolean> {
     const res = await fetch(`/api/v1/vehicles/bookings/${id}`, {

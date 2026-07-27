@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { isInPast } from "@/lib/validation";
 import { getDirectedKhoiIds, departmentIdsOfKhois, directorsOfDepartment } from "@/lib/ot-khoi";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 
 const CreateOTSchema = z.object({
   date: z.string().transform((s) => new Date(s)),
@@ -36,12 +37,13 @@ export async function GET(request: NextRequest) {
 
   const where: Record<string, unknown> = {};
 
-  if (userRole === "EMPLOYEE" || userRole === "TEAM_LEAD") {
-    const emp = await prisma.employee.findFirst({ where: { userId } });
-    if (emp) where.employeeId = emp.id;
-  } else if (userRole === "MANAGER") {
-    const emp = await prisma.employee.findFirst({ where: { userId } });
-    if (emp) where.employee = { departmentId: emp.departmentId };
+  if (userRole === "EMPLOYEE" || userRole === "TEAM_LEAD" || userRole === "MANAGER") {
+    // Phạm vi dữ liệu (Tăng ca) cho role thường; mặc định MANAGER=phòng mình, còn lại=chỉ mình.
+    const scope = await resolveScope(userId, userRole, "m3.tangca");
+    applyScope(where, scopeWhere(scope, {
+      deptPath: (ids) => ({ employee: { departmentId: { in: ids } } }),
+      selfPath: (empId) => ({ employeeId: empId }),
+    }));
   } else {
     // BOM/HR_ADMIN/ADMIN: nếu là GIÁM ĐỐC KHỐI → CHỈ thấy đơn của phòng ban thuộc (các) khối mình.
     const khoiIds = await getDirectedKhoiIds(userId);

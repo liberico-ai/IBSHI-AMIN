@@ -210,6 +210,7 @@ model AccessGrant {
   id        String   @id @default(uuid())
   userId    String   @unique
   perms     String[] @default([])
+  dataScopes Json?   // Phạm vi dữ liệu theo module: { "m10.xe.datxe": "all" | ["deptId",...], ... }
   updatedAt DateTime @updatedAt
   updatedBy String?
 

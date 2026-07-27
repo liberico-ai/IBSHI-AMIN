@@ -1582,7 +1582,7 @@ export default function EmployeeDetailPage({ params }: { params: { id: string } 
             )}
           </div>
           <div className="text-[13px] mb-3" style={{ color: "var(--ibs-text-dim)" }}>
-            {employee.code} · {employee.department.name} · {employee.jobRole || employee.position.name}
+            {employee.code} · {employee.department.name} · {employee.jobPosition || employee.jobRole || employee.position.name}
             {employee.team && ` · ${employee.team.name}`}
           </div>
           <div className="flex items-center gap-5 flex-wrap">

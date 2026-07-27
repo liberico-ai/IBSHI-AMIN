@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canViewPayroll } from "@/lib/access";
 import { canUser } from "@/lib/permission-catalog";
+import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 import { hashSync } from "bcryptjs";
 import { uniqueCompanyEmail } from "@/lib/email-gen";
@@ -55,18 +56,13 @@ export async function GET(request: NextRequest) {
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
 
-  // Build where clause based on role
+  // Phạm vi dữ liệu (Hồ sơ): thấy NV của các phòng trong phạm vi + hồ sơ của chính mình.
   const where: Record<string, unknown> = {};
-
-  if (userRole === "EMPLOYEE" || userRole === "TEAM_LEAD") {
-    // Can only see themselves
-    where.userId = userId;
-  } else if (userRole === "MANAGER") {
-    // Can see their department
-    const manager = await prisma.employee.findFirst({ where: { userId } });
-    if (manager) where.departmentId = manager.departmentId;
-  }
-  // HR_ADMIN and BOM can see all
+  const scope = await resolveScope(userId, userRole, "m1.hoso");
+  applyScope(where, scopeWhere(scope, {
+    deptPath: (ids) => ({ departmentId: { in: ids } }),
+    selfPath: (empId) => ({ id: empId }),
+  }));
 
   if (search) {
     where.OR = [
