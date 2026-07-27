@@ -350,6 +350,8 @@ function PeriodDetailModal({
   period: PeriodDetail;
   onClose: () => void;
 }) {
+  const can = useCan();
+  const canViewSlip = can("m7.phieuluong:view");
   const [slipRecord, setSlipRecord] = useState<PayrollRecord | null>(null);
   const [deptFilter, setDeptFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -549,7 +551,9 @@ function PeriodDetailModal({
                     {COLS.map((c) => {
                       const val = v[c.k];
                       const bc = "rgba(51,65,85,0.3)";
-                      if (c.t === "name") return <td key={c.k} className="px-2 py-1.5 border-b whitespace-nowrap" style={{ borderColor: bc }}><button onClick={() => setSlipRecord(r)} className="hover:underline text-left" style={{ color: "var(--ibs-accent)", fontWeight: 600 }} title="Xem phiếu lương">{val}</button></td>;
+                      if (c.t === "name") return <td key={c.k} className="px-2 py-1.5 border-b whitespace-nowrap" style={{ borderColor: bc }}>{canViewSlip
+                        ? <button onClick={() => setSlipRecord(r)} className="hover:underline text-left" style={{ color: "var(--ibs-accent)", fontWeight: 600 }} title="Xem phiếu lương">{val}</button>
+                        : <span style={{ fontWeight: 600 }}>{val}</span>}</td>;
                       if (c.t === "pdf") return <td key={c.k} className="px-2 py-1.5 border-b text-center" style={{ borderColor: bc }}><a href={`/api/v1/payroll/${period.id}/slip/pdf?employeeId=${r.employeeId}`} download className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-accent)" }}><Download size={10} /> PDF</a></td>;
                       if (c.t === "text") return <td key={c.k} className="px-2 py-1.5 border-b whitespace-nowrap" style={{ borderColor: bc, color: c.k === "code" ? "var(--ibs-accent)" : "var(--ibs-text-dim)", fontFamily: c.k === "code" ? "monospace" : undefined, fontWeight: c.k === "code" ? 600 : undefined }}>{val}</td>;
                       if (c.t === "num") return <td key={c.k} className="px-2 py-1.5 border-b text-center" style={{ borderColor: bc }}>{(val || 0).toLocaleString("vi-VN", { maximumFractionDigits: 4 })}</td>;
@@ -1185,14 +1189,16 @@ export default function LuongPage() {
               {calculatingId === row.id ? "Đang tính..." : row.status === "DRAFT" ? "Tính lương" : "Tính lại"}
             </button>
           )}
-          <button
-            onClick={() => handleViewDetail(row.id)}
-            disabled={loadingDetail}
-            className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
-            style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}
-          >
-            Xem chi tiết
-          </button>
+          {can("m7.bangluong:view") && (
+            <button
+              onClick={() => handleViewDetail(row.id)}
+              disabled={loadingDetail}
+              className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
+              style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}
+            >
+              Xem chi tiết
+            </button>
+          )}
           {(canManage || isBOM || isHRAdmin) && (
             <button
               onClick={(e) => { const b = e.currentTarget.getBoundingClientRect(); setActionMenu({ row, x: b.right, y: b.bottom }); }}
