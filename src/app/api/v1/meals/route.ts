@@ -7,7 +7,7 @@ import { z } from "zod";
 import { MEAL_UNIT_PRICE, MEAL_PRICE_EMPLOYEE, MEAL_PRICE_SUBCONTRACTOR, guestMealCost } from "@/lib/constants";
 import { computeFifo } from "@/lib/food-inventory";
 import { isAfterMealCutoff } from "@/services/meal.service";
-import { resolveScope, applyScope } from "@/lib/data-scope.server";
+import { resolveScope, applyScope, canActOnDeptScope } from "@/lib/data-scope.server";
 
 const RegisterSchema = z.object({
   departmentId: z.string().uuid(),
@@ -301,12 +301,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "MEAL_CUTOFF", message: "Ngoài hạn đăng ký suất ăn (chỉ đăng ký trong 3 ngày gần nhất; hôm nay chốt trước 9h sáng). Vui lòng dùng Đăng ký bổ sung." } }, { status: 403 });
   }
 
-  // MANAGER can only register for their own department
-  if (!canUser(session.user as any, "m10.nhaan.dangky:approve")) {
-    const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
-    if (!emp || emp.departmentId !== departmentId) {
-      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ có thể đăng ký bữa ăn cho phòng ban của mình" } }, { status: 403 });
-    }
+  // Chặn theo PHẠM VI dữ liệu — Phạm vi bọc MỌI quyền, KHÔNG bypass. HR/BGĐ/ADMIN scope=Tất cả nên vẫn
+  //  đặt được mọi phòng; đầu mối được cấp 5 Xưởng thì đúng 5 Xưởng; NV thường mặc định = phòng của mình.
+  if (!(await canActOnDeptScope(userId, userRole, "m10.nhaan.dangky", departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền đăng ký suất ăn cho phòng ban này (ngoài phạm vi được cấp)" } }, { status: 403 });
   }
 
   const registeredBy = userId;
@@ -354,6 +352,7 @@ export async function PUT(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userId = (session.user as any).id;
+  const userRole = (session.user as any).role;
   if (!canUser(session.user as any, "m10.nhaan.dangky:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
@@ -364,12 +363,9 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Thiếu departmentId / date" } }, { status: 400 });
   }
 
-  // MANAGER (không có quyền duyệt = không phải HCNS) chỉ sửa phòng mình.
-  if (!canUser(session.user as any, "m10.nhaan.dangky:approve")) {
-    const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
-    if (!emp || emp.departmentId !== departmentId) {
-      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ sửa bữa ăn của phòng ban mình" } }, { status: 403 });
-    }
+  // Chặn theo PHẠM VI dữ liệu (giống POST) — không bypass.
+  if (!(await canActOnDeptScope(userId, userRole, "m10.nhaan.dangky", departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền sửa suất ăn của phòng ban này (ngoài phạm vi được cấp)" } }, { status: 403 });
   }
 
   // Khách theo đơn giá → tổng khách. guestByPrice = { "20000": 5, "60000": 2 }
@@ -408,7 +404,7 @@ export async function DELETE(request: NextRequest) {
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canUser(session.user as any, "m10.nhaan.dangky:create")) {
+  if (!canUser(session.user as any, "m10.nhaan.dangky:delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
@@ -420,12 +416,9 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "departmentId and date are required" } }, { status: 400 });
   }
 
-  // MANAGER can only delete registrations for their own department
-  if (!canUser(session.user as any, "m10.nhaan.dangky:approve")) {
-    const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
-    if (!emp || emp.departmentId !== departmentId) {
-      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ có thể xóa bữa ăn của phòng ban mình" } }, { status: 403 });
-    }
+  // Chặn theo PHẠM VI dữ liệu (giống POST) — không bypass.
+  if (!(await canActOnDeptScope(userId, userRole, "m10.nhaan.dangky", departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền xóa suất ăn của phòng ban này (ngoài phạm vi được cấp)" } }, { status: 403 });
   }
 
   await prisma.mealRegistration.deleteMany({

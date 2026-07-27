@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
+import { canActOnDeptScope } from "@/lib/data-scope.server";
 import { logAudit } from "@/lib/audit";
 import { isDirectorOfDepartment } from "@/lib/ot-khoi";
 
@@ -30,13 +32,14 @@ export async function PUT(
   const body = await request.json();
   const { action, note } = body as { action: "APPROVE" | "REJECT"; note?: string };
 
-  // ── Luồng A (chốt 2026-07-06): CHỈ Giám đốc KHỐI phụ trách phòng ban của đơn (hoặc ADMIN) mới duyệt/từ chối.
-  //    Tổ trưởng/TP chỉ ĐỀ XUẤT, không duyệt nữa. Đơn duyệt 1 bước: PENDING → APPROVED.
-  //    1 khối có thể nhiều GĐ → BẤT KỲ GĐ nào của khối đều duyệt được.
+  // Duyệt/từ chối OT khi: Giám đốc KHỐI phụ trách (luồng cũ), HOẶC ADMIN, HOẶC người có quyền Duyệt
+  //  (tickbox m3.tangca:approve) VÀ đơn thuộc PHẠM VI được cấp (mặc định = phòng mình).
   const isKhoiDirector = await isDirectorOfDepartment(userId, otRequest.employee.departmentId);
-  if (!isKhoiDirector && userRole !== "ADMIN") {
+  const byScope = canUser(session.user as any, "m3.tangca:approve")
+    && await canActOnDeptScope(userId, userRole, "m3.tangca", otRequest.employee.departmentId);
+  if (!isKhoiDirector && userRole !== "ADMIN" && !byScope) {
     return NextResponse.json(
-      { error: { code: "FORBIDDEN", message: "Chỉ Giám đốc khối phụ trách mới được duyệt/từ chối đơn tăng ca này." } },
+      { error: { code: "FORBIDDEN", message: "Bạn không có quyền duyệt/từ chối đơn tăng ca này (ngoài phạm vi được cấp)." } },
       { status: 403 }
     );
   }

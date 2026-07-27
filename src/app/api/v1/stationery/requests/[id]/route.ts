@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnDeptScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const ItemSchema = z.object({
@@ -20,7 +21,7 @@ const UpdateSchema = z.object({
 async function loadEditable(id: string) {
   const row = await prisma.stationeryRequest.findUnique({
     where: { id },
-    select: { id: true, createdById: true, status: true },
+    select: { id: true, createdById: true, status: true, requester: { select: { departmentId: true } } },
   });
   return row;
 }
@@ -38,8 +39,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ sửa được phiếu đang CHỜ DUYỆT" } }, { status: 400 });
   }
   const isOwner = row.createdById === userId;
-  if (!isOwner && !canUser(session.user as any, "m10.vpp.denghi:edit")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền sửa mới sửa được" } }, { status: 403 });
+  if (!isOwner) {
+    // Phạm vi trước — phiếu phải thuộc phòng trong phạm vi; rồi mới tới quyền Sửa (tickbox).
+    if (!(await canActOnDeptScope((session.user as any).id, (session.user as any).role, "m10.vpp.denghi", row.requester?.departmentId ?? "")))
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Phiếu này ngoài phạm vi được cấp" } }, { status: 403 });
+    if (!canUser(session.user as any, "m10.vpp.denghi:edit"))
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền sửa mới sửa được" } }, { status: 403 });
   }
 
   const body = UpdateSchema.parse(await request.json());
@@ -84,8 +89,11 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ xóa được phiếu đang CHỜ DUYỆT" } }, { status: 400 });
   }
   const isOwner = row.createdById === userId;
-  if (!isOwner && !canUser(session.user as any, "m10.vpp.denghi:delete")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền xóa mới xóa được" } }, { status: 403 });
+  if (!isOwner) {
+    if (!(await canActOnDeptScope((session.user as any).id, (session.user as any).role, "m10.vpp.denghi", row.requester?.departmentId ?? "")))
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Phiếu này ngoài phạm vi được cấp" } }, { status: 403 });
+    if (!canUser(session.user as any, "m10.vpp.denghi:delete"))
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền xóa mới xóa được" } }, { status: 403 });
   }
 
   await prisma.stationeryRequest.delete({ where: { id } });

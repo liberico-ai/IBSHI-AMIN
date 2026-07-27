@@ -2,26 +2,31 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnDeptScope } from "@/lib/data-scope.server";
 
 // DELETE — xóa phiếu đăng ký suất ăn BỔ SUNG khi còn CHỜ DUYỆT (chống rác).
-// Quyền: CHỦ PHIẾU (tự xóa phiếu mình) hoặc người có quyền ma trận m10.nhaan.dangky:delete.
+// Quyền: CHỦ PHIẾU (tự xóa phiếu mình) hoặc người có quyền ma trận m10.nhaan.dangky:delete TRONG PHẠM VI.
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userId = (session.user as any).id;
+  const userRole = (session.user as any).role;
 
   const { id } = await params;
   const req = await prisma.mealSupplementaryRequest.findUnique({
     where: { id },
-    select: { requestedBy: true, status: true },
+    select: { requestedBy: true, status: true, departmentId: true },
   });
   if (!req) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   if (req.status !== "PENDING") {
     return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ xóa được phiếu đang CHỜ DUYỆT" } }, { status: 400 });
   }
   const isOwner = req.requestedBy === userId;
-  if (!isOwner && !canUser(session.user as any, "m10.nhaan.dangky:delete")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền xóa mới xóa được" } }, { status: 403 });
+  if (!isOwner) {
+    if (!canUser(session.user as any, "m10.nhaan.dangky:delete"))
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền xóa mới xóa được" } }, { status: 403 });
+    if (!(await canActOnDeptScope(userId, userRole, "m10.nhaan.dangky", req.departmentId)))
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Đơn này ngoài phạm vi được cấp" } }, { status: 403 });
   }
 
   await prisma.mealSupplementaryRequest.delete({ where: { id } });

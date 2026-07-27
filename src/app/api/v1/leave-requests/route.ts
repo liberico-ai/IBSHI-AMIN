@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { leaveRequiresProof, proofDeadlineFrom } from "@/lib/leave-proof";
 import { canUser } from "@/lib/permission-catalog";
-import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
+import { resolveScope, scopeWhere, applyScope, canActOnEmployeeScope } from "@/lib/data-scope.server";
 
 const CreateLeaveSchema = z.object({
   leaveType: z.enum(["ANNUAL", "SICK", "PERSONAL", "WEDDING", "FUNERAL", "MATERNITY", "PATERNITY", "UNPAID", "WORK_ACCIDENT", "STUDY"]),
@@ -117,6 +117,12 @@ export async function POST(request: NextRequest) {
   if (targetEmployeeId && targetEmployeeId !== creator.id) {
     if (!canProxyLeave(session.user as any)) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền đăng ký nghỉ hộ người khác" } }, { status: 403 });
+    }
+    // PHẠM VI: chỉ đăng ký hộ cho NV thuộc phạm vi được cấp; mặc định (không chọn phòng) = chỉ phòng mình.
+    const uId = (session.user as any).id;
+    const uRole = (session.user as any).role;
+    if (!(await canActOnEmployeeScope(uId, uRole, "m3.nghiphep", targetEmployeeId))) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Nhân sự này ngoài phạm vi được cấp (chỉ đăng ký hộ cho phòng trong phạm vi)" } }, { status: 403 });
     }
     const target = await prisma.employee.findUnique({ where: { id: targetEmployeeId }, include: { department: true } });
     if (!target) {

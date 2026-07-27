@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnDeptScope, resolveScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 import { SUBCONTRACTOR_DEPT_SENTINEL, getSubcontractorDepartmentId } from "@/services/meal.service";
 import { MEAL_SUPP_CUTOFF_HOUR, MEAL_SUPP_CUTOFF_MINUTE } from "@/lib/constants";
@@ -50,10 +51,26 @@ export async function GET(request: NextRequest) {
   const from = searchParams.get("from") || "";
   const to = searchParams.get("to") || "";
 
-  // Người có quyền duyệt (ma trận) xem tất cả; người khác chỉ xem phiếu mình tạo.
+  // Người có quyền duyệt xem theo PHẠM VI (HR=tất cả; đầu mối=5 Xưởng + đơn mình);
+  //  người không duyệt chỉ xem phiếu mình tạo.
   const canApp = canUser(session.user as any, "m10.nhaan.dangky:approve");
   const where: any = {};
-  if (!canApp) where.requestedBy = userId;
+  if (!canApp) {
+    where.requestedBy = userId;
+  } else {
+    const scope = await resolveScope(userId, role, "m10.nhaan.dangky");
+    if (!("all" in scope)) {
+      let deptIds = scope.deptIds;
+      if (deptIds.length === 0) {
+        const emp = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
+        if (emp?.departmentId) deptIds = [emp.departmentId];
+      }
+      where.OR = [
+        ...(deptIds.length ? [{ departmentId: { in: deptIds } }] : []),
+        { requestedBy: userId },
+      ];
+    }
+  }
   if (status) where.status = status;
   if (from || to) {
     const f = from ? new Date(new Date(from).setHours(0, 0, 0, 0)) : undefined;
@@ -94,6 +111,11 @@ export async function POST(request: NextRequest) {
   }
 
   const departmentId = b.departmentId === SUBCONTRACTOR_DEPT_SENTINEL ? await getSubcontractorDepartmentId() : b.departmentId;
+
+  // Chặn theo PHẠM VI dữ liệu (giống Đăng ký thường) — không bypass.
+  if (!(await canActOnDeptScope(userId, role, "m10.nhaan.dangky", departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền đăng ký bổ sung cho phòng ban này (ngoài phạm vi được cấp)" } }, { status: 403 });
+  }
 
   const data = await prisma.mealSupplementaryRequest.create({
     data: {
