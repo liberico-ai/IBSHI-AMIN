@@ -26,6 +26,7 @@ type OTRequest = {
   projectCode?: string | null;
   memberIds?: string[];
   memberNames?: string[];
+  memberProjects?: { id: string; employeeId: string; employeeName: string; projectCode: string; hours: number }[];
   employee: {
     id: string;
     code: string;
@@ -47,9 +48,22 @@ const OT_RATE_LABELS: Record<string, string> = {
   "3":   "×3.0 (ngày lễ)",
 };
 
+// Giờ OT từ khung giờ (làm tròn 2 số lẻ).
+function calcHours(start: string, end: string): number {
+  if (!start || !end) return 0;
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  return Math.max(0, Math.round(((eh * 60 + em - sh * 60 - sm) / 60) * 100) / 100);
+}
+type ProjAlloc = { projectCode: string; hours: number };
+
 // ── New OT Dialog ──────────────────────────────────────────────────────────────
 function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (item: OTRequest) => void }) {
-  const [form, setForm] = useState({ date: "", startTime: "17:30", endTime: "20:00", reason: "", projectCode: "" });
+  const [form, setForm] = useState({ date: "", startTime: "17:30", endTime: "20:00", reason: "" });
+  // Phân bổ dự án theo TỪNG NV: { employeeId: [{projectCode, hours}, ...] }
+  const [memberProjects, setMemberProjects] = useState<Record<string, ProjAlloc[]>>({});
+  // Lý do tăng ca theo TỪNG NV: { employeeId: "lý do" }
+  const [memberReasons, setMemberReasons] = useState<Record<string, string>>({});
   const [emps, setEmps] = useState<{ id: string; fullName: string; team?: { id: string; name: string } | null; department?: { id: string; name: string } | null }[]>([]);
   const [empsLoaded, setEmpsLoaded] = useState(false);
   const [groupKey, setGroupKey] = useState(""); // "dept:<id>" hoặc "team:<id>"
@@ -85,22 +99,63 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     return (type === "dept" ? departments.find((d) => d.id === id)?.name : teams.find((t) => t.id === id)?.name) || "";
   }, [groupKey, departments, teams]);
 
-  // Tổ trưởng chỉ có đúng 1 tổ → tự chọn sẵn.
+  const durationH = calcHours(form.startTime, form.endTime);
+
+  // Tổ trưởng chỉ có đúng 1 tổ → tự chọn sẵn NHÓM (không tự tích nhân sự — mặc định chưa tích ai).
   useEffect(() => {
     if (teams.length === 1 && !groupKey) {
-      const k = "team:" + teams[0].id;
-      setGroupKey(k);
-      setMemberIds(membersOfKey(k).map((e) => e.id));
+      setGroupKey("team:" + teams[0].id);
     }
   }, [teams, groupKey, emps]); // eslint-disable-line
 
+  // Khi đổi khung giờ → cập nhật giờ cho NV chỉ có 1 dòng dự án (còn nhiều dòng thì user tự chia).
+  useEffect(() => {
+    setMemberProjects((prev) => {
+      const n: Record<string, ProjAlloc[]> = {};
+      for (const [id, rows] of Object.entries(prev)) {
+        n[id] = rows.length === 1 ? [{ ...rows[0], hours: durationH }] : rows;
+      }
+      return n;
+    });
+  }, [durationH]); // eslint-disable-line
+
   function selectGroup(key: string) {
     setGroupKey(key);
-    setMemberIds(membersOfKey(key).map((e) => e.id)); // mặc định chọn cả nhóm
+    setMemberIds([]);            // MẶC ĐỊNH KHÔNG tích ai — tự chọn từng NV
+    setMemberProjects({});
+    setMemberReasons({});
     setError(null);
   }
   function toggleMember(id: string) {
     setMemberIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    setMemberProjects((prev) => {
+      const n = { ...prev };
+      if (n[id]) delete n[id]; else n[id] = [{ projectCode: "", hours: durationH }];
+      return n;
+    });
+    setMemberReasons((prev) => {
+      const n = { ...prev };
+      if (id in n) delete n[id]; else n[id] = "";
+      return n;
+    });
+  }
+  function setMemberReason(id: string, value: string) {
+    setMemberReasons((prev) => ({ ...prev, [id]: value }));
+    setError(null);
+  }
+  // Handlers phân bổ dự án cho 1 NV.
+  function addProj(empId: string) {
+    setMemberProjects((prev) => ({ ...prev, [empId]: [...(prev[empId] ?? []), { projectCode: "", hours: 0 }] }));
+  }
+  function removeProj(empId: string, idx: number) {
+    setMemberProjects((prev) => ({ ...prev, [empId]: (prev[empId] ?? []).filter((_, i) => i !== idx) }));
+  }
+  function setProj(empId: string, idx: number, field: keyof ProjAlloc, value: string) {
+    setMemberProjects((prev) => ({
+      ...prev,
+      [empId]: (prev[empId] ?? []).map((r, i) => i === idx ? { ...r, [field]: field === "hours" ? Number(value) : value } : r),
+    }));
+    setError(null);
   }
 
   function handleChange(field: string, value: string) {
@@ -120,6 +175,26 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     setError(null);
     if (!groupKey) { setError("Vui lòng chọn Phòng ban / Tổ"); return; }
     if (memberIds.length === 0) { setError("Vui lòng chọn ít nhất 1 nhân sự"); return; }
+
+    // Dựng danh sách NV × dự án × giờ + validate: mỗi NV phải chọn dự án, nhập lý do, và tổng giờ = giờ OT.
+    const nameOf = (id: string) => emps.find((e2) => e2.id === id)?.fullName || "";
+    const memberProjectsPayload: { employeeId: string; employeeName: string; projectCode: string; hours: number; reason: string }[] = [];
+    for (const id of memberIds) {
+      const rows = memberProjects[id] ?? [];
+      const rsn = (memberReasons[id] || "").trim();
+      if (rows.length === 0 || rows.some((r) => !r.projectCode)) {
+        setError(`Chọn dự án cho ${nameOf(id)}`); return;
+      }
+      if (!rsn) { setError(`Nhập lý do tăng ca cho ${nameOf(id)}`); return; }
+      const sum = rows.reduce((s, r) => s + (r.hours || 0), 0);
+      if (Math.abs(sum - durationH) > 0.01) {
+        setError(`Tổng giờ dự án của ${nameOf(id)} (${sum}h) phải bằng giờ OT (${durationH}h)`); return;
+      }
+      for (const r of rows) memberProjectsPayload.push({ employeeId: id, employeeName: nameOf(id), projectCode: r.projectCode, hours: r.hours, reason: rsn });
+    }
+    // Lý do cấp đơn (tương thích cột cũ): gộp các lý do khác nhau của NV.
+    const batchReason = Array.from(new Set(memberIds.map((id) => (memberReasons[id] || "").trim()).filter(Boolean))).join(" | ");
+
     setSaving(true);
     try {
       const groupId = groupKey.split(":")[1] || null;
@@ -127,7 +202,7 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
       const res = await fetch("/api/v1/ot-requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, teamId: groupId, teamName: groupName || null, memberIds, memberNames }),
+        body: JSON.stringify({ date: form.date, startTime: form.startTime, endTime: form.endTime, reason: batchReason, teamId: groupId, teamName: groupName || null, memberIds, memberNames, memberProjects: memberProjectsPayload }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -143,9 +218,6 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
   }
 
   const otRate = getOTRate(form.date);
-  const durationH = form.startTime && form.endTime
-    ? Math.max(0, (parseInt(form.endTime.split(":")[0]) * 60 + parseInt(form.endTime.split(":")[1]) - parseInt(form.startTime.split(":")[0]) * 60 - parseInt(form.startTime.split(":")[1])) / 60)
-    : 0;
 
   const inputCls = "w-full px-3 py-2 rounded-lg text-[13px] outline-none";
   const inputStyle = { background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" };
@@ -154,12 +226,13 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
-      <div className="w-full max-w-[460px] rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
-        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+      <div className="w-full max-w-[460px] max-h-[90vh] flex flex-col rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: "var(--ibs-border)" }}>
           <h3 className="text-[15px] font-semibold">Đề xuất tăng ca</h3>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
+          <div className="p-5 space-y-4 overflow-y-auto">
           {error && (
             <div className="text-[13px] px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>
               {error}
@@ -200,13 +273,46 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
             </div>
           )}
 
-          <div>
-            <label className={labelCls} style={labelStyle}>Dự án <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>(cho danh sách này)</span></label>
-            <select value={form.projectCode} onChange={(e) => handleChange("projectCode", e.target.value)} className={inputCls} style={inputStyle}>
-              <option value="">-- Chọn dự án --</option>
-              {OT_PROJECTS.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </div>
+          {memberIds.length > 0 && (
+            <div>
+              <label className={labelCls} style={labelStyle}>Dự án theo nhân sự <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>(mỗi NV chia giờ OT theo dự án, tổng = {durationH}h)</span></label>
+              <div className="space-y-2">
+                {memberIds.map((id) => {
+                  const rows = memberProjects[id] ?? [];
+                  const sum = rows.reduce((s, r) => s + (r.hours || 0), 0);
+                  const ok = Math.abs(sum - durationH) < 0.01;
+                  const name = emps.find((e2) => e2.id === id)?.fullName || "";
+                  return (
+                    <div key={id} className="rounded-lg border p-2" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg)" }}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[12.5px] font-medium">{name}</span>
+                        <span className="text-[11px] font-semibold" style={{ color: ok ? "var(--ibs-accent)" : "var(--ibs-danger)" }}>{sum}/{durationH}h</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {rows.map((r, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5">
+                            <select value={r.projectCode} onChange={(e) => setProj(id, idx, "projectCode", e.target.value)} className="flex-1 px-2 py-1.5 rounded-md text-[12px] outline-none" style={inputStyle}>
+                              <option value="">-- Dự án --</option>
+                              {OT_PROJECTS.map((p) => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                            <input type="number" step="0.5" min="0" value={r.hours} onChange={(e) => setProj(id, idx, "hours", e.target.value)} className="w-16 px-2 py-1.5 rounded-md text-[12px] outline-none text-right" style={inputStyle} />
+                            <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>h</span>
+                            {rows.length > 1 && (
+                              <button type="button" onClick={() => removeProj(id, idx)} className="px-1.5 text-[12px]" style={{ color: "var(--ibs-danger)" }} title="Xóa dự án">×</button>
+                            )}
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => addProj(id)} className="text-[11px] font-medium" style={{ color: "var(--ibs-accent)" }}>＋ Thêm dự án</button>
+                      </div>
+                      <textarea rows={2} value={memberReasons[id] ?? ""} onChange={(e) => setMemberReason(id, e.target.value)}
+                        placeholder="Lý do tăng ca..."
+                        className="w-full mt-1.5 px-2 py-1.5 rounded-md text-[12px] outline-none resize-none" style={inputStyle} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div>
             <label className={labelCls} style={labelStyle}>Ngày tăng ca *</label>
@@ -241,15 +347,8 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
             </div>
           )}
 
-          <div>
-            <label className={labelCls} style={labelStyle}>Lý do *</label>
-            <textarea required rows={3} minLength={5}
-              value={form.reason} onChange={(e) => handleChange("reason", e.target.value)}
-              placeholder="Mô tả công việc cần tăng ca..."
-              className={`${inputCls} resize-none`} style={inputStyle} />
           </div>
-
-          <div className="flex gap-3 pt-1">
+          <div className="flex gap-3 p-5 pt-3 border-t shrink-0" style={{ borderColor: "var(--ibs-border)" }}>
             <button type="button" onClick={onClose}
               className="flex-1 py-2 rounded-lg text-[13px] font-medium"
               style={{ border: "1px solid var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
@@ -434,7 +533,16 @@ export default function TangCaPage() {
                           </div>
                         </>
                       )}
-                      {r.projectCode && <div className="text-[10px] mt-1 inline-block px-1.5 py-0.5 rounded font-medium" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>📁 {r.projectCode}</div>}
+                      {(r.memberProjects?.length ?? 0) > 0 ? (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {Object.entries((r.memberProjects ?? []).reduce((acc, mp) => { acc[mp.projectCode] = (acc[mp.projectCode] || 0) + mp.hours; return acc; }, {} as Record<string, number>))
+                            .map(([proj, h]) => (
+                              <span key={proj} className="text-[10px] inline-block px-1.5 py-0.5 rounded font-medium" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }} title={`${proj}: ${h}h (tổng các NV)`}>📁 {proj} · {h}h</span>
+                            ))}
+                        </div>
+                      ) : r.projectCode ? (
+                        <div className="text-[10px] mt-1 inline-block px-1.5 py-0.5 rounded font-medium" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>📁 {r.projectCode}</div>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-[13px]">
                       <span className="flex items-center gap-1" style={{ color: "var(--ibs-text-muted)" }}>

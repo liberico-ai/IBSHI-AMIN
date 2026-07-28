@@ -10,13 +10,21 @@ const CreateOTSchema = z.object({
   date: z.string().transform((s) => new Date(s)),
   startTime: z.string().regex(/^\d{2}:\d{2}$/, "Giờ bắt đầu không hợp lệ (HH:mm)"),
   endTime: z.string().regex(/^\d{2}:\d{2}$/, "Giờ kết thúc không hợp lệ (HH:mm)"),
-  reason: z.string().min(5, "Lý do phải ít nhất 5 ký tự"),
+  reason: z.string().min(1, "Vui lòng nhập lý do"),   // lý do gộp từ các NV (chi tiết theo từng NV ở memberProjects)
   otRate: z.number().optional(),
   teamId: z.string().optional().nullable(),
   teamName: z.string().optional().nullable(),
-  projectCode: z.string().optional().nullable(),   // Dự án của đợt tăng ca
+  projectCode: z.string().optional().nullable(),   // (cũ) Dự án chung của đợt — giữ tương thích
   memberIds: z.array(z.string()).optional(),
   memberNames: z.array(z.string()).optional(),
+  // MỚI: mỗi NV × dự án × giờ (1 NV có thể nhiều dự án). Tổng giờ mỗi NV = giờ OT của đơn.
+  memberProjects: z.array(z.object({
+    employeeId: z.string(),
+    employeeName: z.string().optional().nullable(),
+    projectCode: z.string().min(1),
+    hours: z.number().positive(),
+    reason: z.string().optional().nullable(),   // lý do OT theo từng NV
+  })).optional(),
 });
 
 function timeToMinutes(t: string): number {
@@ -58,7 +66,7 @@ export async function GET(request: NextRequest) {
 
   const data = await prisma.oTRequest.findMany({
     where,
-    include: { employee: { include: { department: true } } },
+    include: { employee: { include: { department: true } }, memberProjects: true },
     orderBy: { createdAt: "desc" },
     take: 50,
   });
@@ -83,7 +91,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { date, startTime, endTime, reason, otRate, teamId, teamName, projectCode, memberIds, memberNames } = parsed.data;
+  const { date, startTime, endTime, reason, otRate, teamId, teamName, projectCode, memberIds, memberNames, memberProjects } = parsed.data;
 
   if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
     return NextResponse.json(
@@ -125,6 +133,30 @@ export async function POST(request: NextRequest) {
 
   const hours = (timeToMinutes(endTime) - timeToMinutes(startTime)) / 60;
 
+  // MỚI: nếu có phân bổ dự án theo NV → validate tổng giờ mỗi NV = giờ OT của đơn (sai số nhỏ cho float).
+  let finalMemberIds = memberIds ?? [];
+  let finalMemberNames = memberNames ?? [];
+  if (memberProjects && memberProjects.length > 0) {
+    const byEmp = new Map<string, { name: string; sum: number }>();
+    for (const mp of memberProjects) {
+      const cur = byEmp.get(mp.employeeId) ?? { name: mp.employeeName || "", sum: 0 };
+      cur.sum += mp.hours;
+      if (mp.employeeName) cur.name = mp.employeeName;
+      byEmp.set(mp.employeeId, cur);
+    }
+    for (const [empId, v] of Array.from(byEmp.entries())) {
+      if (Math.abs(v.sum - hours) > 0.01) {
+        return NextResponse.json(
+          { error: { code: "VALIDATION_ERROR", message: `Tổng giờ dự án của ${v.name || empId} (${v.sum}h) phải bằng giờ OT của đơn (${hours}h)` } },
+          { status: 400 }
+        );
+      }
+    }
+    // Danh sách NV suy ra từ phân bổ (đồng bộ memberIds/memberNames để tương thích hiển thị cũ).
+    finalMemberIds = Array.from(byEmp.keys());
+    finalMemberNames = Array.from(byEmp.values()).map((v) => v.name);
+  }
+
   // Determine OT rate: weekend = 2.0, normal = 1.5
   const dayOfWeek = date.getDay();
   const rate = otRate || (dayOfWeek === 0 || dayOfWeek === 6 ? 2.0 : 1.5);
@@ -141,11 +173,22 @@ export async function POST(request: NextRequest) {
       teamId: teamId || null,
       teamName: teamName || null,
       projectCode: projectCode || null,
-      memberIds: memberIds ?? [],
-      memberNames: memberNames ?? [],
+      memberIds: finalMemberIds,
+      memberNames: finalMemberNames,
       status: "PENDING",
+      ...(memberProjects && memberProjects.length > 0 ? {
+        memberProjects: {
+          create: memberProjects.map((mp) => ({
+            employeeId: mp.employeeId,
+            employeeName: mp.employeeName || "",
+            projectCode: mp.projectCode,
+            hours: mp.hours,
+            reason: mp.reason || null,
+          })),
+        },
+      } : {}),
     },
-    include: { employee: { include: { department: true } } },
+    include: { employee: { include: { department: true } }, memberProjects: true },
   });
 
   // Báo TẤT CẢ giám đốc của khối phụ trách phòng ban người đề xuất (luồng A — GĐ khối duyệt thẳng).

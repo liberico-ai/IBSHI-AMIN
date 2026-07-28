@@ -70,7 +70,7 @@ export const PERMISSION_CATALOG: ModuleGroup[] = [
       { key: "m3.nghiphep", label: "Nghỉ phép", actions: ["view", "create", "edit", "delete", "approve1", "approve2", "proxy"] },
       { key: "m3.tangca", label: "Tăng ca (OT)", actions: ["view", "create", "edit", "delete", "approve"] },
       { key: "m3.phieuto", label: "Phiếu kê khai tổ", actions: ["view", "create", "edit"] },
-      { key: "m3.doisoat", label: "Đối soát chấm công", actions: ["view"] },
+      { key: "m3.doisoat", label: "Đối soát chấm công", actions: ["view", "edit", "approve"] },
       { key: "m3.giaitrinh", label: "Đơn giải trình", actions: ["view", "create", "approve"] },
       { key: "m3.tonghop", label: "Tổng hợp công tháng", actions: ["view"] },
     ],
@@ -201,7 +201,7 @@ export const PERMISSION_TEMPLATES: Record<string, PermTemplate> = {
       "m1.hoso:view", "m2.sodo:view",
       "m3.nghiphep:view", "m3.nghiphep:approve1",           // TP duyệt cấp 1 nghỉ phép
       "m3.tangca:view", "m3.tangca:approve",
-      "m3.phieuto:view", "m3.doisoat:view", "m3.giaitrinh:view", "m3.giaitrinh:approve", "m3.tonghop:view",
+      "m3.phieuto:view", "m3.doisoat:view", "m3.doisoat:approve", "m3.giaitrinh:view", "m3.giaitrinh:approve", "m3.tonghop:view",
       "m10.suachua:view", "m10.suachua:create",
       "m10.xe.datxe:view", "m10.xe.datxe:create", "m10.xe.datxe:approve1",
       "m10.phonghop.dat:view", "m10.phonghop.dat:create",

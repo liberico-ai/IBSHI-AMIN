@@ -529,7 +529,8 @@ model AttendanceRecord {
   date       DateTime
   checkIn    DateTime?
   checkOut   DateTime?
-  workHours  Float            @default(0) // giờ công hành chính ca NGÀY (HC N)
+  workHours  Float            @default(0) // giờ công hành chính ca NGÀY (HC N) — từ MÁY, không đè
+  reconciledHours Float?       // giờ đã ĐỐI SOÁT (thống nhất sau khi 2 bên duyệt); ưu tiên khi tổng hợp/lương
   status     AttendanceStatus @default(PRESENT)
   otHours    Float            @default(0) // giờ tăng ca ca NGÀY (Thêm giờ N)
   nightHours   Float          @default(0) // giờ công hành chính ca ĐÊM (HC Đ)
@@ -590,8 +591,87 @@ model OTRequest {
   createdAt  DateTime       @default(now())
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  memberProjects OTMemberProject[] // OT theo NV × dự án × giờ (mỗi NV có thể nhiều dự án)
 
   @@index([employeeId])
+}
+
+// Bản ghi ĐỐI SOÁT chấm công: sinh khi giờ kê khai (phiếu tổ) LỆCH giờ máy chấm công (NV × ngày).
+// HCNS nhập "thời gian thực" → cần CẢ TP HCNS + phụ trách Xưởng duyệt → ốp vào AttendanceRecord.reconciledHours.
+model AttendanceReconcile {
+  id                String    @id @default(uuid())
+  employeeId        String
+  employeeName      String
+  date              DateTime
+  departmentId      String
+  departmentName    String
+  declaredHours     Float // tổng giờ kê khai (phiếu tổ)
+  machineHours      Float // giờ máy (workHours) tại thời điểm so khớp
+  actualHours       Float? // thời gian thực (HCNS nhập)
+  hcnsApproved      Boolean   @default(false) // TP HCNS đã duyệt
+  hcnsApprovedById  String?
+  xuongApproved     Boolean   @default(false) // phụ trách Xưởng đã duyệt
+  xuongApprovedById String?
+  status            String    @default("OPEN") // OPEN (đang xử lý) | RESOLVED (đã ốp)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([status])
+  @@index([date])
+  @@index([departmentId])
+}
+
+// Phiếu kê khai tổ trưởng (hàng ngày): tổ trưởng khai NV × dự án × giờ × hạng mục.
+// Luồng: DRAFT (nháp) → PENDING (đã gửi, chờ TP duyệt) → APPROVED / REJECTED.
+model TeamWorkLog {
+  id             String             @id @default(uuid())
+  date           DateTime // ngày kê khai
+  departmentId   String // phòng/ban/xưởng
+  departmentName String // snapshot tên phòng để hiển thị
+  createdById    String // user id người tạo (tổ trưởng/người phụ trách)
+  status         ApprovalStatus     @default(DRAFT)
+  approvedById   String?
+  approvedAt     DateTime?
+  rejectReason   String?
+  createdAt      DateTime           @default(now())
+  entries        TeamWorkLogEntry[]
+
+  @@index([departmentId])
+  @@index([status])
+  @@index([date])
+}
+
+// 1 dòng kê khai: 1 nhân viên × 1 dự án × số giờ × hạng mục (1 NV có thể nhiều dòng/dự án).
+model TeamWorkLogEntry {
+  id           String      @id @default(uuid())
+  logId        String
+  employeeId   String
+  employeeName String // snapshot tên NV
+  projectCode  String // mã dự án (list fix cứng src/lib/projects.ts)
+  hours        Float // số giờ (thập phân, vd 4.5)
+  category     String // hạng mục (nhập tay, bắt buộc)
+  log          TeamWorkLog @relation(fields: [logId], references: [id], onDelete: Cascade)
+
+  @@index([logId])
+  @@index([employeeId])
+}
+
+// Phân bổ giờ OT của TỪNG nhân viên cho TỪNG dự án (1 NV có thể OT nhiều dự án).
+// Tổng hours các dòng của 1 NV trong 1 đơn = giờ OT của đơn.
+model OTMemberProject {
+  id           String    @id @default(uuid())
+  otRequestId  String
+  employeeId   String
+  employeeName String // snapshot tên NV để hiển thị
+  projectCode  String // mã dự án (list fix cứng src/lib/projects.ts)
+  hours        Float // giờ OT của NV này cho dự án này
+  reason       String? // lý do tăng ca của NV này (theo từng nhân viên)
+  otRequest    OTRequest @relation(fields: [otRequestId], references: [id], onDelete: Cascade)
+
+  @@index([otRequestId])
+  @@index([employeeId])
+  @@index([projectCode])
 }
 
 model LeaveBalance {

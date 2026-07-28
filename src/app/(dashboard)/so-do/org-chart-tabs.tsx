@@ -543,7 +543,13 @@ function AddOrTransferEmpModal({ dept, onClose, onDone }: { dept: Dept; onClose:
     if (!pickId) { setError("Chọn nhân sự cần điều chuyển"); return; }
     setError(null); setSaving(true);
     try {
-      const res = await fetch(`/api/v1/employees/${pickId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ departmentId: dept.id }) });
+      // Điều chuyển = cập nhật hồ sơ M1: đổi phòng ban + reset chức danh về "Nhân viên"
+      //  (vị trí công việc để trống, bổ sung sau). Dùng PUT (endpoint sửa hồ sơ chuẩn).
+      const res = await fetch(`/api/v1/employees/${pickId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ departmentId: dept.id, jobRole: "Nhân viên", jobPosition: "" }),
+      });
       const json = await res.json();
       if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
       onDone();
