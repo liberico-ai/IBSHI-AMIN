@@ -97,6 +97,25 @@ function NewLeaveDialog({ onClose, onSuccess, editing, proxy }: { onClose: () =>
     if (!proxy) return;
     fetch("/api/v1/leave-requests/registerable-employees").then((r) => r.json()).then((res) => setRegEmps(res.data || [])).catch(() => {});
   }, [proxy]);
+  // Quỹ PHÉP NĂM còn lại (hiển thị trong form + cảnh báo khi vượt). Self hoặc NV được ĐK hộ.
+  const [balance, setBalance] = useState<{ remain: number; used: number; accrued: number; probation: boolean } | null>(null);
+  useEffect(() => {
+    if (editing) { setBalance(null); return; }             // sửa đơn: không hiển thị quỹ
+    if (proxy && !targetEmployeeId) { setBalance(null); return; } // ĐK hộ chưa chọn NV
+    const q = proxy && targetEmployeeId ? `?employeeId=${encodeURIComponent(targetEmployeeId)}` : "";
+    fetch(`/api/v1/leave-requests/balance${q}`)
+      .then((r) => r.json()).then((res) => setBalance(res.data || null)).catch(() => setBalance(null));
+  }, [proxy, targetEmployeeId, editing]);
+  // Ước tính số ngày nghỉ client-side (khớp server: tính cả 2 đầu mút, bỏ Chủ Nhật; nửa ngày = 0,5).
+  function countLeaveDays(): number {
+    if (form.halfDay) return 0.5;
+    if (!form.startDate || !form.endDate) return 0;
+    const s = new Date(form.startDate), e = new Date(form.endDate);
+    if (e < s) return 0;
+    let n = 0; const cur = new Date(s);
+    while (cur <= e) { if (cur.getDay() !== 0) n += 1; cur.setDate(cur.getDate() + 1); }
+    return n;
+  }
   // Bật/tắt nửa ngày: ép ngày kết thúc = ngày bắt đầu (nửa ngày chỉ 1 ngày).
   function setHalfDay(on: boolean) {
     setForm((f) => ({ ...f, halfDay: on, endDate: on ? f.startDate : f.endDate }));
@@ -104,6 +123,7 @@ function NewLeaveDialog({ onClose, onSuccess, editing, proxy }: { onClose: () =>
   }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hideForm, setHideForm] = useState(false); // ẩn form khi đang hiện popup xác nhận vượt quỹ
 
   function handleChange(field: string, value: string) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -114,6 +134,29 @@ function NewLeaveDialog({ onClose, onSuccess, editing, proxy }: { onClose: () =>
     e.preventDefault();
     setError(null);
     if (proxy && !editing && !targetEmployeeId) { setError("Vui lòng chọn nhân sự cần đăng ký hộ"); return; }
+
+    // Cảnh báo VƯỢT quỹ phép năm: hỏi xác nhận, phần dư = KHÔNG lương. Không thì quay về form.
+    let acceptUnpaidExcess = false;
+    if (!editing && form.leaveType === "ANNUAL" && balance && !balance.probation) {
+      const req = countLeaveDays();
+      if (req > balance.remain) {
+        const excess = +(req - balance.remain).toFixed(1);
+        setHideForm(true);        // ẩn form → popup đứng 1 mình
+        const ok = await confirmDialog({
+          title: "Vượt quỹ phép năm",
+          tone: "danger",
+          confirmText: "Vẫn gửi đơn",
+          cancelText: "Quay lại",
+          message: (
+            <>{proxy ? "Nhân sự này" : "Bạn"} chỉ còn <b>{balance.remain}</b> ngày phép năm. Đơn này <b>{req}</b> ngày
+            {" "}→ <b style={{ color: "var(--ibs-danger)" }}>{excess} ngày còn lại sẽ là KHÔNG lương</b>. Vẫn tiếp tục gửi đơn?</>
+          ),
+        });
+        if (!ok) { setHideForm(false); return; }   // Quay lại → mở lại form cũ
+        acceptUnpaidExcess = true;                 // Vẫn gửi → giữ form ẩn, submit luôn
+      }
+    }
+
     setSaving(true);
     try {
       const res = await fetch(
@@ -121,16 +164,20 @@ function NewLeaveDialog({ onClose, onSuccess, editing, proxy }: { onClose: () =>
         {
           method: editing ? "PUT" : "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(editing ? { action: "EDIT", ...form } : { ...form, ...(proxy && targetEmployeeId ? { targetEmployeeId } : {}) }),
+          body: JSON.stringify(editing
+            ? { action: "EDIT", ...form }
+            : { ...form, ...(proxy && targetEmployeeId ? { targetEmployeeId } : {}), ...(acceptUnpaidExcess ? { acceptUnpaidExcess: true } : {}) }),
         }
       );
       const json = await res.json();
       if (!res.ok) {
+        setHideForm(false);      // lỗi → mở lại form để hiện thông báo
         setError(apiError(res.status, json?.error));
         return;
       }
       onSuccess(json.data);
     } catch {
+      setHideForm(false);
       setError("Lỗi kết nối");
     } finally {
       setSaving(false);
@@ -141,6 +188,8 @@ function NewLeaveDialog({ onClose, onSuccess, editing, proxy }: { onClose: () =>
   const inputStyle = { background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" };
   const labelCls = "block text-[12px] font-medium mb-1.5";
   const labelStyle = { color: "var(--ibs-text-muted)" };
+
+  if (hideForm) return null; // đang hiện popup xác nhận vượt quỹ → ẩn form
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
@@ -176,6 +225,14 @@ function NewLeaveDialog({ onClose, onSuccess, editing, proxy }: { onClose: () =>
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+            {!editing && form.leaveType === "ANNUAL" && balance && (
+              <div className="mt-2 text-[12px] px-3 py-2 rounded-lg"
+                style={{ background: balance.probation ? "rgba(245,158,11,0.1)" : "rgba(0,180,216,0.08)", color: "var(--ibs-text-muted)", border: "1px solid rgba(0,180,216,0.2)" }}>
+                {balance.probation
+                  ? "⚠️ Nhân sự thử việc chưa có phép năm — đơn phép năm sẽ không được duyệt."
+                  : <>📅 {proxy ? "Nhân sự này" : "Bạn"} còn <b style={{ color: "var(--ibs-accent)" }}>{balance.remain}</b> ngày phép năm (đã dùng {balance.used}/{balance.accrued} tích luỹ tới tháng này).</>}
+              </div>
+            )}
           </div>
 
           <label className="flex items-center gap-2 text-[13px] font-medium cursor-pointer" style={{ color: "var(--ibs-text)" }}>

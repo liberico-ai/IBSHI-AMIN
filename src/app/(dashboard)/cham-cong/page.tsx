@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, Fragment, Suspense } from "react";
+import { confirmDialog } from "@/lib/confirm-dialog";
 import { useSearchParams } from "next/navigation";
 import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -19,18 +20,23 @@ function pickAttendanceSheet(XLSX: any, wb: any, year: number, month: number): u
     const c0 = String(r?.[0] ?? "").trim(), c1 = String(r?.[1] ?? "").trim(), c2 = String(r?.[2] ?? "").trim();
     return (/^\d{4,}$/.test(c0) && !!c1) || (/^\d{1,3}$/.test(c0) && /^\d{4,}$/.test(c1) && !!c2) || (!c0 && /^\d{4,}$/.test(c1) && !!c2);
   };
+  // Dòng tiêu đề NGÀY thật = dãy 1..31 (nhiều giá trị KHÁC NHAU, chạm tới cuối tháng 28-31).
+  // Đếm theo Set (giá trị phân biệt) + bắt buộc có ngày >= 28 → tránh nhầm dòng GIỜ CÔNG
+  // (vd 8,8,4,8... toàn số ≤ 24, ít giá trị phân biệt) thành tiêu đề ngày.
   const hasDayHeader = (rows: any[][]): boolean => {
     for (let i = 0; i < Math.min(rows.length, 15); i++) {
-      const r = rows[i] || []; let n = 0;
+      const r = rows[i] || [];
+      const daysSet = new Set<number>();
       for (const cell of r) {
         const v = Number(cell);
-        if (Number.isFinite(v) && v >= 1 && v <= 31 && Number.isInteger(v)) n++;
+        if (Number.isFinite(v) && v >= 1 && v <= 31 && Number.isInteger(v)) daysSet.add(v);
         else if (Number.isFinite(v) && v >= 40000 && v <= 60000) {
           const dt = new Date(Math.round((v - 25569) * 86400 * 1000));
-          if (dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1) n++;
+          if (dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1) daysSet.add(dt.getUTCDate());
         }
       }
-      if (n >= 20) return true;
+      const hasMonthEnd = [28, 29, 30, 31].some((d) => daysSet.has(d));
+      if (daysSet.size >= 20 && hasMonthEnd) return true;
     }
     return false;
   };
@@ -59,7 +65,8 @@ type OTRequest = {
 type AttendanceSummary = { departmentId: string; departmentName: string; present: number; total: number; rate: number };
 type AttendanceRecord = {
   id: string; date: string; status: string; checkIn?: string; checkOut?: string;
-  workHours: number; otHours: number; note?: string;
+  workHours: number; reconciledHours?: number | null; otHours: number; note?: string;
+  paidLeaveDays?: number; leaveCode?: string | null;
   employee: { code: string; fullName: string; teamId: string | null; department: { name: string }; position: { level: string } | null };
 };
 
@@ -83,12 +90,13 @@ const POSITION_ORDER: Record<string, number> = { C_LEVEL: 0, MANAGER: 1, TEAM_LE
 
 // ── Office Attendance Card (Khối Gián tiếp — hours-based, matches Excel template) ──
 function OfficeAttendanceCard({
-  employees, daysInMonth, month, year, onRefresh, canImport,
+  employees, daysInMonth, month, year, onRefresh, canImport, needsApproval,
 }: {
   employees: GridEmployee[];
   daysInMonth: number; month: number; year: number;
   onRefresh: () => void;
   canImport: boolean;
+  needsApproval?: (rec: AttendanceRecord) => boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -104,7 +112,7 @@ function OfficeAttendanceCard({
     for (let d = 1; d <= daysInMonth; d++) {
       const rec = emp.days[d];
       if (!rec) continue;
-      const wh = rec.workHours || 0;
+      const wh = (rec.reconciledHours ?? rec.workHours) || 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT
       const oh = rec.otHours || 0;
       if (isSun(d)) { sunday += wh + oh; }
       else { regular += wh; ot += oh; }
@@ -112,7 +120,7 @@ function OfficeAttendanceCard({
     return { regular, ot, sunday, total: +(regular + ot + sunday).toFixed(1) };
   }
 
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>, mode: "month" | "day" = "month") {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true); setImportMsg(null);
@@ -290,11 +298,11 @@ function OfficeAttendanceCard({
       const res = await fetch("/api/v1/attendance/import-office", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month, year, records }),
+        body: JSON.stringify({ month, year, records, mode }),
       });
       const result = await res.json();
       if (res.ok) {
-        setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${result.skipped ? `. Bỏ qua ${result.skipped} bản ghi (${result.missingCodes?.length ?? 0} mã NV không tìm thấy).` : "."}` });
+        setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${mode === "day" ? " (theo ngày — cộng dồn, không xoá ngày khác)" : " (cả tháng)"}${result.skipped ? `. Bỏ qua ${result.skipped} bản ghi (${result.missingCodes?.length ?? 0} mã NV không tìm thấy).` : "."}` });
         // Delay refresh so user sees the message
         setTimeout(() => onRefresh(), 1500);
       } else {
@@ -319,7 +327,8 @@ function OfficeAttendanceCard({
       const r2: (string|number)[] = ["","","Thêm giờ"];
       days.forEach(d => {
         const rec = emp.days[d];
-        r1.push(rec?.workHours && rec.workHours > 0 ? rec.workHours : "");
+        const ewh = rec ? (rec.reconciledHours ?? rec.workHours) : 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT
+        r1.push(ewh && ewh > 0 ? ewh : "");
         r2.push(rec?.otHours && rec.otHours > 0 ? rec.otHours : "");
       });
       r1.push(s.regular, s.ot, s.sunday, s.total);
@@ -353,11 +362,18 @@ function OfficeAttendanceCard({
         </button>
         <div className="flex gap-2 ml-4">
           {canImport && (
-            <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border cursor-pointer${importing ? " opacity-50 pointer-events-none" : ""}`}
-              style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }}>
-              <Upload size={12} /> {importing ? "Đang xử lý..." : "Import Excel"}
-              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} disabled={importing} />
-            </label>
+<>
+              <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border cursor-pointer${importing ? " opacity-50 pointer-events-none" : ""}`}
+                style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }} title="Nạp file bảng công CẢ THÁNG — thay sạch dữ liệu tháng của các NV trong file">
+                <Upload size={12} /> {importing ? "Đang xử lý..." : "Import cả tháng"}
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleImport(e, "month")} disabled={importing} />
+              </label>
+              <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border cursor-pointer${importing ? " opacity-50 pointer-events-none" : ""}`}
+                style={{ borderColor: "var(--ibs-success)", color: "var(--ibs-success)" }} title="Nạp file theo NGÀY — chỉ ghi/thay các ngày có trong file, cộng dồn, KHÔNG xoá ngày khác trong tháng">
+                <Upload size={12} /> {importing ? "Đang xử lý..." : "Import theo ngày"}
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleImport(e, "day")} disabled={importing} />
+              </label>
+            </>
           )}
           <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border"
             style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>
@@ -413,14 +429,16 @@ function OfficeAttendanceCard({
                       <td className="px-2 py-1.5 border-r border-b whitespace-nowrap text-center" style={{ borderColor: BD, color: "var(--ibs-text-dim)" }}>{emp.dept}</td>
                       {days.map(d => {
                         const rec = emp.days[d];
-                        const wh = rec?.workHours;
+                        const wh = rec ? (rec.reconciledHours ?? rec.workHours) : undefined; // ưu tiên giờ ĐÃ ĐỐI SOÁT
                         const sun = isSun(d); const sat = isSat(d);
+                        const flag = rec && needsApproval ? needsApproval(rec) : false; // mã đặc biệt chưa duyệt
                         return (
                           <td key={d} className="w-7 py-1.5 border-r border-b text-center"
                             style={{ borderColor: BD, background: sun ? "rgba(239,68,68,0.05)" : sat ? "rgba(245,158,11,0.04)" : undefined }}>
                             {wh && wh > 0
                               ? <span className="font-semibold" style={{ color: sun ? "var(--ibs-danger)" : "var(--ibs-success)", fontSize: "10px" }}>{wh}</span>
                               : <span style={{ color: "rgba(51,65,85,0.25)", fontSize: "9px" }}>·</span>}
+                            {flag ? <span title={`Mã "${rec?.leaveCode}" chưa có đơn nghỉ được duyệt — ngày này đang KHÔNG tính lương. Nhắc NV làm/duyệt đơn.`} style={{ color: "var(--ibs-danger)", fontWeight: 700, fontSize: "11px", marginLeft: "1px", verticalAlign: "top" }}>*</span> : null}
                           </td>
                         );
                       })}
@@ -460,7 +478,7 @@ function OfficeAttendanceCard({
 }
 
 function AttendanceGridCard({
-  title, subtitle, icon, employees, daysInMonth, month, year, onExport, onRefresh, canImport,
+  title, subtitle, icon, employees, daysInMonth, month, year, onExport, onRefresh, canImport, needsApproval,
 }: {
   title: string; subtitle: string; icon: string;
   employees: GridEmployee[];
@@ -468,6 +486,7 @@ function AttendanceGridCard({
   onExport: () => void;
   onRefresh: () => void;
   canImport: boolean;
+  needsApproval?: (rec: AttendanceRecord) => boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -482,7 +501,7 @@ function AttendanceGridCard({
     for (let d = 1; d <= daysInMonth; d++) {
       const rec = emp.days[d];
       if (!rec) continue;
-      const wh = rec.workHours || 0;
+      const wh = (rec.reconciledHours ?? rec.workHours) || 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT
       const oh = rec.otHours || 0;
       if (isSun(d)) { sunday += wh + oh; }
       else { regular += wh; ot += oh; }
@@ -490,7 +509,7 @@ function AttendanceGridCard({
     return { regular, ot, sunday, total: +(regular + ot + sunday).toFixed(1) };
   }
 
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>, mode: "month" | "day" = "month") {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true); setImportMsg(null);
@@ -655,11 +674,11 @@ function AttendanceGridCard({
       const res = await fetch("/api/v1/attendance/import-office", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month, year, records }),
+        body: JSON.stringify({ month, year, records, mode }),
       });
       const result = await res.json();
       if (res.ok) {
-        setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${result.skipped ? `. Bỏ qua ${result.skipped} bản ghi (${result.missingCodes?.length ?? 0} mã NV không tìm thấy).` : "."}` });
+        setImportMsg({ ok: true, text: `✓ Đã import ${result.created} bản ghi${mode === "day" ? " (theo ngày — cộng dồn, không xoá ngày khác)" : " (cả tháng)"}${result.skipped ? `. Bỏ qua ${result.skipped} bản ghi (${result.missingCodes?.length ?? 0} mã NV không tìm thấy).` : "."}` });
         setTimeout(() => onRefresh(), 1500);
       } else {
         setImportMsg({ ok: false, text: apiError(res.status, result.error) });
@@ -688,11 +707,18 @@ function AttendanceGridCard({
         </button>
         <div className="flex gap-2 ml-4">
           {canImport && (
-            <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border cursor-pointer${importing ? " opacity-50 pointer-events-none" : ""}`}
-              style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }}>
-              <Upload size={12} /> {importing ? "Đang xử lý..." : "Import Excel"}
-              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} disabled={importing} />
-            </label>
+<>
+              <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border cursor-pointer${importing ? " opacity-50 pointer-events-none" : ""}`}
+                style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }} title="Nạp file bảng công CẢ THÁNG — thay sạch dữ liệu tháng của các NV trong file">
+                <Upload size={12} /> {importing ? "Đang xử lý..." : "Import cả tháng"}
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleImport(e, "month")} disabled={importing} />
+              </label>
+              <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border cursor-pointer${importing ? " opacity-50 pointer-events-none" : ""}`}
+                style={{ borderColor: "var(--ibs-success)", color: "var(--ibs-success)" }} title="Nạp file theo NGÀY — chỉ ghi/thay các ngày có trong file, cộng dồn, KHÔNG xoá ngày khác trong tháng">
+                <Upload size={12} /> {importing ? "Đang xử lý..." : "Import theo ngày"}
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleImport(e, "day")} disabled={importing} />
+              </label>
+            </>
           )}
           <button onClick={onExport}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border"
@@ -765,6 +791,7 @@ function AttendanceGridCard({
                         const sym = rec ? ATTENDANCE_SYMBOL[rec.status] : null;
                         const wh = rec?.workHours;
                         const sun = isSun(d), sat = isSat(d);
+                        const flag = rec && needsApproval ? needsApproval(rec) : false; // mã đặc biệt chưa duyệt
                         return (
                           <td key={d} className="w-7 py-1.5 border-r border-b text-center font-semibold"
                             style={{ borderColor: BD, background: sun ? "rgba(239,68,68,0.05)" : sat ? "rgba(245,158,11,0.04)" : undefined }}>
@@ -775,6 +802,7 @@ function AttendanceGridCard({
                             ) : (
                               <span style={{ color: "rgba(51,65,85,0.5)", fontSize: "9px" }}>·</span>
                             )}
+                            {flag ? <span title={`Mã "${rec?.leaveCode}" chưa có đơn nghỉ được duyệt — ngày này đang KHÔNG tính lương. Nhắc NV làm/duyệt đơn.`} style={{ color: "var(--ibs-danger)", fontWeight: 700, fontSize: "11px", marginLeft: "1px", verticalAlign: "top" }}>*</span> : null}
                           </td>
                         );
                       })}
@@ -991,6 +1019,31 @@ function AttendancePageInner() {
   const officeEmployees = useMemo(() => gridEmployees.filter((e) => !isProduction(e)), [gridEmployees]);
   const productionEmployees = useMemo(() => gridEmployees.filter((e) => isProduction(e)), [gridEmployees]);
 
+  // ── Dấu * đỏ: ngày có MÃ ĐẶC BIỆT (AL/CL/WL/ML/SL/MT) nhưng CHƯA có đơn nghỉ DUYỆT ──
+  //   Khớp luật gate ở tính lương (salary.service): mã đặc biệt chỉ có lương khi đơn được duyệt.
+  //   L (lễ, theo lịch) + UL (không lương) → không cần đánh dấu.
+  const apprLeaveDaySet = useMemo(() => {
+    const set = new Set<string>(); // "empCode|YYYY-MM-DD"
+    for (const lr of leaveRequests) {
+      if (lr.status !== "APPROVED" || lr.leaveType === "UNPAID") continue;
+      const s = new Date(lr.startDate), e = new Date(lr.endDate);
+      let t = Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate());
+      const eDay = Date.UTC(e.getUTCFullYear(), e.getUTCMonth(), e.getUTCDate());
+      for (; t <= eDay; t += 86400000) {
+        const dt = new Date(t);
+        if (dt.getUTCDay() === 0) continue; // bỏ Chủ Nhật
+        set.add(`${lr.employee.code}|${dt.toISOString().slice(0, 10)}`);
+      }
+    }
+    return set;
+  }, [leaveRequests]);
+  const leaveNeedsApproval = useMemo(() => (rec: AttendanceRecord) => {
+    const base = String(rec.leaveCode ?? "").toUpperCase().replace(/[0-9.,\s]/g, "");
+    if (!["AL", "CL", "WL", "ML", "SL", "MT"].includes(base)) return false; // chỉ mã đặc biệt (L/UL bỏ qua)
+    const ymd = new Date(rec.date).toISOString().slice(0, 10);
+    return !apprLeaveDaySet.has(`${rec.employee.code}|${ymd}`);
+  }, [apprLeaveDaySet]);
+
   async function handleLeaveAction(id: string, action: "APPROVE" | "REJECT") {
     const res = await fetch(`/api/v1/leave-requests/${id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
@@ -1198,6 +1251,11 @@ function AttendancePageInner() {
             </div>
           ) : (
             <>
+              <div className="flex items-start gap-2 text-[11px] px-3 py-2 rounded-lg border"
+                style={{ color: "var(--ibs-text-dim)", background: "rgba(239,68,68,0.05)", borderColor: "rgba(239,68,68,0.2)" }}>
+                <span style={{ color: "var(--ibs-danger)", fontWeight: 700, fontSize: "13px", lineHeight: 1 }}>*</span>
+                <span>= ngày có mã nghỉ đặc biệt (AL/CL/WL/ML/SL/MT) <b>chưa có đơn nghỉ được duyệt</b> → đang <b>KHÔNG</b> tính lương. Nhắc NV làm đơn / duyệt để ngày đó được tính bù (kể cả duyệt cuối tháng).</span>
+              </div>
               {/* Card: Khối Gián tiếp */}
               <OfficeAttendanceCard
                 employees={officeEmployees}
@@ -1206,6 +1264,7 @@ function AttendancePageInner() {
                 year={year}
                 onRefresh={() => setGridRefreshKey(k => k + 1)}
                 canImport={can("m3.bangcong:import")}
+                needsApproval={leaveNeedsApproval}
               />
               {/* Card: Khối Trực tiếp */}
               <AttendanceGridCard
@@ -1219,6 +1278,7 @@ function AttendancePageInner() {
                 onExport={() => exportGrid(productionEmployees, "Truc-tiep")}
                 onRefresh={() => setGridRefreshKey(k => k + 1)}
                 canImport={can("m3.bangcong:import")}
+                needsApproval={leaveNeedsApproval}
               />
             </>
           )}
@@ -1298,30 +1358,65 @@ function LeaveRequestForm({ onClose, onSuccess }: { onClose: () => void; onSucce
   const [form, setForm] = useState({ leaveType: "ANNUAL", startDate: "", endDate: "", reason: "" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [balance, setBalance] = useState<number | null>(null);
+  const [balance, setBalance] = useState<{ remain: number; used: number; accrued: number; probation: boolean } | null>(null);
+  const [hideForm, setHideForm] = useState(false); // ẩn form khi hiện popup xác nhận vượt quỹ
 
   useEffect(() => {
-    fetch("/api/v1/leave-requests")
-      .then((r) => r.json()).then((res) => {
-        // Try to infer balance from API — placeholder: show from notifications or employee detail
-      });
+    fetch("/api/v1/leave-requests/balance")
+      .then((r) => r.json()).then((res) => setBalance(res.data || null)).catch(() => setBalance(null));
   }, []);
 
+  // Ước tính số ngày nghỉ (khớp server: tính cả 2 đầu mút, bỏ Chủ Nhật).
+  function countLeaveDays(): number {
+    if (!form.startDate || !form.endDate) return 0;
+    const s = new Date(form.startDate), e = new Date(form.endDate);
+    if (e < s) return 0;
+    let n = 0; const cur = new Date(s);
+    while (cur <= e) { if (cur.getDay() !== 0) n += 1; cur.setDate(cur.getDate() + 1); }
+    return n;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault(); setError(""); setSubmitting(true);
+    e.preventDefault(); setError("");
+
+    // Cảnh báo VƯỢT quỹ phép năm: phần dư = KHÔNG lương → hỏi xác nhận, không thì quay về form.
+    let acceptUnpaidExcess = false;
+    if (form.leaveType === "ANNUAL" && balance && !balance.probation) {
+      const req = countLeaveDays();
+      if (req > balance.remain) {
+        const excess = +(req - balance.remain).toFixed(1);
+        setHideForm(true);        // ẩn form → popup đứng 1 mình
+        const ok = await confirmDialog({
+          title: "Vượt quỹ phép năm",
+          tone: "danger",
+          confirmText: "Vẫn gửi đơn",
+          cancelText: "Quay lại",
+          message: (
+            <>Bạn chỉ còn <b>{balance.remain}</b> ngày phép năm. Đơn này <b>{req}</b> ngày
+            {" "}→ <b style={{ color: "var(--ibs-danger)" }}>{excess} ngày còn lại sẽ là KHÔNG lương</b>. Vẫn tiếp tục gửi đơn?</>
+          ),
+        });
+        if (!ok) { setHideForm(false); return; }   // Quay lại → mở lại form cũ
+        acceptUnpaidExcess = true;
+      }
+    }
+
+    setSubmitting(true);
     try {
       const res = await fetch("/api/v1/leave-requests", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(acceptUnpaidExcess ? { ...form, acceptUnpaidExcess: true } : form),
       });
       const data = await res.json();
-      if (!res.ok) { setError(apiError(res.status, data.error)); return; }
+      if (!res.ok) { setHideForm(false); setError(apiError(res.status, data.error)); return; }
       onSuccess(data.data);
     } finally { setSubmitting(false); }
   }
 
   const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
   const inputClass = "w-full px-3 py-2 rounded-lg text-[13px] outline-none border";
+
+  if (hideForm) return null; // đang hiện popup xác nhận vượt quỹ → ẩn form
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
@@ -1338,6 +1433,14 @@ function LeaveRequestForm({ onClose, onSuccess }: { onClose: () => void; onSucce
               className={inputClass} style={inputStyle}>
               {Object.entries(LEAVE_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
+            {form.leaveType === "ANNUAL" && balance && (
+              <div className="mt-2 text-[12px] px-3 py-2 rounded-lg"
+                style={{ background: balance.probation ? "rgba(245,158,11,0.1)" : "rgba(0,180,216,0.08)", color: "var(--ibs-text-muted)", border: "1px solid rgba(0,180,216,0.2)" }}>
+                {balance.probation
+                  ? "⚠️ Nhân sự thử việc chưa có phép năm."
+                  : <>📅 Bạn còn <b style={{ color: "var(--ibs-accent)" }}>{balance.remain}</b> ngày phép năm (đã dùng {balance.used}/{balance.accrued} tích luỹ tới tháng này).</>}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

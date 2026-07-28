@@ -14,6 +14,7 @@ const CreateLeaveSchema = z.object({
   proofUrls: z.array(z.string()).optional(),
   halfDay: z.boolean().optional(),   // Nghỉ NỬA NGÀY (0,5 công) — chỉ áp dụng cho 1 ngày.
   targetEmployeeId: z.string().optional(),   // ĐĂNG KÝ HỘ: NV được nghỉ (khác người đăng nhập).
+  acceptUnpaidExcess: z.boolean().optional(), // Phép năm VƯỢT quỹ: NV đã xác nhận phần dư = KHÔNG lương → vẫn gửi.
 });
 
 // Ai được đăng ký nghỉ HỘ người khác: người được cấp quyền riêng m3.nghiphep:proxy ("ĐK hộ").
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { leaveType, startDate, endDate, reason, proofUrls, halfDay, targetEmployeeId } = parsed.data;
+  const { leaveType, startDate, endDate, reason, proofUrls, halfDay, targetEmployeeId, acceptUnpaidExcess } = parsed.data;
 
   if (halfDay && startDate.getTime() !== endDate.getTime()) {
     return NextResponse.json(
@@ -195,13 +196,16 @@ export async function POST(request: NextRequest) {
     });
     const used = booked._sum.totalDays ?? 0;
 
-    if (used + totalDays > accrued) {
+    // VƯỢT quỹ phép năm: chỉ CHẶN khi NV CHƯA xác nhận. Nếu đã xác nhận (acceptUnpaidExcess=true)
+    //   → CHO gửi; phần dư được coi là KHÔNG lương (HCNS đánh mã KL/UL cho các ngày dư trên bảng công).
+    if (used + totalDays > accrued && !acceptUnpaidExcess) {
       const remain = Math.max(0, accrued - used);
       return NextResponse.json(
         {
           error: {
             code: "LEAVE_ACCRUAL_EXCEEDED",
-            message: `Số ngày quá quy định. Bạn chỉ được phép nghỉ phép tối đa ${remain} ngày.`,
+            message: `Số ngày quá quy định. Bạn chỉ còn ${remain} ngày phép năm.`,
+            remain,
           },
         },
         { status: 400 }

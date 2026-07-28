@@ -26,7 +26,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { month, year, records } = body as { month: number; year: number; records: RecordInput[] };
+    const { month, year, records, mode } = body as { month: number; year: number; records: RecordInput[]; mode?: "month" | "day" };
+    // mode = "month" (mặc định): thay SẠCH cả tháng (file phải là bảng công cả tháng).
+    // mode = "day": chỉ ghi/thay các NGÀY có trong file, KHÔNG đụng ngày khác (cộng dồn theo ngày).
 
     if (!Array.isArray(records) || records.length === 0 || !month || !year) {
       return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Dữ liệu không hợp lệ" } }, { status: 400 });
@@ -94,12 +96,24 @@ export async function POST(request: NextRequest) {
     const empIdsInFile = Array.from(new Set(
       records.map((r) => codeToId.get(r.employeeCode)).filter((x): x is string => !!x)
     ));
+    //  - mode "month": xoá cả tháng (các NV trong file) → nạp lại đúng file.
+    //  - mode "day": KHÔNG xoá cả tháng; chỉ xoá đúng các NGÀY có trong file (để re-import 1 ngày
+    //    ghi đè sạch ngày đó), giữ nguyên các ngày khác → cộng dồn theo ngày.
     if (empIdsInFile.length > 0) {
-      const monthStart = new Date(Date.UTC(year, month - 1, 1));
-      const monthEnd = new Date(Date.UTC(year, month, 1));
-      await prisma.attendanceRecord.deleteMany({
-        where: { employeeId: { in: empIdsInFile }, date: { gte: monthStart, lt: monthEnd } },
-      });
+      if (mode === "day") {
+        const datesInFile = Array.from(new Set(records.map((r) => r.date))).map((d) => new Date(d));
+        if (datesInFile.length > 0) {
+          await prisma.attendanceRecord.deleteMany({
+            where: { employeeId: { in: empIdsInFile }, date: { in: datesInFile } },
+          });
+        }
+      } else {
+        const monthStart = new Date(Date.UTC(year, month - 1, 1));
+        const monthEnd = new Date(Date.UTC(year, month, 1));
+        await prisma.attendanceRecord.deleteMany({
+          where: { employeeId: { in: empIdsInFile }, date: { gte: monthStart, lt: monthEnd } },
+        });
+      }
     }
 
     // Batch upserts (10 at a time)

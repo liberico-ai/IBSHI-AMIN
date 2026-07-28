@@ -46,7 +46,7 @@ type PayslipDetail = {
   insuranceSalary: number; allowance: number; totalIncome: number; dependentsCount: number;
   responsibilityAllow: number; farAllowance: number; bonusTotal: number; bonusFull?: number;
   pieceRate: number; adjustment: number; adjustmentNote?: string;
-  standardDays: number; workDays: number; leaveDays: number;
+  standardDays: number; workDays: number; leaveDays: number; bhxhLeaveDays?: number; leaveNeedsApproval?: number;
   otWeekday: number; otWeekdayNight: number; otSunday: number; otSundayNight: number;
   otHoliday: number; otHolidayNight: number; otHoursTotal: number; otConvertedHours: number;
   otFillHours: number; otPaidHours: number;
@@ -427,6 +427,13 @@ function PeriodDetailModal({
   const totals: Record<string, number> = {};
   for (const c of COLS) if (c.t === "money") totals[c.k] = filteredVals.reduce((s, x) => s + (x.v[c.k] || 0), 0);
 
+  // Cảnh báo cho người tính lương: NV có ngày mã đặc biệt (AL/CL/SL…) CHƯA có đơn nghỉ được duyệt
+  //   → các ngày đó đang bị tính KL (không lương). Nhắc NV làm/duyệt đơn rồi TÍNH LẠI để bù.
+  const needsApprovalList = period.records
+    .filter((r) => (r.detail?.leaveNeedsApproval ?? 0) > 0)
+    .map((r) => ({ code: r.employee.code, name: r.employee.fullName, days: r.detail!.leaveNeedsApproval! }))
+    .sort((a, b) => b.days - a.days);
+
   async function exportExcel() {
     const { default: ExcelJS } = await import("exceljs");
     const wb = new ExcelJS.Workbook();
@@ -524,6 +531,25 @@ function PeriodDetailModal({
             {(deptFilter || search) && (
               <button onClick={() => { setDeptFilter(""); setSearch(""); }} className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Xoá lọc</button>
             )}
+          </div>
+        )}
+
+        {/* Cảnh báo: có NV đang bị KL vì đơn nghỉ chưa duyệt */}
+        {needsApprovalList.length > 0 && (
+          <div className="mx-6 mt-3 px-4 py-2.5 rounded-lg border flex-shrink-0"
+            style={{ background: "rgba(239,68,68,0.06)", borderColor: "rgba(239,68,68,0.25)" }}>
+            <div className="flex items-center gap-2 text-[12px] font-semibold" style={{ color: "var(--ibs-danger)" }}>
+              ⚠️ {needsApprovalList.length} nhân sự có ngày nghỉ mã đặc biệt CHƯA được duyệt đơn — đang bị tính KL (không lương)
+            </div>
+            <div className="mt-1 text-[11px] leading-relaxed" style={{ color: "var(--ibs-text-dim)" }}>
+              Nhắc NV làm/duyệt đơn nghỉ rồi bấm <b>Tính lại lương</b> để bù các ngày đó (duyệt cuối tháng vẫn được tính).{" "}
+              {needsApprovalList.slice(0, 12).map((x, i) => (
+                <span key={x.code}>
+                  {i > 0 ? ", " : ""}<b>{x.name}</b> ({x.days} ngày)
+                </span>
+              ))}
+              {needsApprovalList.length > 12 ? `, … +${needsApprovalList.length - 12} NV` : ""}
+            </div>
           </div>
         )}
 

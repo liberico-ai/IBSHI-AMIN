@@ -27,7 +27,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // M3: Bảng chấm công đã import (vân tay khối gián tiếp + khuôn mặt khối trực tiếp)
   let attendanceData = await prisma.attendanceRecord.findMany({
     where: { date: { gte: startDate, lte: endDate } },
-    select: { employeeId: true, status: true, workHours: true, otHours: true, nightHours: true, otNightHours: true, date: true, paidLeaveDays: true, leaveCode: true },
+    select: { employeeId: true, status: true, workHours: true, reconciledHours: true, otHours: true, nightHours: true, otNightHours: true, date: true, paidLeaveDays: true, leaveCode: true },
   });
 
   // ── TẠM NGHỈ (ON_LEAVE): ẩn các ngày trong khoảng tạm nghỉ — KHÔNG tính lương ngày đó (chốt 2026-06-26).
@@ -126,7 +126,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const [priorAtt, priorOt] = await Promise.all([
       prisma.attendanceRecord.findMany({
         where: { date: { gte: yearStart, lt: startDate } },
-        select: { employeeId: true, date: true, workHours: true, otHours: true, otNightHours: true },
+        select: { employeeId: true, date: true, workHours: true, reconciledHours: true, otHours: true, otNightHours: true },
       }),
       prisma.oTRequest.findMany({
         where: { date: { gte: yearStart, lt: startDate }, status: "APPROVED" },
@@ -134,7 +134,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       }),
     ]);
     for (const a of priorAtt) {
-      const d = new Date(a.date); const wh = a.workHours || 0, oh = a.otHours || 0, onh = (a as any).otNightHours || 0;
+      const d = new Date(a.date); const wh = ((a as any).reconciledHours ?? a.workHours) || 0, oh = a.otHours || 0, onh = (a as any).otNightHours || 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT
       // CN/Lễ: toàn bộ giờ làm ngày + OT đêm tính OT; ngày thường: chỉ giờ OT (ngày + đêm). (HC Đ là ca đêm, không phải OT.)
       const h = (isHoliday(d) || d.getUTCDay() === 0) ? wh + oh + onh : oh + onh;
       if (h > 0) priorOtMap[a.employeeId] = (priorOtMap[a.employeeId] || 0) + h;
@@ -157,9 +157,29 @@ export async function calculatePayrollForPeriod(periodId: string) {
       startDate: { lte: endDate },
       endDate: { gte: startDate },
     },
-    select: { employeeId: true, leaveType: true, totalDays: true },
+    select: { employeeId: true, leaveType: true, totalDays: true, startDate: true, endDate: true },
   });
 
+  // ── GATE nghỉ phép (chốt 2026-07-29): dựng tập NGÀY đã có ĐƠN NGHỈ DUYỆT ──
+  //   Luật: mã đặc biệt (AL/CL/WL/ML/SL/MT) trên bảng công CHỈ được tính lương nếu có đơn nghỉ
+  //   APPROVED phủ đúng ngày đó (duyệt là ĐIỀU KIỆN — kể cả duyệt bù cuối tháng cho ngày đầu tháng).
+  //   Ngày file ghi KL nhưng có đơn duyệt → NÂNG thành nghỉ có lương (hồi tố). L (lễ) theo LỊCH,
+  //   không cần đơn. UNPAID → không tạo gate.
+  const BHXH_LEAVE_TYPES = new Set(["SICK", "MATERNITY", "PATERNITY"]);
+  const apprLeaveDay = new Map<string, { bhxh: boolean }>(); // key: "empId|YYYY-MM-DD"
+  for (const l of leaveData) {
+    if (l.leaveType === "UNPAID") continue;
+    const bhxh = BHXH_LEAVE_TYPES.has(l.leaveType);
+    const s = new Date(l.startDate), e = new Date(l.endDate);
+    let t = Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate());
+    const eDay = Date.UTC(e.getUTCFullYear(), e.getUTCMonth(), e.getUTCDate());
+    for (; t <= eDay; t += 86400000) {
+      const dt = new Date(t);
+      if (dt.getUTCDay() === 0) continue;                                                // bỏ Chủ Nhật
+      if (dt.getUTCFullYear() !== period.year || dt.getUTCMonth() !== period.month - 1) continue; // chỉ trong tháng
+      apprLeaveDay.set(`${l.employeeId}|${dt.toISOString().slice(0, 10)}`, { bhxh });
+    }
+  }
 
   // ── Build lookup maps ──
 
@@ -178,6 +198,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
   // L (nghỉ lễ) — CHỈ đếm khi ô ngày CÓ chữ "L". NV không có "L" (vào sau lễ / nghỉ cả tháng / thai sản) → KHÔNG có lương lễ.
   const holidayCodeMap: Record<string, number> = {};
   const unpaidWeekdayMap: Record<string, number> = {};   // NK ngày thường (mục tiêu bù công)
+  // Đếm ngày có MÃ ĐẶC BIỆT (AL/CL/WL/ML/SL/MT) nhưng CHƯA có đơn duyệt → hiện dấu * + cảnh báo HCNS.
+  const leaveNeedsApprovalMap: Record<string, number> = {};
   const otMap: Record<string, { weekday: number; weekdayNight: number; sunday: number; sundayNight: number; holiday: number; holidayNight: number }> = {};
   const ensureOt = (id: string) => (otMap[id] ||= { weekday: 0, weekdayNight: 0, sunday: 0, sundayNight: 0, holiday: 0, holidayNight: 0 });
   // Ca đêm (HC Đ) — công đêm theo loại ngày (lương ×1.3/2.7/3.9). KHÁC OT đêm.
@@ -186,22 +208,28 @@ export async function calculatePayrollForPeriod(periodId: string) {
 
   for (const a of attendanceData) {
     const d = new Date(a.date);
-    const wh = a.workHours || 0;
+    const wh = ((a as any).reconciledHours ?? a.workHours) || 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT (khai báo tổ)
     const oh = a.otHours || 0;
     const nh = (a as any).nightHours || 0;       // HC Đ — công ca đêm
     const onh = (a as any).otNightHours || 0;    // Thêm giờ Đ — OT ca đêm
-    // Nghỉ phép CÓ LƯƠNG (AL) lấy thẳng từ chấm công (dòng "nghỉ"), áp dụng mọi ngày.
-    if ((a.paidLeaveDays || 0) > 0) {
+    // GATE: ngày này có ĐƠN NGHỈ DUYỆT phủ không? (L lễ theo lịch → không cần đơn.)
+    const appr = apprLeaveDay.get(`${a.employeeId}|${d.toISOString().slice(0, 10)}`);
+    // Nghỉ phép CÓ LƯƠNG (AL) từ chấm công — CHỈ tính khi CÓ đơn duyệt.
+    if ((a.paidLeaveDays || 0) > 0 && appr) {
       alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + (a.paidLeaveDays || 0);
     }
-    // Phân loại mã nghỉ (gồm nửa ngày "0.5XX"):
+    // Phân loại mã nghỉ (gồm nửa ngày "0.5XX") — CL/WL/ML/SL/MT cũng CHỈ tính khi có đơn duyệt:
     const lvBase = leaveCodeBase(a.leaveCode);
-    if (lvBase === "CL" || lvBase === "WL" || lvBase === "ML") {           // công ty trả → leaveDays
+    if ((lvBase === "CL" || lvBase === "WL" || lvBase === "ML") && appr) {  // công ty trả → leaveDays
       companyExtraLeaveMap[a.employeeId] = (companyExtraLeaveMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
-    } else if (lvBase === "SL" || lvBase === "MT") {                        // BHXH trả → chỉ hiển thị
+    } else if ((lvBase === "SL" || lvBase === "MT") && appr) {              // BHXH trả → chỉ hiển thị
       bhxhLeaveDaysMap[a.employeeId] = (bhxhLeaveDaysMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
-    } else if (lvBase === "L") {                                            // Nghỉ Lễ — CHỈ ô có "L" mới được công lễ
+    } else if (lvBase === "L") {                                            // Nghỉ Lễ — theo LỊCH, KHÔNG cần đơn
       holidayCodeMap[a.employeeId] = (holidayCodeMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
+    }
+    // Cảnh báo: mã đặc biệt (AL/CL/WL/ML/SL/MT) mà CHƯA có đơn duyệt → ngày này đang KHÔNG được tính lương.
+    if (((a.paidLeaveDays || 0) > 0 || ["CL", "WL", "ML", "SL", "MT"].includes(lvBase)) && !appr) {
+      leaveNeedsApprovalMap[a.employeeId] = (leaveNeedsApprovalMap[a.employeeId] || 0) + 1;
     }
     if (isHoliday(d)) {
       // Lễ — wh+oh → OT × hệ số (chốt 2026-06-08).
@@ -228,11 +256,24 @@ export async function calculatePayrollForPeriod(periodId: string) {
         workDaysMap[a.employeeId] = (workDaysMap[a.employeeId] || 0) + 1;
       } else if (a.status === "ABSENT_UNAPPROVED") {
         // KL (vắng không lương → mục tiêu bù công bằng OT) = nghỉ KHÔNG lương (UL) + vắng không mã.
-        // LOẠI TRỪ (không phải KL): mọi mã CÓ HƯỞNG — công ty trả (AL/L/CL/WL/ML) hoặc BHXH (SL/MT).
         const code = leaveCodeBase(a.leaveCode);
-        if (![...COMPANY_PAID_LEAVE, ...BHXH_LEAVE].includes(code)) {
+        const isPaidCode = [...COMPANY_PAID_LEAVE, ...BHXH_LEAVE].includes(code); // AL/L/CL/WL/ML/SL/MT
+        if (appr) {
+          // Có đơn duyệt phủ ngày này:
+          if (!isPaidCode) {
+            // file ghi KL/không mã nhưng ĐƠN đã duyệt → NÂNG thành nghỉ có lương (hồi tố: nghỉ ngày 13,
+            //   quên đơn → duyệt bù ngày 29 thì ngày 13 lại có lương). BHXH-type → cột nghỉ hưởng lương.
+            if (appr.bhxh) bhxhLeaveDaysMap[a.employeeId] = (bhxhLeaveDaysMap[a.employeeId] || 0) + 1;
+            else companyExtraLeaveMap[a.employeeId] = (companyExtraLeaveMap[a.employeeId] || 0) + 1;
+          }
+          // isPaidCode + appr: đã đếm ở khối phân loại mã phía trên → KHÔNG tính KL.
+        } else {
+          // KHÔNG có đơn duyệt → KL cả ngày (kể cả mã CL/WL/ML/SL/MT đã ghi sẵn nhưng CHƯA duyệt).
           unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
         }
+      } else if (a.status === "ABSENT_APPROVED" && !appr) {
+        // AL cả ngày nhưng CHƯA có đơn duyệt → không lương → KL.
+        unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + (a.paidLeaveDays || 0);
       }
       // Nửa ngày KHÔNG lương (vd "0.5UL"): NV làm nửa ngày (HALF_DAY ở trên đã cộng công
       // phần làm) + nửa còn lại nghỉ không lương → tính phần nghỉ đó là KL để bù (như UL).
@@ -240,12 +281,17 @@ export async function calculatePayrollForPeriod(periodId: string) {
       if (ulHalf && a.status === "HALF_DAY") {
         unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + parseFloat(ulHalf[1]);
       }
+      // Nửa ngày phép AL đi kèm HALF_DAY (HC=4 + 0.5AL) mà CHƯA duyệt → nửa phép đó thành KL.
+      if (a.status === "HALF_DAY" && (a.paidLeaveDays || 0) > 0 && !appr) {
+        unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + (a.paidLeaveDays || 0);
+      }
       // Nửa ngày phép (vd "0.5AL") mà KHÔNG đi làm phần còn lại → phần còn lại = KL (bù OT như ngày KL).
       //   HC=4 + 0.5AL  → status HALF_DAY (đã có đi làm) → phần kia là công làm, KHÔNG tính KL.
       //   HC trống + 0.5AL → status ABSENT_APPROVED_HALF (không đi làm) → (1 − số ngày phép) = KL.
       if (a.status === "ABSENT_APPROVED_HALF") {
         const gap = Math.max(0, 1 - (a.paidLeaveDays || 0));
         if (gap > 0) unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + gap;
+        if (!appr) unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + (a.paidLeaveDays || 0);
       }
       // Nghỉ phép có lương: đã cộng từ paidLeaveDays ở trên (không suy từ status nữa).
       if (oh > 0) ensureOt(a.employeeId).weekday += oh;                 // OT ngày thường (Thêm giờ N)
@@ -296,7 +342,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
   };
   for (const a of attendanceData) {
     const d = new Date(a.date); const t = d.getTime();
-    const wh = a.workHours || 0, oh = a.otHours || 0, onh = (a as any).otNightHours || 0;
+    const wh = ((a as any).reconciledHours ?? a.workHours) || 0, oh = a.otHours || 0, onh = (a as any).otNightHours || 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT
     if (isHoliday(d)) {
       const compH = isCompensatoryHoliday(d);
       pushOt(a.employeeId, t, wh + oh, compH ? OT_COEF.sunday : OT_COEF.holiday);
@@ -328,16 +374,50 @@ export async function calculatePayrollForPeriod(periodId: string) {
     otExemptRatioMap[id] = totalConv > 0 ? exemptConv / totalConv : 0;
   }
 
-  // 6 — Nghỉ phép có lương (LeaveRequest + mã AL bảng công) → hưởng theo Lương BHXH/CC
-  const leavePaidMap: Record<string, number> = {};
-  // SICK (ốm) + MATERNITY/PATERNITY (thai sản) qua ĐƠN NGHỈ — BHXH chi trả → chỉ hiển thị (bhxhLeaveDays),
-  //   KHÔNG vào leaveDays (công ty trả). Đồng bộ với path mã chấm công SL/MT ở trên.
-  const BHXH_LEAVE_TYPES = new Set(["SICK", "MATERNITY", "PATERNITY"]);
-  for (const l of leaveData) {
-    if (l.leaveType === "UNPAID") continue;
-    if (BHXH_LEAVE_TYPES.has(l.leaveType)) bhxhLeaveDaysMap[l.employeeId] = (bhxhLeaveDaysMap[l.employeeId] || 0) + l.totalDays;
-    else leavePaidMap[l.employeeId] = (leavePaidMap[l.employeeId] || 0) + l.totalDays;
+  // ── AUTO-CAP PHÉP NĂM theo quỹ tích luỹ (chốt 2026-07-29, hướng B) ──
+  //   Phép năm (AL) chỉ được trả lương trong QUỸ CÒN LẠI tới tháng này:
+  //     accrued = floor(quota/12 × tháng)  −  AL đã dùng các THÁNG TRƯỚC (đơn ANNUAL đã duyệt).
+  //   AL trong file VƯỢT quỹ còn lại → phần dư chuyển thành KL (không lương, bù OT như KL).
+  //   (NV thử việc không tạo được đơn ANNUAL → không có appr → AL đã tự rớt ở gate, không tới đây.)
+  const alEmpIds = Object.keys(alDaysFromAttendance).filter((id) => (alDaysFromAttendance[id] || 0) > 0);
+  if (alEmpIds.length > 0) {
+    const balances = await prisma.leaveBalance.findMany({
+      where: { year: period.year, employeeId: { in: alEmpIds } },
+      select: { employeeId: true, totalDays: true },
+    });
+    const quotaMap: Record<string, number> = {};
+    for (const b of balances) quotaMap[b.employeeId] = b.totalDays;
+    // AL đã dùng ở các THÁNG TRƯỚC trong năm (đơn ANNUAL đã duyệt, bắt đầu trước đầu tháng kỳ này).
+    const priorAL = await prisma.leaveRequest.groupBy({
+      by: ["employeeId"],
+      where: {
+        employeeId: { in: alEmpIds },
+        leaveType: "ANNUAL",
+        status: "APPROVED",
+        startDate: { gte: new Date(period.year, 0, 1), lt: startDate },
+      },
+      _sum: { totalDays: true },
+    });
+    const priorMap: Record<string, number> = {};
+    for (const p of priorAL) priorMap[p.employeeId] = p._sum.totalDays ?? 0;
+    for (const empId of alEmpIds) {
+      const quota = quotaMap[empId] ?? 12;
+      const accrued = Math.floor((quota / 12) * period.month);
+      const remaining = Math.max(0, accrued - (priorMap[empId] || 0));
+      const alThis = alDaysFromAttendance[empId] || 0;
+      if (alThis > remaining) {
+        const excess = alThis - remaining;
+        alDaysFromAttendance[empId] = remaining;                              // chỉ trả phần trong quỹ
+        unpaidWeekdayMap[empId] = (unpaidWeekdayMap[empId] || 0) + excess;    // phần dư → KL
+      }
+    }
   }
+
+  // 6 — Nghỉ phép có lương → hưởng theo Lương BHXH/CC.
+  //   ĐƠN NGHỈ (LeaveRequest) KHÔNG cộng độc lập ở đây nữa — nó chỉ là ĐIỀU KIỆN (gate) + NÂNG ngày
+  //   KL→có lương, đã xử lý trong vòng chấm công phía trên (apprLeaveDay). Ở đây chỉ gom AL (đã qua
+  //   gate + cap quỹ) từ chấm công vào leavePaidMap; CL/WL/ML → companyExtraLeaveMap; SL/MT → bhxhLeaveDaysMap.
+  const leavePaidMap: Record<string, number> = {};
   for (const [empId, days] of Object.entries(alDaysFromAttendance)) {
     leavePaidMap[empId] = (leavePaidMap[empId] || 0) + days;
   }
@@ -564,6 +644,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       nightWorkDays: nightCong,       // công ca đêm (để tách khỏi cột Lương ca ngày)
       leaveDays: input.leaveDays,     // phép/lễ CÔNG TY trả (AL + Lễ) — dùng tính lương chế độ
       bhxhLeaveDays: bhxhLeaveDaysMap[emp.id] || 0, // SL+MT do BHXH trả — CHỈ hiển thị cột "nghỉ hưởng lương", không vào lương
+      leaveNeedsApproval: leaveNeedsApprovalMap[emp.id] || 0, // số ngày mã đặc biệt CHƯA có đơn duyệt (đang bị KL) → HCNS nhắc
       // OT giờ tách theo loại (sau khi đã tiêu hao phần bù công — khớp OT quy đổi)
       otWeekday: otAfter.weekday, otWeekdayNight: otAfter.weekdayNight,
       otSunday: otAfter.sunday, otSundayNight: otAfter.sundayNight,
