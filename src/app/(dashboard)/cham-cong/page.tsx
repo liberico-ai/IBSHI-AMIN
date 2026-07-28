@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, Fragment, Suspense } from "react";
 import { confirmDialog } from "@/lib/confirm-dialog";
+import { isHoliday } from "@/lib/holidays";
 import { useSearchParams } from "next/navigation";
 import { PageTitle } from "@/components/layout/page-title";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -90,13 +91,14 @@ const POSITION_ORDER: Record<string, number> = { C_LEVEL: 0, MANAGER: 1, TEAM_LE
 
 // ── Office Attendance Card (Khối Gián tiếp — hours-based, matches Excel template) ──
 function OfficeAttendanceCard({
-  employees, daysInMonth, month, year, onRefresh, canImport, needsApproval,
+  employees, daysInMonth, month, year, onRefresh, canImport, needsApproval, needsApprovalOt,
 }: {
   employees: GridEmployee[];
   daysInMonth: number; month: number; year: number;
   onRefresh: () => void;
   canImport: boolean;
   needsApproval?: (rec: AttendanceRecord) => boolean;
+  needsApprovalOt?: (rec: AttendanceRecord) => boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -455,10 +457,13 @@ function OfficeAttendanceCard({
                       </td>
                       <td className="border-r border-b" style={{ borderColor: BD }}></td>
                       {days.map(d => {
-                        const oh = emp.days[d]?.otHours;
+                        const rec = emp.days[d];
+                        const oh = rec?.otHours;
+                        const flag = rec && needsApprovalOt ? needsApprovalOt(rec) : false;
                         return (
                           <td key={d} className="w-7 py-0.5 border-r border-b text-center" style={{ borderColor: BD }}>
                             {oh && oh > 0 ? <span className="font-semibold" style={{ color: "var(--ibs-warning)", fontSize: "10px" }}>{oh}</span> : null}
+                            {flag ? <span title="Giờ OT chưa có đơn tăng ca được duyệt — đang KHÔNG tính lương. Nhắc làm/duyệt đơn." style={{ color: "var(--ibs-danger)", fontWeight: 700, fontSize: "10px", marginLeft: "1px", verticalAlign: "top" }}>*</span> : null}
                           </td>
                         );
                       })}
@@ -478,7 +483,7 @@ function OfficeAttendanceCard({
 }
 
 function AttendanceGridCard({
-  title, subtitle, icon, employees, daysInMonth, month, year, onExport, onRefresh, canImport, needsApproval,
+  title, subtitle, icon, employees, daysInMonth, month, year, onExport, onRefresh, canImport, needsApproval, needsApprovalOt,
 }: {
   title: string; subtitle: string; icon: string;
   employees: GridEmployee[];
@@ -487,6 +492,7 @@ function AttendanceGridCard({
   onRefresh: () => void;
   canImport: boolean;
   needsApproval?: (rec: AttendanceRecord) => boolean;
+  needsApprovalOt?: (rec: AttendanceRecord) => boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -818,10 +824,13 @@ function AttendanceGridCard({
                       </td>
                       <td className="border-r border-b" style={{ borderColor: BD }}></td>
                       {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
-                        const oh = emp.days[d]?.otHours;
+                        const rec = emp.days[d];
+                        const oh = rec?.otHours;
+                        const flag = rec && needsApprovalOt ? needsApprovalOt(rec) : false;
                         return (
                           <td key={d} className="w-7 py-0.5 border-r border-b text-center" style={{ borderColor: BD }}>
                             {oh && oh > 0 ? <span className="font-semibold" style={{ color: "var(--ibs-warning)", fontSize: "10px" }}>{oh}</span> : null}
+                            {flag ? <span title="Giờ OT chưa có đơn tăng ca được duyệt — đang KHÔNG tính lương. Nhắc làm/duyệt đơn." style={{ color: "var(--ibs-danger)", fontWeight: 700, fontSize: "10px", marginLeft: "1px", verticalAlign: "top" }}>*</span> : null}
                           </td>
                         );
                       })}
@@ -1044,6 +1053,23 @@ function AttendancePageInner() {
     return !apprLeaveDaySet.has(`${rec.employee.code}|${ymd}`);
   }, [apprLeaveDaySet]);
 
+  // ── Dấu * đỏ cho OT ngày thường CHƯA có đơn tăng ca duyệt (khớp gate lương Pha 3) ──
+  //   CN/Lễ không cần đơn → không đánh dấu.
+  const apprOtDaySet = useMemo(() => {
+    const set = new Set<string>(); // "empCode|YYYY-MM-DD"
+    for (const o of otRequests) {
+      if (o.status !== "APPROVED") continue;
+      set.add(`${o.employee.code}|${new Date(o.date).toISOString().slice(0, 10)}`);
+    }
+    return set;
+  }, [otRequests]);
+  const otNeedsApproval = useMemo(() => (rec: AttendanceRecord) => {
+    if (!rec.otHours || rec.otHours <= 0) return false;
+    const d = new Date(rec.date);
+    if (d.getUTCDay() === 0 || isHoliday(d)) return false; // CN/Lễ không cần đơn
+    return !apprOtDaySet.has(`${rec.employee.code}|${d.toISOString().slice(0, 10)}`);
+  }, [apprOtDaySet]);
+
   async function handleLeaveAction(id: string, action: "APPROVE" | "REJECT") {
     const res = await fetch(`/api/v1/leave-requests/${id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
@@ -1254,7 +1280,7 @@ function AttendancePageInner() {
               <div className="flex items-start gap-2 text-[11px] px-3 py-2 rounded-lg border"
                 style={{ color: "var(--ibs-text-dim)", background: "rgba(239,68,68,0.05)", borderColor: "rgba(239,68,68,0.2)" }}>
                 <span style={{ color: "var(--ibs-danger)", fontWeight: 700, fontSize: "13px", lineHeight: 1 }}>*</span>
-                <span>= ngày có mã nghỉ đặc biệt (AL/CL/WL/ML/SL/MT) <b>chưa có đơn nghỉ được duyệt</b> → đang <b>KHÔNG</b> tính lương. Nhắc NV làm đơn / duyệt để ngày đó được tính bù (kể cả duyệt cuối tháng).</span>
+                <span>= mã nghỉ đặc biệt (AL/CL/WL/ML/SL/MT) <b>chưa có đơn nghỉ duyệt</b>, hoặc giờ OT ngày thường <b>chưa có đơn tăng ca duyệt</b> → đang <b>KHÔNG</b> tính lương. Nhắc NV làm/duyệt đơn để được tính bù (kể cả duyệt cuối tháng).</span>
               </div>
               {/* Card: Khối Gián tiếp */}
               <OfficeAttendanceCard
@@ -1265,6 +1291,7 @@ function AttendancePageInner() {
                 onRefresh={() => setGridRefreshKey(k => k + 1)}
                 canImport={can("m3.bangcong:import")}
                 needsApproval={leaveNeedsApproval}
+                needsApprovalOt={otNeedsApproval}
               />
               {/* Card: Khối Trực tiếp */}
               <AttendanceGridCard
@@ -1279,6 +1306,7 @@ function AttendancePageInner() {
                 onRefresh={() => setGridRefreshKey(k => k + 1)}
                 canImport={can("m3.bangcong:import")}
                 needsApproval={leaveNeedsApproval}
+                needsApprovalOt={otNeedsApproval}
               />
             </>
           )}

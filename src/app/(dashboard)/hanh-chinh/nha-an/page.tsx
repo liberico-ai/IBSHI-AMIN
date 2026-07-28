@@ -210,7 +210,7 @@ export default function NhaAnPage() {
   type DayCostRow = { date: string; lunchCount: number; dinnerCount: number; guestCount: number; subcontractorCount: number; totalMeals: number; mealCost: number; foodCost: number; diff: number };
   const [costByDay, setCostByDay] = useState<DayCostRow[]>([]);
   // Đối soát Kế hoạch (đăng ký) vs Thực tế (bếp phục vụ)
-  type ActualRow = { date: string; planLunch: number; planDinner: number; planGuest: number; planSub: number; actLunch: number; actDinner: number; actGuest: number; actSub: number; hasActual: boolean; note: string | null };
+  type ActualRow = { date: string; planLunch: number; planDinner: number; planGuest: number; planSub: number; actLunch: number; actDinner: number; actGuest: number; actSub: number; present: number; hasActual: boolean; note: string | null };
   const [mealActual, setMealActual] = useState<ActualRow[]>([]);
   const [actualCanManage, setActualCanManage] = useState(false);
   const [editActualDate, setEditActualDate] = useState<ActualRow | null>(null);
@@ -911,6 +911,7 @@ export default function NhaAnPage() {
                       <th className="text-right px-3 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>KHÁCH</th>
                       <th className="text-right px-3 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>THẦU PHỤ</th>
                       <th className="text-right px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>TỔNG</th>
+                      <th className="text-right px-3 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }} title="Số NV có mặt theo chấm công">CÓ MẶT</th>
                       <th className="text-right px-4 py-3 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>CHÊNH LỆCH</th>
                       {actualCanManage && <th className="px-5 py-3" />}
                     </tr>
@@ -926,6 +927,9 @@ export default function NhaAnPage() {
                         const planTotal = r.planLunch + r.planDinner + r.planGuest + r.planSub;
                         const actTotal = r.actLunch + r.actDinner + r.actGuest + r.actSub;
                         const diff = r.hasActual ? actTotal - planTotal : null;
+                        // Đối soát cơm trưa vs số có mặt: cơm trưa (thực tế nếu có, không thì đăng ký) > có mặt → thừa.
+                        const lunchRef = r.hasActual ? r.actLunch : r.planLunch;
+                        const lunchOver = r.present > 0 && lunchRef > r.present;
                         return (
                           <tr key={r.date} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
                             <td className="px-5 py-2.5 font-medium">{r.date.split("-").reverse().join("/")} <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>({dow})</span></td>
@@ -934,6 +938,10 @@ export default function NhaAnPage() {
                             <td className="px-3 py-2.5 text-right">{cell(r.planGuest, r.actGuest, r.hasActual)}</td>
                             <td className="px-3 py-2.5 text-right">{cell(r.planSub, r.actSub, r.hasActual)}</td>
                             <td className="px-4 py-2.5 text-right font-semibold">{cell(planTotal, actTotal, r.hasActual)}</td>
+                            <td className="px-3 py-2.5 text-right font-semibold" style={{ color: lunchOver ? "var(--ibs-danger)" : "var(--ibs-text-dim)" }}
+                              title={lunchOver ? `Cơm trưa (${lunchRef}) nhiều hơn số có mặt (${r.present}) → đăng ký/nấu thừa` : "Số NV có mặt theo chấm công"}>
+                              {r.present || "—"}
+                            </td>
                             <td className="px-4 py-2.5 text-right font-semibold" style={{ color: diff === null ? "var(--ibs-text-dim)" : diff === 0 ? "var(--ibs-text-dim)" : diff > 0 ? "#10b981" : "var(--ibs-danger)" }}>
                               {diff === null ? "—" : (diff > 0 ? "+" : "") + diff}
                             </td>
@@ -951,6 +959,7 @@ export default function NhaAnPage() {
                 </div>
                 <div className="px-5 py-2.5 border-t text-[11px]" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>
                   Chênh lệch = Thực tế − Kế hoạch. Âm (đỏ) = nấu dư so với thực ăn; Dương (xanh) = thực ăn nhiều hơn đăng ký.
+                  {" · "}<b>Có mặt</b> = số NV chấm công trong ngày; đỏ = cơm trưa (thực tế/đăng ký) nhiều hơn số có mặt → đăng ký/nấu thừa.
                 </div>
               </div>
             )

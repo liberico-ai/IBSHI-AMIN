@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
   const start = new Date(year, month - 1, 1);
   const end = new Date(year, month, 0, 23, 59, 59);
 
-  const [regs, supps, subMeals, actuals] = await Promise.all([
+  const [regs, supps, subMeals, actuals, attendance] = await Promise.all([
     prisma.mealRegistration.findMany({
       where: { date: { gte: start, lte: end }, department: { isActive: true } },
       select: { date: true, lunchCount: true, dinnerCount: true, guestCount: true },
@@ -46,18 +46,24 @@ export async function GET(request: NextRequest) {
       select: { date: true, lunchCount: true, dinnerCount: true },
     }),
     prisma.mealActual.findMany({ where: { date: { gte: start, lte: end } } }),
+    // Pha 5: SỐ CÓ MẶT theo ngày (chấm công) — đối soát với suất cơm đăng ký/thực tế.
+    prisma.attendanceRecord.findMany({
+      where: { date: { gte: start, lte: end }, status: { in: ["PRESENT", "LATE", "HALF_DAY", "BUSINESS_TRIP"] } },
+      select: { date: true },
+    }),
   ]);
 
   type Row = {
     date: string;
     planLunch: number; planDinner: number; planGuest: number; planSub: number;
     actLunch: number; actDinner: number; actGuest: number; actSub: number;
+    present: number;   // số NV có mặt (chấm công) trong ngày
     hasActual: boolean; note: string | null;
   };
   const byDay = new Map<string, Row>();
   const ensure = (k: string): Row => {
     let r = byDay.get(k);
-    if (!r) { r = { date: k, planLunch: 0, planDinner: 0, planGuest: 0, planSub: 0, actLunch: 0, actDinner: 0, actGuest: 0, actSub: 0, hasActual: false, note: null }; byDay.set(k, r); }
+    if (!r) { r = { date: k, planLunch: 0, planDinner: 0, planGuest: 0, planSub: 0, actLunch: 0, actDinner: 0, actGuest: 0, actSub: 0, present: 0, hasActual: false, note: null }; byDay.set(k, r); }
     return r;
   };
 
@@ -82,9 +88,13 @@ export async function GET(request: NextRequest) {
     row.actLunch = a.lunchActual; row.actDinner = a.dinnerActual; row.actGuest = a.guestActual; row.actSub = a.subActual;
     row.hasActual = true; row.note = a.note;
   }
+  // Số CÓ MẶT (chấm công) — mỗi bản ghi AttendanceRecord là 1 NV/ngày (unique employee+date).
+  for (const a of attendance) {
+    ensure(keyOf(a.date)).present += 1;
+  }
 
   const data = Array.from(byDay.values())
-    .filter((r) => r.planLunch + r.planDinner + r.planGuest + r.planSub > 0 || r.hasActual)
+    .filter((r) => r.planLunch + r.planDinner + r.planGuest + r.planSub > 0 || r.hasActual || r.present > 0)
     .sort((a, b) => a.date.localeCompare(b.date));
 
   return NextResponse.json({ data, meta: { month, year, canManage: canUser(session.user as any, "m10.nhaan.thucte:edit") } });
