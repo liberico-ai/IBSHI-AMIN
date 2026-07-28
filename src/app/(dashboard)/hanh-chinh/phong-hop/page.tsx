@@ -13,6 +13,7 @@ type Booking = {
   startTime: string; endTime: string; status: string; rejectReason?: string; seriesId?: string | null;
   room: { id: string; name: string; code: string; capacity: number };
   requester: { id: string; code: string; fullName: string };
+  attendees?: { id: string; rsvp: string; employee: { id: string; code: string; fullName: string } }[];
 };
 
 const BOOKING_STATUS: Record<string, { label: string; color: string; bg: string }> = {
@@ -118,6 +119,11 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priorityNote, setPriorityNote] = useState("");
+  // Mời người tham gia họp
+  const [attendees, setAttendees] = useState<{ id: string; code: string; fullName: string; dept: string }[]>([]);
+  const [attQuery, setAttQuery] = useState("");
+  const [attResults, setAttResults] = useState<{ id: string; code: string; fullName: string; department: { name: string } | null }[]>([]);
+  const [attOpen, setAttOpen] = useState(false);
   const [recurrenceOn, setRecurrenceOn] = useState(false);
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]); // 0=CN..6=T7
   const [recurrenceUntil, setRecurrenceUntil] = useState("");
@@ -170,6 +176,16 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
     });
   }, [roomId, date]);
 
+  // Tìm NV để mời (debounce 250ms) khi ô tìm đang mở.
+  useEffect(() => {
+    if (!attOpen) return;
+    const t = setTimeout(() => {
+      fetch(`/api/v1/employees/lookup?q=${encodeURIComponent(attQuery.trim())}`)
+        .then((r) => r.json()).then((res) => setAttResults(res.data || [])).catch(() => setAttResults([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [attQuery, attOpen]);
+
   const bookedSlots = useMemo(() => {
     const set = new Set<number>();
     for (const b of bookings) {
@@ -216,6 +232,7 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
         body: JSON.stringify({
           roomId, startTime: start.toISOString(), endTime: end.toISOString(),
           title: title.trim(), description: description.trim() || null, priorityNote: priorityNote.trim() || null,
+          ...(attendees.length > 0 ? { attendeeIds: attendees.map((a) => a.id) } : {}),
           ...(recurrenceOn ? { recurrence: { daysOfWeek: cleanDays, ...(recurrenceUntil ? { until: recurrenceUntil } : {}) } } : {}),
         }),
       });
@@ -225,6 +242,7 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
         await alertDialog(`Đã tạo ${d.data.count} phiếu (chờ duyệt). Phiếu cần được duyệt cả series trước khi sử dụng.`);
       }
       setTitle(""); setDescription(""); setPriorityNote("");
+      setAttendees([]); setAttQuery("");
       setRecurrenceOn(false); setRecurrenceDays([]); setRecurrenceUntil("");
       setSlotStart(null); setSlotEnd(null);
       onCreated();
@@ -299,6 +317,45 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
           <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Mức ưu tiên / ghi chú (tự do)</label>
           <input value={priorityNote} onChange={(e) => setPriorityNote(e.target.value)} placeholder="VD: Họp khẩn cấp với khách hàng" className="w-full px-3 py-2 rounded-lg border text-[13px]"
             style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
+        </div>
+
+        {/* Mời người tham gia */}
+        <div>
+          <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Người tham gia</label>
+          {attendees.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {attendees.map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-full text-[12px]"
+                  style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>
+                  {a.fullName}
+                  <button type="button" onClick={() => setAttendees((p) => p.filter((x) => x.id !== a.id))}
+                    className="w-4 h-4 flex items-center justify-center rounded-full" style={{ lineHeight: 1 }} title="Bỏ">×</button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="relative">
+            <input value={attQuery} onChange={(e) => { setAttQuery(e.target.value); setAttOpen(true); }}
+              onFocus={() => setAttOpen(true)} onBlur={() => setTimeout(() => setAttOpen(false), 150)}
+              placeholder="Tìm theo tên hoặc mã NV..." className="w-full px-3 py-2 rounded-lg border text-[13px]"
+              style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }} />
+            {attOpen && (
+              <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border shadow-lg"
+                style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                {attResults.filter((r) => !attendees.some((a) => a.id === r.id)).length === 0 ? (
+                  <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không có kết quả</div>
+                ) : attResults.filter((r) => !attendees.some((a) => a.id === r.id)).map((r) => (
+                  <button key={r.id} type="button"
+                    onClick={() => { setAttendees((p) => [...p, { id: r.id, code: r.code, fullName: r.fullName, dept: r.department?.name || "" }]); setAttQuery(""); }}
+                    className="w-full text-left px-3 py-2 text-[13px]" style={{ borderBottom: "1px solid var(--ibs-border)" }}>
+                    <span className="font-medium">{r.fullName}</span>{" "}
+                    <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>({r.code}{r.department?.name ? " · " + r.department.name : ""})</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {attendees.length > 0 && <div className="mt-1 text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Đã mời {attendees.length} người</div>}
         </div>
 
         {/* Lặp lại — đặt lịch cố định */}
@@ -622,10 +679,20 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
                 </div>
               </div>
 
-              {expanded.has(b.id) && (b.description || b.priorityNote || b.rejectReason || b.seriesId) && (
+              {expanded.has(b.id) && (b.description || b.priorityNote || b.rejectReason || b.seriesId || (b.attendees && b.attendees.length > 0)) && (
                 <div className="px-4 pb-3 pl-10 text-[12px]" style={{ background: "rgba(0,0,0,0.03)", color: "var(--ibs-text-muted)" }}>
                   {b.description && <div className="mb-1">📝 {b.description}</div>}
                   {b.priorityNote && <div style={{ color: "var(--ibs-warning)" }}>⚡ Ưu tiên: {b.priorityNote}</div>}
+                  {b.attendees && b.attendees.length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <span>👥 Người tham gia ({b.attendees.length}):</span>
+                      {b.attendees.map((a) => (
+                        <span key={a.id} className="px-2 py-0.5 rounded-full text-[11px]" style={{ background: "rgba(0,180,216,0.1)", color: "var(--ibs-accent)" }}>
+                          {a.employee.fullName}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {b.seriesId && <div className="mt-1" style={{ color: "var(--ibs-accent)" }}>📅 Phiếu thuộc lịch cố định (series #{b.seriesId.slice(0, 8)})</div>}
                   {b.rejectReason && <div className="mt-1" style={{ color: "var(--ibs-danger)" }}>❌ Lý do từ chối: {b.rejectReason}</div>}
                 </div>

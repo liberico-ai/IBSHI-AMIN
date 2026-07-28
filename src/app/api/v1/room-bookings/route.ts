@@ -19,6 +19,7 @@ const CreateSchema = z.object({
     daysOfWeek: z.array(z.number().int().min(1).max(6)).min(1),
     until: z.string().optional(),
   }).optional(),
+  attendeeIds: z.array(z.string().uuid()).optional(), // NV được mời tham gia họp
 });
 
 // GET: list bookings — params:
@@ -69,6 +70,7 @@ export async function GET(request: NextRequest) {
     include: {
       room: { select: { id: true, name: true, code: true, capacity: true } },
       requester: { select: { id: true, code: true, fullName: true } },
+      attendees: { include: { employee: { select: { id: true, code: true, fullName: true } } } },
     },
     take: roomId && date ? 200 : 100,
   });
@@ -86,6 +88,8 @@ export async function POST(request: NextRequest) {
   const body = CreateSchema.parse(await request.json());
   const startTime = new Date(body.startTime);
   const endTime = new Date(body.endTime);
+  // NV được mời (bỏ trùng + bỏ chính người đặt — họ là chủ trì, không cần tự mời).
+  const attendeeIds = Array.from(new Set((body.attendeeIds || []).filter((id) => id !== me.id)));
   if (endTime <= startTime) return NextResponse.json({ error: { code: "INVALID_TIME", message: "Giờ kết thúc phải sau giờ bắt đầu" } }, { status: 400 });
 
   // Phải đặt trước tối thiểu 30 phút, không đặt giờ trong quá khứ.
@@ -128,6 +132,16 @@ export async function POST(request: NextRequest) {
           seriesId,
         })),
       });
+      // Mời người tham gia cho MỌI phiếu trong series (createMany không trả id → truy vấn theo seriesId).
+      if (attendeeIds.length > 0) {
+        const seriesBookings = await prisma.roomBooking.findMany({ where: { seriesId }, select: { id: true } });
+        if (seriesBookings.length > 0) {
+          await prisma.bookingAttendee.createMany({
+            data: seriesBookings.flatMap((b) => attendeeIds.map((employeeId) => ({ bookingId: b.id, employeeId }))),
+            skipDuplicates: true,
+          });
+        }
+      }
       return NextResponse.json({ data: { seriesId, count: result.count } }, { status: 201 });
     } catch (e: any) {
       console.error("[room-bookings series create] error:", e);
@@ -165,5 +179,11 @@ export async function POST(request: NextRequest) {
       status: "APPROVED",
     },
   });
+  if (attendeeIds.length > 0) {
+    await prisma.bookingAttendee.createMany({
+      data: attendeeIds.map((employeeId) => ({ bookingId: booking.id, employeeId })),
+      skipDuplicates: true,
+    });
+  }
   return NextResponse.json({ data: booking }, { status: 201 });
 }
