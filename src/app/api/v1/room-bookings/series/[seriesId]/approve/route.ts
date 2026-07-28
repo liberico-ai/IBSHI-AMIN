@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canApproveRoomVehicle } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
+import { resolveScope, scopeAllowsDept } from "@/lib/data-scope.server";
 
 // POST /api/v1/room-bookings/series/[seriesId]/approve
 // Duyệt cả series. Với mỗi phiếu PENDING_APPROVAL trong series:
@@ -11,11 +13,20 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ se
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const employeeCode = (session.user as any).employeeCode;
-  if (!canApproveRoomVehicle(employeeCode, (session.user as any).role))
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền duyệt phiếu đặt phòng họp" } }, { status: 403 });
-
-  const { seriesId } = await params;
+  const role = (session.user as any).role;
   const userId = (session.user as any).id;
+  const { seriesId } = await params;
+
+  // Duyệt được khi: allowlist cũ HOẶC có quyền Duyệt ma trận + series thuộc Phạm vi (series cùng 1 người đặt).
+  const sample = await prisma.roomBooking.findFirst({ where: { seriesId }, include: { requester: { select: { departmentId: true } } } });
+  if (!sample) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Series không tồn tại" } }, { status: 404 });
+  let allowed = canApproveRoomVehicle(employeeCode, role);
+  if (!allowed && canUser(session.user as any, "m10.phonghop.dat:approve")) {
+    const scope = await resolveScope(userId, role, "m10.phonghop.dat");
+    allowed = scopeAllowsDept(scope, sample.requester?.departmentId);
+  }
+  if (!allowed)
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền duyệt phiếu đặt phòng họp" } }, { status: 403 });
 
   const pending = await prisma.roomBooking.findMany({
     where: { seriesId, status: "PENDING_APPROVAL" },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { renderOfferLetterPdf } from "@/lib/offer-letter-pdf";
 import { sendMail } from "@/lib/mail";
 import { getHrMinioClient, getHrFileUrl, HR_BUCKET } from "@/lib/minio";
@@ -17,8 +18,8 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!["MANAGER", "HR_ADMIN", "BOM", "ADMIN"].includes(userRole)) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ TP HCNS / HR_ADMIN / BGĐ duyệt được" } }, { status: 403 });
+  if (!["MANAGER", "HR_ADMIN", "BOM", "ADMIN"].includes(userRole) && !canUser(session.user as any, "m4.offer:approve")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ TP HCNS / BGĐ hoặc người có quyền Duyệt Offer" } }, { status: 403 });
   }
 
   const approver = await prisma.employee.findFirst({

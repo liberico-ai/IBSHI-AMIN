@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
+import { resolveScope, scopeAllowsDept } from "@/lib/data-scope.server";
 
 // Xác nhận cuộc họp ĐÃ XONG (kết thúc SỚM hơn giờ đăng ký) → rút endTime về hiện tại
 // để trả phòng về trạng thái TRỐNG cho khoảng thời gian còn lại.
@@ -20,8 +22,13 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
 
   const isOwner = b.requester.user?.id === userId;
   const isAdmin = role === "HR_ADMIN" || role === "BOM" || role === "ADMIN";
-  if (!isOwner && !isAdmin)
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc admin được xác nhận xong" } }, { status: 403 });
+  let byMatrix = false;
+  if (!isOwner && !isAdmin && canUser(session.user as any, "m10.phonghop.dat:approve")) {
+    const scope = await resolveScope(userId, role, "m10.phonghop.dat");
+    byMatrix = scopeAllowsDept(scope, b.requester.departmentId);
+  }
+  if (!isOwner && !isAdmin && !byMatrix)
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu, admin, hoặc người có quyền Duyệt (trong phạm vi)" } }, { status: 403 });
 
   if (b.status !== "APPROVED")
     return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ phiếu ĐÃ DUYỆT mới xác nhận xong được" } }, { status: 400 });

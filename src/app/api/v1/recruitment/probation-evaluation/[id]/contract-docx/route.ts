@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { buildContractHtml, renderContractDocxFromHtml } from "@/lib/contract-doc";
 
 // GET — sinh & tải Word (.docx) Hợp đồng từ nội dung đã soạn.
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
+  if (!canUser(session.user as any, "m4.thuviec:view")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const evalRec = await prisma.probationEvaluation.findUnique({
     where: { id: params.id },

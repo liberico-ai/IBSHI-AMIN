@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { captureOrgSnapshot, currentPeriod } from "@/lib/org-snapshot";
+import { canUser } from "@/lib/permission-catalog";
 
 // GET /api/v1/org-snapshots            → danh sách các tháng đã chốt
 // GET /api/v1/org-snapshots?period=... → chi tiết sĩ số phòng/tổ của tháng đó
@@ -23,8 +24,8 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
-  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role)) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS được chốt snapshot" } }, { status: 403 });
+  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role) && !canUser(session.user as any, "m2.sodo:create")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ HCNS hoặc người có quyền quản lý sơ đồ" } }, { status: 403 });
   }
   const body = await req.json().catch(() => ({}));
   const period = (body?.period as string) || currentPeriod();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { sendMail } from "@/lib/mail";
 import { presignFileUrl } from "@/lib/minio";
 
@@ -10,7 +11,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!["MANAGER", "HR_ADMIN", "BOM", "ADMIN"].includes(userRole)) {
+  if (!["MANAGER", "HR_ADMIN", "BOM", "ADMIN"].includes(userRole) && !canUser(session.user as any, "m4.offer:edit")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 

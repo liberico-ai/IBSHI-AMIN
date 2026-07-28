@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canUser } from "@/lib/permission-catalog";
 import { canActOnDeptScope } from "@/lib/data-scope.server";
+// (canUser đã import ở trên)
 import { logAudit } from "@/lib/audit";
 import { isDirectorOfDepartment } from "@/lib/ot-khoi";
 
@@ -97,12 +98,14 @@ export async function PUT(
 }
 
 // Quyền quản lý (sửa/xoá) đơn OT: HC/ADMIN/BOM toàn quyền; MANAGER chỉ phòng mình.
-async function canManageOT(userRole: string, userId: string, reqDeptId: string): Promise<boolean> {
+async function canManageOT(user: any, userRole: string, userId: string, reqDeptId: string, matrixAction: string): Promise<boolean> {
   if (canDo(userRole, "otRequests", "approve2")) return true; // HR_ADMIN / ADMIN / BOM
   if (userRole === "MANAGER") {
     const mgr = await prisma.employee.findFirst({ where: { userId }, select: { departmentId: true } });
-    return !!mgr && mgr.departmentId === reqDeptId;
+    if (!!mgr && mgr.departmentId === reqDeptId) return true;
   }
+  // Tick ma trận (Sửa/Xóa) + đơn thuộc PHẠM VI được cấp.
+  if (canUser(user, matrixAction)) return await canActOnDeptScope(userId, userRole, "m3.tangca", reqDeptId);
   return false;
 }
 
@@ -121,8 +124,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (ot.status !== "PENDING") {
     return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ sửa được đơn tăng ca CHƯA duyệt" } }, { status: 400 });
   }
-  if (!(await canManageOT(userRole, userId, ot.employee.departmentId))) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Trưởng phòng chỉ sửa được đơn OT của phòng mình" } }, { status: 403 });
+  if (!(await canManageOT(session.user as any, userRole, userId, ot.employee.departmentId, "m3.tangca:edit"))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền sửa đơn OT này (ngoài phạm vi)" } }, { status: 403 });
   }
 
   const body = await request.json();
@@ -165,8 +168,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   if (ot.status !== "PENDING") {
     return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ xoá được đơn tăng ca CHƯA duyệt" } }, { status: 400 });
   }
-  if (!(await canManageOT(userRole, userId, ot.employee.departmentId))) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Trưởng phòng chỉ xoá được đơn OT của phòng mình" } }, { status: 403 });
+  if (!(await canManageOT(session.user as any, userRole, userId, ot.employee.departmentId, "m3.tangca:delete"))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền xoá đơn OT này (ngoài phạm vi)" } }, { status: 403 });
   }
 
   await prisma.oTRequest.delete({ where: { id } });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 
 // POST — Xác nhận đã ký phụ lục (upload bản scan) → áp giá trị mới vào HĐ gốc + hồ sơ NV.
@@ -10,7 +11,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
-  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role))
+  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role) && !canUser(session.user as any, "m1.phuluc:edit"))
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
 
   const { contractId, aid } = await params;

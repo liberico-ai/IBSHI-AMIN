@@ -34,8 +34,8 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (!canUser(session.user as any, "m7.bangluong:view")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập mục Lương" } }, { status: 403 });
+  if (!canUser(session.user as any, "m7.bangluong:run")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền tạo kỳ lương" } }, { status: 403 });
   }
 
   const body = await request.json();

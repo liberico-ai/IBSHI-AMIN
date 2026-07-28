@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { canDo } from "@/lib/permissions";
+import { canUser } from "@/lib/permission-catalog";
 import { rejectLeave } from "@/services/leave.service";
 import { logAudit } from "@/lib/audit";
 import prisma from "@/lib/prisma";
@@ -14,14 +15,16 @@ export async function PUT(
 
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!canDo(userRole, "leaveRequests", "reject")) {
+  const canReject = canDo(userRole, "leaveRequests", "reject")
+    || canUser(session.user as any, "m3.nghiphep:approve1") || canUser(session.user as any, "m3.nghiphep:approve2");
+  if (!canReject) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
 
   const { id } = await params;
 
-  // MANAGER can only reject requests from their own department
-  if (!canDo(userRole, "leaveRequests", "approve2")) {
+  // Cấp cao (approve2) xử lý mọi phòng; còn lại chỉ phòng mình.
+  if (!canDo(userRole, "leaveRequests", "approve2") && !canUser(session.user as any, "m3.nghiphep:approve2")) {
     const leaveReq = await prisma.leaveRequest.findUnique({
       where: { id },
       include: { employee: { select: { departmentId: true } } },

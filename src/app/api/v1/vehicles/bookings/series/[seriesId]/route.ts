@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
 import { canApproveRoomVehicle } from "@/lib/access";
+import { canUser } from "@/lib/permission-catalog";
+import { resolveScope, scopeAllowsDept } from "@/lib/data-scope.server";
 
 const Schema = z.object({
   action: z.enum(["APPROVE", "REJECT", "CANCEL"]),
@@ -20,18 +22,30 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { seriesId } = await params;
   const body = Schema.parse(await request.json());
 
-  // Lấy 1 phiếu để xác định owner
+  // Lấy 1 phiếu để xác định owner + phòng ban (series cùng 1 người đặt).
   const sample = await prisma.vehicleBooking.findFirst({
     where: { seriesId },
-    include: { requester: { select: { userId: true } } },
+    include: { requester: { select: { userId: true, departmentId: true } } },
   });
   if (!sample) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
 
+  const role = (session.user as any).role;
   const isOwner = sample.requester?.userId === userId;
-  const isApprover = canApproveRoomVehicle(employeeCode, (session.user as any).role);
+  let isApprover = canApproveRoomVehicle(employeeCode, role);
+  // Có ô Duyệt ma trận + series thuộc Phạm vi → cũng là approver.
+  if (!isApprover && (canUser(session.user as any, "m10.xe.datxe:approve1") || canUser(session.user as any, "m10.xe.datxe:approve2"))) {
+    const scope = await resolveScope(userId, role, "m10.xe.datxe");
+    isApprover = scopeAllowsDept(scope, sample.requester?.departmentId);
+  }
+  // Huỷ: chủ phiếu, approver, hoặc ô Xóa ma trận + trong Phạm vi.
+  let canDelete = isOwner || isApprover;
+  if (!canDelete && canUser(session.user as any, "m10.xe.datxe:delete")) {
+    const scope = await resolveScope(userId, role, "m10.xe.datxe");
+    canDelete = scopeAllowsDept(scope, sample.requester?.departmentId);
+  }
 
   if (body.action === "CANCEL") {
-    if (!isOwner && !isApprover) {
+    if (!canDelete) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
     }
     const r = await prisma.vehicleBooking.updateMany({

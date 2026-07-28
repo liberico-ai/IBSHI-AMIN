@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 
 const RejectSchema = z.object({
@@ -12,8 +13,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
   const userRole = (session.user as any).role;
-  if (userRole !== "BOM" && userRole !== "ADMIN") {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ BGĐ trả lại được" } }, { status: 403 });
+  if (userRole !== "BOM" && userRole !== "ADMIN" && !canUser(session.user as any, "m4.thuviec:approve")) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ BGĐ hoặc người có quyền Duyệt thử việc" } }, { status: 403 });
   }
 
   const body = await request.json().catch(() => ({}));

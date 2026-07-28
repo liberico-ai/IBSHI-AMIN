@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { canUser } from "@/lib/permission-catalog";
 import { z } from "zod";
 
 // POST — TP HCNS / BOM duyệt hoặc từ chối HĐ (dùng cho HĐ thử việc chờ duyệt).
@@ -12,8 +13,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
-  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role))
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ TP HCNS / BGĐ được duyệt" } }, { status: 403 });
+  if (!["HR_ADMIN", "BOM", "ADMIN"].includes(role) && !canUser(session.user as any, "m1.hopdong:approve"))
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ TP HCNS / BGĐ hoặc người có quyền Duyệt HĐ" } }, { status: 403 });
 
   const { contractId } = await params;
   const body = Schema.safeParse(await request.json().catch(() => ({})));
