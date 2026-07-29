@@ -451,6 +451,8 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
   const [approveTarget, setApproveTarget] = useState<Booking | null>(null); // duyệt phiếu lẻ + (tuỳ chọn) đổi phòng
   const [editTarget, setEditTarget] = useState<Booking | null>(null);       // sửa phiếu chưa họp xong
   const [processing, setProcessing] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 10;
   const [showExport, setShowExport] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [filterRoomId, setFilterRoomId] = useState("");
@@ -514,6 +516,12 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
     }
     return result;
   }, [filtered]);
+  // Phân trang 10 phiếu/trang (trên danh sách ĐÃ gộp series).
+  const totalPages = Math.max(1, Math.ceil(displayBookings.length / PER_PAGE));
+  const pageClamped = Math.min(page, totalPages);
+  const pagedBookings = displayBookings.slice((pageClamped - 1) * PER_PAGE, pageClamped * PER_PAGE);
+  // Đổi bộ lọc → về trang 1.
+  useEffect(() => { setPage(1); }, [filter, filterRoomId, filterFrom, filterTo]);
   const DOW_LABELS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
   const pad2 = (n: number) => String(n).padStart(2, "0");
 
@@ -620,7 +628,7 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
       </div>
       {loading ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
         : displayBookings.length === 0 ? <div className="px-4 py-8 text-center" style={{ color: "var(--ibs-text-dim)" }}>Không có phiếu nào</div>
-        : displayBookings.map((b) => {
+        : pagedBookings.map((b) => {
           const isOwner = me?.employeeId && me.employeeId === b.requester.id;
           const start = new Date(b.startTime), end = new Date(b.endTime);
           const st = BOOKING_STATUS[b.status] || { label: b.status, color: "#6b7280", bg: "rgba(0,0,0,0.05)" };
@@ -715,6 +723,15 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
             </div>
           );
         })}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-3 py-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+          <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={pageClamped <= 1}
+            className="px-2.5 py-1 rounded text-[12px] border disabled:opacity-40" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>← Trước</button>
+          <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Trang {pageClamped}/{totalPages} · {displayBookings.length} phiếu</span>
+          <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={pageClamped >= totalPages}
+            className="px-2.5 py-1 rounded text-[12px] border disabled:opacity-40" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Sau →</button>
+        </div>
+      )}
     </div>
 
     {rejectTarget && (

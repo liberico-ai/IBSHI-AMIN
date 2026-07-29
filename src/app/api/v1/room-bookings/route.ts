@@ -66,13 +66,17 @@ export async function GET(request: NextRequest) {
 
   const data = await prisma.roomBooking.findMany({
     where,
-    orderBy: { startTime: "desc" },
+    // Slot-picker (roomId+date): theo giờ. List tổng: theo NGÀY TẠO mới nhất → phiếu mới (chờ duyệt)
+    //   lên đầu, không bị các occurrence tương lai của lịch cố định đẩy ra ngoài.
+    orderBy: roomId && date ? { startTime: "desc" } : { createdAt: "desc" },
     include: {
       room: { select: { id: true, name: true, code: true, capacity: true } },
       requester: { select: { id: true, code: true, fullName: true } },
       attendees: { include: { employee: { select: { id: true, code: true, fullName: true } } } },
     },
-    take: roomId && date ? 200 : 100,
+    // Trần cao cho list tổng: 1 lịch cố định có thể sinh nhiều trăm occurrence — cần đủ chỗ để KHÔNG
+    //   cắt mất phiếu lẻ. (UI gộp series thành 1 dòng nên số dòng hiển thị vẫn ít.)
+    take: roomId && date ? 200 : 2000,
   });
 
   return NextResponse.json({ data, myEmployeeId: me?.id ?? null });

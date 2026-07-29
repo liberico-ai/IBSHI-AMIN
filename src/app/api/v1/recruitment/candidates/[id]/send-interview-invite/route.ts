@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canUser } from "@/lib/permission-catalog";
 import { sendMail } from "@/lib/mail";
+import { interviewInviteHtml, INTERVIEW_DEFAULT_LOCATION } from "@/lib/recruitment-letters";
 import { z } from "zod";
 
 const Schema = z.object({
@@ -12,15 +13,14 @@ const Schema = z.object({
   interviewLocation: z.string().optional().nullable(),
   interviewContact: z.string().optional().nullable(),
   interviewNote: z.string().optional().nullable(),
+  preview: z.boolean().optional(),            // true → chỉ TRẢ nội dung thư (không gửi, không đổi trạng thái)
+  bodyHtml: z.string().optional().nullable(), // nội dung thư ĐÃ SỬA (HCNS chỉnh trong ô xem trước) → gửi nội dung này
 });
 
-const DEFAULT_LOCATION = "Km 6 Quốc lộ 5, Phường Hồng Bàng, TP. Hải Phòng";
-
-function fmtDate(d: string) {
-  return d.split("-").reverse().join("/");
-}
+const DEFAULT_LOCATION = INTERVIEW_DEFAULT_LOCATION;
 
 // POST — soạn & gửi THƯ MỜI PHỎNG VẤN cho ứng viên (email), đồng thời chuyển sang trạng thái Hẹn PV.
+//   ?preview: chỉ trả HTML để HCNS xem trước + sửa (không gửi). Gửi kèm bodyHtml = dùng nội dung đã sửa.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
@@ -49,24 +49,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const position = candidate.recruitment.positionName;
   const deptName = candidate.recruitment.department?.name || "";
 
-  // Gửi email thư mời phỏng vấn TRƯỚC — lỗi thì không đổi trạng thái (HCNS thử lại được).
-  const when = `${d.interviewTime?.trim() ? d.interviewTime.trim() + ", " : ""}ngày ${fmtDate(d.interviewDate)}`;
-  const html = `
-    <div style="font-family:Arial,sans-serif;font-size:14px;color:#0f172a;line-height:1.6">
-      <p>Kính gửi Anh/Chị <b>${candidate.fullName}</b>,</p>
-      <p><b>CÔNG TY CỔ PHẦN CÔNG NGHIỆP NẶNG IBS</b> trân trọng cảm ơn Anh/Chị đã quan tâm và ứng tuyển.
-      Chúng tôi trân trọng kính mời Anh/Chị tham gia buổi <b>phỏng vấn</b> cho vị trí
-      <b>${position}</b>${deptName ? ` – ${deptName}` : ""} với thông tin như sau:</p>
-      <ul>
-        <li><b>Thời gian:</b> ${when}</li>
-        <li><b>Địa điểm:</b> ${location}</li>
-        ${d.interviewContact?.trim() ? `<li><b>Người liên hệ / phỏng vấn:</b> ${d.interviewContact.trim()}</li>` : ""}
-      </ul>
-      ${d.interviewNote?.trim() ? `<p><b>Lưu ý:</b> ${d.interviewNote.trim().replace(/\n/g, "<br/>")}</p>` : ""}
-      <p>Đề nghị Anh/Chị mang theo CMND/CCCD và đến đúng giờ. Nếu cần thay đổi lịch, vui lòng phản hồi email này.</p>
-      <p>Trân trọng,<br/><b>Phòng Hành chính – Nhân sự</b><br/>Công ty CP Công nghiệp nặng IBS</p>
-    </div>`;
+  // Nội dung thư: dùng bản HCNS đã sửa (bodyHtml) nếu có, không thì sinh từ mẫu.
+  const generated = interviewInviteHtml({
+    fullName: candidate.fullName, position, deptName,
+    interviewDate: d.interviewDate, interviewTime: d.interviewTime,
+    location, contact: d.interviewContact, note: d.interviewNote,
+  });
 
+  // XEM TRƯỚC: chỉ trả nội dung, KHÔNG gửi + KHÔNG đổi trạng thái.
+  if (d.preview) {
+    return NextResponse.json({ data: { html: generated } });
+  }
+
+  const html = d.bodyHtml?.trim() ? d.bodyHtml : generated;
+
+  // Gửi email thư mời phỏng vấn TRƯỚC — lỗi thì không đổi trạng thái (HCNS thử lại được).
   try {
     await sendMail({
       to: candidate.email,

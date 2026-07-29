@@ -7,6 +7,7 @@ import { formatDate, formatVND, apiError } from "@/lib/utils";
 import { viewUrl } from "@/lib/use-presigned-url";
 import { useCan } from "@/hooks/use-permission";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
+import { offerLetterHtml } from "@/lib/recruitment-letters";
 import {
   Plus, RefreshCw, X, Check, Clock, ClipboardCheck, Send, FileText,
   ChevronRight, ThumbsUp, ThumbsDown, AlertCircle, Mail, Award,
@@ -302,6 +303,7 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
   const [benefits, setBenefits] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // Lương chính thức = tổng các thành phần. Lương thử việc do HCNS tự nhập (không tự tính 85%).
   const officialSalary = (Number(baseSalary) || 0) + (Number(farAllowance) || 0) + (Number(kpiAllowance) || 0) + (Number(positionAllowance) || 0);
@@ -476,11 +478,40 @@ function OfferFormSheet({ candidate, onBack, onCreated, onClose }: {
 
       <div className="flex gap-2 justify-end pt-3 border-t" style={{ borderColor: "var(--ibs-border)" }}>
         <button onClick={onBack} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>← Chọn UV khác</button>
+        <button onClick={() => setPreviewOpen(true)} className="px-4 py-2 rounded-lg text-[13px] border flex items-center gap-1" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }}>
+          <FileText size={13} /> Xem trước thư
+        </button>
         <button onClick={() => handleSubmit(false)} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>Lưu nháp</button>
         <button onClick={() => handleSubmit(true)} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
           {saving ? "Đang gửi..." : "Gửi TP HCNS duyệt"}
         </button>
       </div>
+
+      {previewOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4" onClick={() => setPreviewOpen(false)}>
+          <div className="rounded-2xl w-full max-w-3xl p-6 max-h-[92vh] overflow-y-auto flex flex-col" onClick={(e) => e.stopPropagation()} style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[16px] font-bold">Xem trước Thư mời nhận việc</div>
+              <button onClick={() => setPreviewOpen(false)}><X size={18} /></button>
+            </div>
+            <div className="text-[12px] mb-3 p-2.5 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
+              ⓘ Bản xem trước theo các trường đang nhập. Muốn sửa nội dung → đóng lại và chỉnh trường tương ứng (lương/vị trí/ngày/chế độ). File PDF khi gửi sẽ khớp bản này.
+            </div>
+            <div className="rounded-lg border px-5 py-4" style={{ background: "#fff", borderColor: "var(--ibs-border)" }}
+              dangerouslySetInnerHTML={{ __html: offerLetterHtml({
+                candidateFullName: candidate.fullName,
+                candidateGender: "Anh/Chị",
+                position, departmentName: department,
+                workLocation: "Km 6 Quốc lộ 5, Phường Hồng Bàng, Thành phố Hải Phòng, Việt Nam",
+                officialSalary, probationarySalary: Number(probSalary) || 0,
+                probationDays: Number(probDays) || 0,
+                startDate: startDate ? new Date(startDate) : new Date(),
+                probationEndDate: probationEnd || (startDate ? new Date(startDate) : new Date()),
+                benefits,
+              }) }} />
+          </div>
+        </div>
+      )}
     </ModalShell>
   );
 }

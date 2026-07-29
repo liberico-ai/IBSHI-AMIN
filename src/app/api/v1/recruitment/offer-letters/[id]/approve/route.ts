@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { renderOfferLetterPdf } from "@/lib/offer-letter-pdf";
+import { OFFER_SIGNER_NAME } from "@/lib/recruitment-letters";
 import { sendMail } from "@/lib/mail";
 import { getHrMinioClient, getHrFileUrl, HR_BUCKET } from "@/lib/minio";
 import { BUCKETS } from "@/lib/minio-constants";
@@ -56,7 +57,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
     startDate: offer.startDate,
     probationEndDate: offer.probationEndDate,
     benefits: offer.benefits || "",
-    hrManagerName: approver.fullName,
+    hrManagerName: OFFER_SIGNER_NAME, // TP HCNS ký — fix cứng (Hoàng Văn Toại)
     issuedDate: new Date(),
   });
 

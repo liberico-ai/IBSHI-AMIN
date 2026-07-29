@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { formatDate, apiError } from "@/lib/utils";
@@ -454,6 +454,7 @@ export default function TuyenDungPage() {
                   interviewLocation: data.interviewLocation,
                   interviewContact: data.interviewContact,
                   interviewNote: data.interviewNote,
+                  bodyHtml: data.bodyHtml || undefined, // nội dung thư đã sửa ở ô Xem trước
                 }),
               });
               if (!res.ok) {
@@ -815,7 +816,7 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
   //  - OFFERED → ACCEPTED/DECLINED: tự động ở Tab 2 mark-result
   // Negative actions (Loại / Rút lui): hiện theo stage ở action bar dưới cùng.
 
-  async function handleSave() {
+  async function handleSave(bodyHtml?: string) {
     setSaving(true);
     await onSaveInterview(candidate.id, {
       interviewDate: interviewDate || null,
@@ -824,8 +825,36 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
       interviewContact: interviewContact || null,
       interviewNote: interviewNote || null,
       interviewScore: interviewScore ? Number(interviewScore) : null,
+      bodyHtml: bodyHtml || undefined,
     });
     setSaving(false);
+  }
+
+  // Xem trước THƯ MỜI PHỎNG VẤN trước khi gửi (HCNS kiểm tra + sửa) — chỉ ở bước SCREENING → Hẹn PV.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const letterEditorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (previewOpen && letterEditorRef.current) letterEditorRef.current.innerHTML = previewHtml;
+  }, [previewOpen, previewHtml]);
+  async function openLetterPreview() {
+    if (!interviewDate || !interviewTime) return;
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`/api/v1/recruitment/candidates/${candidate.id}/send-interview-invite`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interviewDate, interviewTime,
+          interviewLocation: interviewLocation || null, interviewContact: interviewContact || null,
+          interviewNote: interviewNote || null, preview: true,
+        }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok) { alert(apiError(res.status, j?.error) || "Không tạo được bản xem trước"); return; }
+      setPreviewHtml(j.data?.html || "");
+      setPreviewOpen(true);
+    } finally { setPreviewLoading(false); }
   }
 
   return (
@@ -1118,16 +1147,16 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
                 )}
 
                 {candidate.status === "SCREENING" && (
-                  <button type="button" onClick={handleSave} disabled={saving || !interviewDate || !interviewTime}
-                    title={!interviewDate ? "Vui lòng chọn Ngày phỏng vấn" : !interviewTime ? "Vui lòng chọn Giờ phỏng vấn" : ""}
+                  <button type="button" onClick={openLetterPreview} disabled={saving || previewLoading || !interviewDate || !interviewTime}
+                    title={!interviewDate ? "Vui lòng chọn Ngày phỏng vấn" : !interviewTime ? "Vui lòng chọn Giờ phỏng vấn" : "Xem trước + sửa thư rồi gửi"}
                     className="px-4 py-2 rounded-lg text-[13px] font-semibold"
-                    style={{ background: "var(--ibs-accent)", color: "#fff", opacity: saving || !interviewDate || !interviewTime ? 0.5 : 1 }}>
-                    {saving ? "Đang gửi..." : "Lưu & Gửi thư mời PV"}
+                    style={{ background: "var(--ibs-accent)", color: "#fff", opacity: saving || previewLoading || !interviewDate || !interviewTime ? 0.5 : 1 }}>
+                    {previewLoading ? "Đang tạo bản xem trước..." : "Xem trước & Gửi thư mời PV"}
                   </button>
                 )}
 
                 {candidate.status === "INTERVIEW" && (
-                  <button type="button" onClick={handleSave} disabled={saving}
+                  <button type="button" onClick={() => handleSave()} disabled={saving}
                     className="px-4 py-2 rounded-lg text-[13px] font-semibold"
                     style={{ background: "var(--ibs-accent)", color: "#fff" }}>
                     {saving ? "Đang lưu..." : "Lưu & Đánh dấu Đã PV"}
@@ -1140,6 +1169,29 @@ function CandidateDetailModal({ candidate, showEvaluation = false, canEdit, onCl
           </>
         )}
       </div>
+      {previewOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
+          <div className="rounded-2xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto flex flex-col" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[16px] font-bold">Xem trước Thư mời phỏng vấn</div>
+              <button onClick={() => setPreviewOpen(false)}><X size={18} /></button>
+            </div>
+            <div className="text-[12px] mb-3 p-2.5 rounded-lg" style={{ background: "rgba(0,180,216,0.06)", color: "var(--ibs-text-dim)" }}>
+              ⓘ Kiểm tra + chỉnh sửa trực tiếp nội dung thư bên dưới rồi bấm <b>Gửi thư mời</b> — email sẽ gửi đúng nội dung này.
+            </div>
+            <div ref={letterEditorRef} contentEditable suppressContentEditableWarning
+              className="rounded-lg border px-4 py-3 text-[13px] outline-none" style={{ background: "#fff", color: "#0f172a", borderColor: "var(--ibs-border)", minHeight: 260 }} />
+            <div className="flex gap-2 justify-end mt-4">
+              <button type="button" onClick={() => setPreviewOpen(false)} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Đóng</button>
+              <button type="button" disabled={saving}
+                onClick={async () => { const html = letterEditorRef.current?.innerHTML || previewHtml; setPreviewOpen(false); await handleSave(html); }}
+                className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: saving ? "rgba(0,180,216,0.5)" : "var(--ibs-accent)" }}>
+                {saving ? "Đang gửi..." : "Gửi thư mời"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
