@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { apiError } from "@/lib/utils";
-import { X, Calendar, ClipboardList, ChevronDown, ChevronRight, Check, XCircle, Download } from "lucide-react";
+import { X, Calendar, ClipboardList, ChevronDown, ChevronRight, Check, XCircle, Download, Pencil } from "lucide-react";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { canApproveRoomVehicle } from "@/lib/access";
 
@@ -198,14 +198,21 @@ function BookTab({ onCreated }: { onCreated: () => void }) {
 
   function clickSlot(idx: number) {
     if (bookedSlots.has(idx)) return;
-    if (slotStart === null) { setSlotStart(idx); setSlotEnd(idx + 1); }
-    else if (idx < slotStart) { setSlotStart(idx); setSlotEnd(idx + 1); }
-    else {
-      for (let i = slotStart; i <= idx; i++) {
+    // Chưa chọn gì → chọn 1 ô (30 phút).
+    if (slotStart === null || slotEnd === null) { setSlotStart(idx); setSlotEnd(idx + 1); return; }
+    // Bấm đúng ô ĐANG là điểm bắt đầu → BỎ CHỌN (để chọn khung khác).
+    if (idx === slotStart) { setSlotStart(null); setSlotEnd(null); return; }
+    const isSingle = slotEnd - slotStart === 1;
+    if (isSingle) {
+      // Đang chọn đúng 1 ô → ô thứ 2 tạo KHOẢNG (cả tiến lẫn lùi).
+      const lo = Math.min(idx, slotStart), hi = Math.max(idx, slotStart);
+      for (let i = lo; i <= hi; i++) {
         if (bookedSlots.has(i)) { void alertDialog(`Khung ${slotToTime(i)} đã bận, chọn khoảng khác`); return; }
       }
-      setSlotEnd(idx + 1);
+      setSlotStart(lo); setSlotEnd(hi + 1); return;
     }
+    // Đã có KHOẢNG nhiều ô → bấm ô bất kỳ = chọn LẠI mới từ ô đó.
+    setSlotStart(idx); setSlotEnd(idx + 1);
   }
 
   async function submit() {
@@ -441,6 +448,8 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "CANCELLED">("all");
   const [rejectTarget, setRejectTarget] = useState<Booking | null>(null);
+  const [approveTarget, setApproveTarget] = useState<Booking | null>(null); // duyệt phiếu lẻ + (tuỳ chọn) đổi phòng
+  const [editTarget, setEditTarget] = useState<Booking | null>(null);       // sửa phiếu chưa họp xong
   const [processing, setProcessing] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -652,13 +661,19 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
                   )}
                   {canApprove && isPending && !b.seriesId && (
                     <>
-                      <button onClick={() => approve(b.id)} disabled={processing === b.id} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "#10b981", opacity: processing === b.id ? 0.6 : 1 }}>
+                      <button onClick={() => setApproveTarget(b)} disabled={processing === b.id} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "#10b981", opacity: processing === b.id ? 0.6 : 1 }}>
                         <Check size={12} /> {processing === b.id ? "Đang duyệt..." : "Duyệt"}
                       </button>
                       <button onClick={() => setRejectTarget(b)} disabled={processing === b.id} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
                         <XCircle size={12} /> Từ chối
                       </button>
                     </>
+                  )}
+                  {/* Người có quyền Duyệt: SỬA phiếu CHƯA họp xong (còn hiệu lực + chưa kết thúc) — đổi phòng/giờ/tiêu đề. */}
+                  {canApprove && (b.status === "PENDING_APPROVAL" || b.status === "APPROVED") && end.getTime() > Date.now() && (
+                    <button onClick={() => setEditTarget(b)} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }} title={b.seriesId ? "Sửa 1 ngày trong lịch cố định (đổi phòng/giờ)" : "Sửa phiếu (đổi phòng/giờ/tiêu đề)"}>
+                      <Pencil size={12} /> Sửa
+                    </button>
                   )}
                   {isOwner && isOngoing && (
                     <button onClick={() => completeOne(b.id)} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "#10b981" }} title="Xác nhận đã xong — trả phòng về trống cho thời gian còn lại">
@@ -705,8 +720,172 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
     {rejectTarget && (
       <RejectModal booking={rejectTarget} onClose={() => setRejectTarget(null)} onDone={() => { setRejectTarget(null); load(); }} />
     )}
+    {approveTarget && (
+      <ApproveRoomModal booking={approveTarget} rooms={rooms} onClose={() => setApproveTarget(null)} onDone={() => { setApproveTarget(null); load(); }} />
+    )}
+    {editTarget && (
+      <EditBookingModal
+        target={editTarget}
+        seriesBookings={editTarget.seriesId ? bookings.filter((x) => x.seriesId === editTarget.seriesId) : [editTarget]}
+        rooms={rooms}
+        onClose={() => setEditTarget(null)}
+        onDone={() => { setEditTarget(null); load(); }}
+      />
+    )}
     {showExport && <ExportBookingsModal onClose={() => setShowExport(false)} />}
     </>
+  );
+}
+
+// ── Duyệt phiếu LẺ + (tuỳ chọn) chỉ định lại phòng ──
+function ApproveRoomModal({ booking, rooms, onClose, onDone }: { booking: Booking; rooms: Room[]; onClose: () => void; onDone: () => void }) {
+  const [roomId, setRoomId] = useState(booking.roomId);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const start = new Date(booking.startTime), end = new Date(booking.endTime);
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  async function doApprove() {
+    setSaving(true); setError("");
+    try {
+      const res = await fetch(`/api/v1/room-bookings/${booking.id}/approve`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(apiError(res.status, j?.error) || "Duyệt thất bại"); return; }
+      onDone();
+    } finally { setSaving(false); }
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
+      <div className="w-full max-w-[420px] rounded-xl border p-5" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-[15px] font-semibold">Duyệt phiếu đặt phòng</h3>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="text-[12px] mb-3" style={{ color: "var(--ibs-text-muted)" }}>
+          <b>{booking.title}</b> · {start.toLocaleDateString("vi-VN")} {pad2(start.getHours())}:{pad2(start.getMinutes())}–{pad2(end.getHours())}:{pad2(end.getMinutes())}
+        </div>
+        <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Phòng (đổi nếu cần)</label>
+        <select value={roomId} onChange={(e) => setRoomId(e.target.value)} className="w-full px-3 py-2 rounded-lg border text-[13px]" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}>
+          {rooms.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.capacity} người)</option>)}
+        </select>
+        {roomId !== booking.roomId && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-accent)" }}>Sẽ chỉ định lại sang phòng khác khi duyệt.</div>}
+        {error && <div className="text-[12px] mt-3 px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+        <div className="flex gap-3 mt-4">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg text-[13px] font-medium" style={{ border: "1px solid var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Đóng</button>
+          <button onClick={doApprove} disabled={saving} className="flex-1 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: saving ? "rgba(16,185,129,0.5)" : "#10b981" }}>{saving ? "Đang duyệt..." : "Duyệt"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Sửa phiếu chưa họp xong (lẻ: sửa thẳng; series: chọn 1 ngày để sửa) ──
+function EditBookingModal({ target, seriesBookings, rooms, onClose, onDone }: { target: Booking; seriesBookings: Booking[]; rooms: Room[]; onClose: () => void; onDone: () => void }) {
+  const isSeries = !!target.seriesId;
+  // Chỉ cho sửa các ngày CHƯA họp xong (còn hiệu lực + chưa kết thúc).
+  const editable = seriesBookings
+    .filter((b) => (b.status === "PENDING_APPROVAL" || b.status === "APPROVED") && new Date(b.endTime).getTime() > Date.now())
+    .sort((a, b) => +new Date(a.startTime) - +new Date(b.startTime));
+  const [pickedId, setPickedId] = useState(isSeries ? "" : target.id);
+  const picked = editable.find((b) => b.id === pickedId) || null;
+
+  const [roomId, setRoomId] = useState(target.roomId);
+  const [date, setDate] = useState("");
+  const [fromT, setFromT] = useState("");
+  const [toT, setToT] = useState("");
+  const [title, setTitle] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+  useEffect(() => {
+    if (!picked) return;
+    const s = new Date(picked.startTime), e = new Date(picked.endTime);
+    setRoomId(picked.roomId);
+    setDate(`${s.getFullYear()}-${String(s.getMonth() + 1).padStart(2, "0")}-${String(s.getDate()).padStart(2, "0")}`);
+    setFromT(hhmm(s)); setToT(hhmm(e)); setTitle(picked.title); setError("");
+  }, [pickedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function save() {
+    if (!picked) return;
+    if (!date || !fromT || !toT) { setError("Nhập đủ ngày + giờ"); return; }
+    const startTime = new Date(`${date}T${fromT}:00`);
+    const endTime = new Date(`${date}T${toT}:00`);
+    if (endTime <= startTime) { setError("Giờ kết thúc phải sau giờ bắt đầu"); return; }
+    setSaving(true); setError("");
+    try {
+      const res = await fetch(`/api/v1/room-bookings/${picked.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId, startTime: startTime.toISOString(), endTime: endTime.toISOString(), title: title.trim() }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(apiError(res.status, j?.error) || "Sửa thất bại"); return; }
+      onDone();
+    } finally { setSaving(false); }
+  }
+
+  const inputCls = "w-full px-3 py-2 rounded-lg border text-[13px]";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
+      <div className="w-full max-w-[460px] rounded-xl border p-5" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-[15px] font-semibold">{isSeries ? "Sửa 1 ngày trong lịch cố định" : "Sửa phiếu đặt phòng"}</h3>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+
+        {isSeries && (
+          <div className="mb-3">
+            <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Chọn ngày cần sửa (chỉ ngày của lịch này)</label>
+            <select value={pickedId} onChange={(e) => setPickedId(e.target.value)} className={inputCls} style={inputStyle}>
+              <option value="">-- Chọn ngày --</option>
+              {editable.map((b) => {
+                const s = new Date(b.startTime);
+                return <option key={b.id} value={b.id}>{s.toLocaleDateString("vi-VN")} · {hhmm(new Date(b.startTime))}–{hhmm(new Date(b.endTime))} ({(BOOKING_STATUS[b.status]?.label) || b.status})</option>;
+              })}
+            </select>
+            {editable.length === 0 && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Không còn ngày nào chưa họp xong để sửa.</div>}
+          </div>
+        )}
+
+        {picked && (
+          <div className="space-y-3">
+            <div>
+              <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Phòng</label>
+              <select value={roomId} onChange={(e) => setRoomId(e.target.value)} className={inputCls} style={inputStyle}>
+                {rooms.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.capacity} người)</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày</label>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} style={inputStyle} />
+              </div>
+              <div>
+                <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Từ giờ</label>
+                <input type="time" value={fromT} onChange={(e) => setFromT(e.target.value)} className={inputCls} style={inputStyle} />
+              </div>
+              <div>
+                <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Đến giờ</label>
+                <input type="time" value={toT} onChange={(e) => setToT(e.target.value)} className={inputCls} style={inputStyle} />
+              </div>
+            </div>
+            <div>
+              <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Tiêu đề</label>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} style={inputStyle} />
+            </div>
+          </div>
+        )}
+
+        {error && <div className="text-[12px] mt-3 px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+        <div className="flex gap-3 mt-4">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg text-[13px] font-medium" style={{ border: "1px solid var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Đóng</button>
+          <button onClick={save} disabled={saving || !picked} className="flex-1 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: (saving || !picked) ? "rgba(0,180,216,0.5)" : "var(--ibs-accent)" }}>{saving ? "Đang lưu..." : "Lưu"}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

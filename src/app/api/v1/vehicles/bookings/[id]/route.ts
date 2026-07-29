@@ -58,17 +58,21 @@ export async function PUT(
   const { action, rejectedReason, actualKm, returnTime, driverName } = parsed.data;
   const isOwner = booking.requester?.user?.id === userId;
 
-  // EDIT — sửa chi tiết phiếu CHỜ DUYỆT (chủ phiếu tự sửa, hoặc người có quyền m10.xe.datxe:edit).
+  // EDIT — sửa chuyến CHƯA HOÀN THÀNH (chốt 2026-07-29): PENDING hoặc APPROVED và completedAt==null.
+  //   Người có quyền Duyệt sửa MỌI thông tin (kể cả chỉ định lại XE + LÁI XE). Chủ phiếu / người có
+  //   quyền sửa vẫn tự sửa được phiếu CHỜ DUYỆT như cũ.
   if (action === "EDIT") {
-    if (booking.status !== "PENDING") {
-      return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ sửa được phiếu đang CHỜ DUYỆT" } }, { status: 400 });
+    const notCompleted = booking.completedAt == null && (booking.status === "PENDING" || booking.status === "APPROVED");
+    if (!notCompleted) {
+      return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ sửa được chuyến CHƯA hoàn thành (chưa huỷ/từ chối)" } }, { status: 400 });
     }
-    if (!isOwner && !canUser(session.user as any, "m10.xe.datxe:edit")) {
-      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền sửa mới sửa được" } }, { status: 403 });
+    const canEditNow = isApprover || (booking.status === "PENDING" && (isOwner || canUser(session.user as any, "m10.xe.datxe:edit")));
+    if (!canEditNow) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền sửa chuyến này" } }, { status: 403 });
     }
     const d = parsed.data;
     const ed: any = {};
-    if (d.vehicleId !== undefined) ed.vehicleId = d.vehicleId;
+    if (d.vehicleId !== undefined) ed.vehicleId = d.vehicleId;          // chỉ định lại XE
     if (d.startDate !== undefined) ed.startDate = new Date(d.startDate);
     if (d.endDate !== undefined) ed.endDate = new Date(d.endDate);
     if (d.origin !== undefined) ed.origin = d.origin || null;
@@ -77,6 +81,17 @@ export async function PUT(
     if (d.passengers !== undefined) ed.passengers = d.passengers;
     if (d.priority !== undefined) ed.priority = d.priority;
     if (d.notes !== undefined) ed.notes = d.notes || null;
+    if (d.driverName !== undefined) ed.driverName = d.driverName?.trim() || null; // chỉ định lại LÁI XE
+    // Check trùng lịch: xe + giờ mới không đụng chuyến ĐÃ DUYỆT khác.
+    const vId = ed.vehicleId ?? booking.vehicleId;
+    const sd = ed.startDate ?? booking.startDate;
+    const edd = ed.endDate ?? booking.endDate;
+    if (edd <= sd) return NextResponse.json({ error: { code: "INVALID_RANGE", message: "Ngày/giờ về phải sau ngày/giờ đi" } }, { status: 400 });
+    const clash = await prisma.vehicleBooking.findFirst({
+      where: { id: { not: id }, vehicleId: vId, status: "APPROVED", startDate: { lte: edd }, endDate: { gte: sd } },
+      select: { destination: true },
+    });
+    if (clash) return NextResponse.json({ error: { code: "CONFLICT", message: `Xe đã có chuyến ĐÃ DUYỆT khác trùng giờ ("${clash.destination}")` } }, { status: 409 });
     const updated = await prisma.vehicleBooking.update({ where: { id }, data: ed });
     return NextResponse.json({ data: updated });
   }

@@ -5,11 +5,15 @@ import { canApproveRoomVehicle } from "@/lib/access";
 import { canUser } from "@/lib/permission-catalog";
 import { resolveScope, scopeAllowsDept } from "@/lib/data-scope.server";
 
-export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const employeeCode = (session.user as any).employeeCode;
   const userId = (session.user as any).id;
+
+  // (Tuỳ chọn) chỉ định lại PHÒNG khi duyệt.
+  const body = await request.json().catch(() => ({}));
+  const newRoomId: string | undefined = body?.roomId || undefined;
 
   const { id } = await params;
   const b = await prisma.roomBooking.findUnique({
@@ -31,11 +35,18 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
   if (b.status !== "PENDING_APPROVAL")
     return NextResponse.json({ error: { code: "INVALID_STATE" } }, { status: 400 });
 
-  // Khi duyệt, phải check không có booking APPROVED khác overlap (đã có cùng phòng từ phiếu khác đã được duyệt trước)
+  // Phòng cuối cùng = phòng chỉ định lại (nếu có) hoặc phòng cũ.
+  const roomId = newRoomId && newRoomId !== b.roomId ? newRoomId : b.roomId;
+  if (roomId !== b.roomId) {
+    const room = await prisma.meetingRoom.findUnique({ where: { id: roomId }, select: { id: true } });
+    if (!room) return NextResponse.json({ error: { code: "ROOM_NOT_FOUND", message: "Phòng chỉ định không tồn tại" } }, { status: 400 });
+  }
+
+  // Check không có booking APPROVED khác overlap ở PHÒNG CUỐI CÙNG.
   const conflict = await prisma.roomBooking.findFirst({
     where: {
       id: { not: id },
-      roomId: b.roomId,
+      roomId,
       status: "APPROVED",
       startTime: { lt: b.endTime },
       endTime: { gt: b.startTime },
@@ -43,12 +54,12 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     select: { title: true },
   });
   if (conflict) return NextResponse.json({
-    error: { code: "CONFLICT", message: `Phòng đã có lịch APPROVED khác trong khung giờ: "${conflict.title}"` },
+    error: { code: "CONFLICT", message: `Phòng đã có lịch ĐÃ DUYỆT khác trong khung giờ: "${conflict.title}"` },
   }, { status: 409 });
 
   const data = await prisma.roomBooking.update({
     where: { id },
-    data: { status: "APPROVED", approvedById: userId, approvedAt: new Date() },
+    data: { status: "APPROVED", roomId, approvedById: userId, approvedAt: new Date() },
   });
   return NextResponse.json({ data });
 }

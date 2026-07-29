@@ -176,7 +176,7 @@ export async function POST(request: NextRequest) {
       title: body.title.trim(),
       description: body.description?.trim() || null,
       priorityNote: body.priorityNote?.trim() || null,
-      status: "APPROVED",
+      status: "PENDING_APPROVAL", // Cả phiếu LẺ cũng cần duyệt (chốt 2026-07-29) — người duyệt có thể đổi phòng khi duyệt.
     },
   });
   if (attendeeIds.length > 0) {

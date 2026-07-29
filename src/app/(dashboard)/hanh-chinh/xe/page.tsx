@@ -49,7 +49,7 @@ type VehicleBooking = {
   startDatetime?: string; endDatetime?: string;
   origin?: string | null; destination: string; purpose: string; passengers: number; status: string;
   approvedAt?: string; actualKm?: number; returnTime?: string; notes?: string; seriesId?: string | null;
-  driverName?: string | null; priority?: string;
+  driverName?: string | null; priority?: string; completedAt?: string | null;
   vehicle: { licensePlate: string; model: string };
   requester: { id?: string; code: string; fullName: string; department: { name: string } };
 };
@@ -170,6 +170,7 @@ export default function XePage() {
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
   const [showNewBooking, setShowNewBooking] = useState(false);
   const [assignTarget, setAssignTarget] = useState<VehicleBooking | null>(null);
+  const [editTripTarget, setEditTripTarget] = useState<VehicleBooking | null>(null); // người duyệt sửa chuyến chưa hoàn thành
   const [showExport, setShowExport] = useState(false);
   const [showNewVehicle, setShowNewVehicle] = useState(false);
   const [showNewFuel, setShowNewFuel] = useState(false);
@@ -456,8 +457,15 @@ export default function XePage() {
           <button onClick={() => setAssignTarget(b)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}><Check size={11} /> Chỉ định</button>
           <button onClick={async () => { if (!(await confirmDialog({ title: "Từ chối phiếu", message: "Từ chối lịch đặt xe này?", tone: "danger", confirmText: "Từ chối" }))) return; handleBookingAction(b.id, "REJECT"); }} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}><XCircle size={11} /> Từ chối</button>
         </>)}
-        {/* CHỜ DUYỆT: chủ phiếu (hoặc người có quyền) Sửa / Xóa hẳn phiếu (chống rác) */}
-        {b.status === "PENDING" && !b.seriesId && (isOwner || can("m10.xe.datxe:edit")) && (
+        {/* Người DUYỆT: sửa chuyến CHƯA HOÀN THÀNH (PENDING/APPROVED, chưa hoàn thành) — đổi xe/lái xe/giờ.
+            Áp cho cả phiếu lẻ + lịch cố định (series chọn ngày trong popup). */}
+        {canApproveBooking && (b.status === "PENDING" || b.status === "APPROVED") && !b.completedAt && (
+          <button onClick={() => setEditTripTarget(b)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(59,130,246,0.15)", color: "#2563eb" }} title={b.seriesId ? "Sửa 1 ngày trong lịch cố định (đổi xe/lái xe/giờ)" : "Sửa chuyến (đổi xe/lái xe/giờ)"}>
+            <Pencil size={11} /> Sửa
+          </button>
+        )}
+        {/* CHỜ DUYỆT: chủ phiếu (không phải người duyệt) tự Sửa / Xóa phiếu (chống rác) */}
+        {b.status === "PENDING" && !b.seriesId && !canApproveBooking && (isOwner || can("m10.xe.datxe:edit")) && (
           <button onClick={() => setEditBooking(b)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(59,130,246,0.15)", color: "#2563eb" }}>
             <Pencil size={11} /> Sửa
           </button>
@@ -872,6 +880,14 @@ export default function XePage() {
           onClose={() => setAssignTarget(null)}
           onApprove={async (driver, vehicleId) => { const ok = await handleBookingAction(assignTarget.id, "APPROVE", driver, vehicleId); if (ok) setAssignTarget(null); }} />
       )}
+      {editTripTarget && (
+        <EditTripModal
+          target={editTripTarget}
+          seriesBookings={editTripTarget.seriesId ? bookings.filter((x) => x.seriesId === editTripTarget.seriesId) : [editTripTarget]}
+          vehicles={vehicles}
+          onClose={() => setEditTripTarget(null)}
+          onDone={() => { setEditTripTarget(null); fetchBookings(); }} />
+      )}
       {showExport && <ExportVehicleBookingsModal onClose={() => setShowExport(false)} />}
       {showNewVehicle && (
         <NewVehicleModal onClose={() => setShowNewVehicle(false)}
@@ -1211,6 +1227,118 @@ function AssignDriverModal({ booking, vehicles, onClose, onApprove }: {
           <button type="button" onClick={submit} disabled={!driver || !vehicleId || saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold flex items-center gap-1" style={{ background: "var(--ibs-success)", color: "#fff", opacity: (!driver || !vehicleId || saving) ? 0.5 : 1, cursor: (!driver || !vehicleId || saving) ? "not-allowed" : "pointer" }}>
             <Check size={14} /> {saving ? "Đang duyệt..." : "Duyệt"}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Người DUYỆT sửa chuyến CHƯA HOÀN THÀNH: đổi xe / lái xe / giờ / điểm đến. Series → chọn 1 ngày. ──
+function EditTripModal({ target, seriesBookings, vehicles, onClose, onDone }: {
+  target: VehicleBooking; seriesBookings: VehicleBooking[]; vehicles: Vehicle[]; onClose: () => void; onDone: () => void;
+}) {
+  const isSeries = !!target.seriesId;
+  const editable = seriesBookings
+    .filter((b) => !b.completedAt && (b.status === "PENDING" || b.status === "APPROVED"))
+    .sort((a, b) => +new Date(a.startDate) - +new Date(b.startDate));
+  const [pickedId, setPickedId] = useState(isSeries ? "" : target.id);
+  const picked = editable.find((b) => b.id === pickedId) || null;
+
+  const vnParts = (iso: string) => {
+    const vn = new Date(new Date(iso).getTime() + 7 * 3600 * 1000);
+    return { date: vn.toISOString().slice(0, 10), time: vn.toISOString().slice(11, 16) };
+  };
+  const [vehicleId, setVehicleId] = useState(target.vehicleId);
+  const [driver, setDriver] = useState(target.driverName || "");
+  const [sDate, setSDate] = useState(""); const [sTime, setSTime] = useState("");
+  const [eDate, setEDate] = useState(""); const [eTime, setETime] = useState("");
+  const [destination, setDestination] = useState("");
+  const [passengers, setPassengers] = useState("1");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!picked) return;
+    const s = vnParts(picked.startDate), e = vnParts(picked.endDate);
+    setVehicleId(picked.vehicleId); setDriver(picked.driverName || "");
+    setSDate(s.date); setSTime(s.time); setEDate(e.date); setETime(e.time);
+    setDestination(picked.destination || ""); setPassengers(String(picked.passengers ?? 1)); setError("");
+  }, [pickedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function save() {
+    if (!picked) return;
+    if (!sDate || !sTime || !eDate || !eTime) { setError("Nhập đủ ngày + giờ"); return; }
+    const startDate = `${sDate}T${sTime}:00+07:00`;
+    const endDate = `${eDate}T${eTime}:00+07:00`;
+    if (new Date(endDate).getTime() <= new Date(startDate).getTime()) { setError("Ngày/giờ về phải sau ngày/giờ đi"); return; }
+    setSaving(true); setError("");
+    try {
+      const res = await fetch(`/api/v1/vehicles/bookings/${picked.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "EDIT", vehicleId, driverName: driver || null, startDate, endDate, destination: destination.trim(), passengers: parseInt(passengers) || 1 }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(apiError(res.status, j?.error) || "Sửa thất bại"); return; }
+      onDone();
+    } finally { setSaving(false); }
+  }
+
+  const inputCls = "w-full rounded-lg px-3 py-2 text-[13px] border";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const lbl = "text-[12px] font-medium mb-1 block";
+  const lblStyle = { color: "var(--ibs-text-dim)" };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="rounded-2xl w-full max-w-md p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[16px] font-bold">{isSeries ? "Sửa 1 ngày trong lịch cố định" : "Sửa chuyến (chưa hoàn thành)"}</div>
+          <button onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {isSeries && (
+          <div className="mb-3">
+            <label className={lbl} style={lblStyle}>Chọn ngày cần sửa (chỉ ngày của lịch này)</label>
+            <select value={pickedId} onChange={(e) => setPickedId(e.target.value)} className={inputCls} style={inputStyle}>
+              <option value="">-- Chọn ngày --</option>
+              {editable.map((b) => {
+                const s = vnParts(b.startDate);
+                return <option key={b.id} value={b.id}>{s.date.split("-").reverse().join("/")} · {s.time} → {vnParts(b.endDate).time} ({(BOOKING_STATUS[b.status]?.label) || b.status})</option>;
+              })}
+            </select>
+            {editable.length === 0 && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Không còn ngày nào chưa hoàn thành để sửa.</div>}
+          </div>
+        )}
+
+        {picked && (
+          <div className="space-y-3">
+            <div>
+              <label className={lbl} style={lblStyle}>Xe (chỉ định lại)</label>
+              <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className={inputCls} style={inputStyle}>
+                {vehicles.map((v) => <option key={v.id} value={v.id}>{v.licensePlate} — {v.model}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lbl} style={lblStyle}>Lái xe (chỉ định lại)</label>
+              <select value={driver} onChange={(e) => setDriver(e.target.value)} className={inputCls} style={inputStyle}>
+                <option value="">Chưa chỉ định</option>
+                {VEHICLE_DRIVERS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><label className={lbl} style={lblStyle}>Ngày đi</label><input type="date" value={sDate} onChange={(e) => setSDate(e.target.value)} className={inputCls} style={inputStyle} /></div>
+              <div><label className={lbl} style={lblStyle}>Giờ đi</label><input type="time" value={sTime} onChange={(e) => setSTime(e.target.value)} className={inputCls} style={inputStyle} /></div>
+              <div><label className={lbl} style={lblStyle}>Ngày về</label><input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} className={inputCls} style={inputStyle} /></div>
+              <div><label className={lbl} style={lblStyle}>Giờ về</label><input type="time" value={eTime} onChange={(e) => setETime(e.target.value)} className={inputCls} style={inputStyle} /></div>
+            </div>
+            <div><label className={lbl} style={lblStyle}>Điểm đến</label><input value={destination} onChange={(e) => setDestination(e.target.value)} className={inputCls} style={inputStyle} /></div>
+            <div><label className={lbl} style={lblStyle}>Số người</label><input type="number" min={1} value={passengers} onChange={(e) => setPassengers(e.target.value)} className={inputCls} style={inputStyle} /></div>
+          </div>
+        )}
+
+        {error && <div className="text-[12px] mt-3 px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+        <div className="flex gap-2 justify-end mt-5">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Đóng</button>
+          <button type="button" onClick={save} disabled={saving || !picked} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: (saving || !picked) ? "rgba(37,99,235,0.5)" : "#2563eb" }}>{saving ? "Đang lưu..." : "Lưu"}</button>
         </div>
       </div>
     </div>
