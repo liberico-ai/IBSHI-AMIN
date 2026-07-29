@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
 import { canViewPayroll } from "@/lib/access";
-import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
+import { resolveScope, scopeWhere, applyScope, canActOnDeptScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -77,10 +77,15 @@ export async function POST(request: NextRequest) {
   const { teamId, departmentId, month, year, projectCode, totalHours, unitPrice, completionRate } = parsed.data;
 
   // Thành viên nhận khoán: theo XƯỞNG (department) hoặc TỔ (team).
+  const _uid = (session.user as any).id, _role = (session.user as any).role;
   let memberIds: string[];
   if (departmentId) {
     const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true } });
     if (!dept) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Xưởng/Phòng ban không tồn tại" } }, { status: 404 });
+    // PHẠM VI (m7.dongia): chỉ nhập khoán cho Xưởng trong phạm vi được cấp.
+    if (!(await canActOnDeptScope(_uid, _role, "m7.dongia", departmentId))) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Xưởng này ngoài phạm vi được cấp" } }, { status: 403 });
+    }
     const emps = await prisma.employee.findMany({ where: { departmentId, status: { in: ["ACTIVE", "PROBATION"] } }, select: { id: true } });
     memberIds = emps.map((e) => e.id);
   } else {
@@ -89,6 +94,9 @@ export async function POST(request: NextRequest) {
       include: { employees: { where: { status: { in: ["ACTIVE", "PROBATION"] } }, select: { id: true } } },
     });
     if (!team) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Tổ sản xuất không tồn tại" } }, { status: 404 });
+    if (team.departmentId && !(await canActOnDeptScope(_uid, _role, "m7.dongia", team.departmentId))) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Tổ này ngoài phạm vi được cấp" } }, { status: 403 });
+    }
     memberIds = team.employees.map((e) => e.id);
   }
 

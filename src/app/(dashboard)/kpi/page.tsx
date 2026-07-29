@@ -225,7 +225,7 @@ export default function KPIPage() {
   const [year, setYear] = useState(currentYear);
 
   useEffect(() => {
-    fetch(`/api/v1/employees?limit=200`).then((r) => r.json())
+    fetch(`/api/v1/employees?limit=200&scopeModule=m6.chamdiem`).then((r) => r.json())
       .then((res) => setEmployees(res.data || []));
   }, []);
 

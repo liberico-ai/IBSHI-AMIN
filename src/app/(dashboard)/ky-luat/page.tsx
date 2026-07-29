@@ -86,7 +86,7 @@ export default function KyLuatPage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/employees?limit=300").then((r) => r.json()).then((res) => setEmployees(res.data || []));
+    fetch("/api/v1/employees?limit=300&scopeModule=m8.kyluat").then((r) => r.json()).then((res) => setEmployees(res.data || []));
     fetchRegulations();
     fetchActions();
   }, []);

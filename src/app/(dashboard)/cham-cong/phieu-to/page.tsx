@@ -167,7 +167,7 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
 
   useEffect(() => {
     fetch("/api/v1/departments").then((r) => r.json()).then((j) => setDepts(j.data || [])).catch(() => {});
-    fetch("/api/v1/employees?limit=1000").then((r) => r.json()).then((j) => setEmps((j.data || []).filter((e: any) => e.status === "ACTIVE" || e.status === "PROBATION"))).catch(() => {});
+    fetch("/api/v1/employees?limit=1000&scopeModule=m3.bangcong").then((r) => r.json()).then((j) => setEmps((j.data || []).filter((e: any) => e.status === "ACTIVE" || e.status === "PROBATION"))).catch(() => {});
   }, []);
 
   const groupMembers = emps.filter((e) => e.departmentId === departmentId);

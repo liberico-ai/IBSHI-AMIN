@@ -164,8 +164,16 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ xóa được phiếu đang CHỜ DUYỆT" } }, { status: 400 });
   }
   const isOwner = booking.requester?.user?.id === userId;
-  if (!isOwner && !canUser(session.user as any, "m10.xe.datxe:delete")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền xóa mới xóa được" } }, { status: 403 });
+  if (!isOwner) {
+    const role = (session.user as any).role;
+    if (!canUser(session.user as any, "m10.xe.datxe:delete")) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền xóa mới xóa được" } }, { status: 403 });
+    }
+    // PHẠM VI (m10.xe.datxe): chỉ xóa phiếu của phòng trong phạm vi được cấp.
+    const dscope = await resolveScope(userId, role, "m10.xe.datxe");
+    if (!scopeAllowsDept(dscope, booking.requester?.departmentId)) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Phiếu này ngoài phạm vi được cấp" } }, { status: 403 });
+    }
   }
 
   await prisma.vehicleBooking.delete({ where: { id } });

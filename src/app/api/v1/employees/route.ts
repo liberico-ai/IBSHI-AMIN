@@ -4,7 +4,8 @@ import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canViewPayroll } from "@/lib/access";
 import { canUser } from "@/lib/permission-catalog";
-import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
+import { resolveScope, scopeWhere, applyScope, canActOnDeptScope } from "@/lib/data-scope.server";
+import { SCOPED_FEATURES } from "@/lib/data-scope";
 import { z } from "zod";
 import { hashSync } from "bcryptjs";
 import { uniqueCompanyEmail } from "@/lib/email-gen";
@@ -56,9 +57,13 @@ export async function GET(request: NextRequest) {
   const userRole = (session.user as any).role;
   const userId = (session.user as any).id;
 
-  // Phạm vi dữ liệu (Hồ sơ): thấy NV của các phòng trong phạm vi + hồ sơ của chính mình.
+  // Phạm vi dữ liệu: mặc định theo Hồ sơ (m1.hoso). Khi endpoint được TÁI DÙNG làm PICKER cho 1 module
+  //   khác (kỷ luật/đào tạo/KPI/VPP/HSE...), trang truyền ?scopeModule=<key> để lọc NV theo ĐÚNG phạm vi
+  //   của module đó (vd đầu mối 5 Xưởng chỉ thấy NV 5 Xưởng). Chỉ nhận key hợp lệ, còn lại về m1.hoso.
+  const scopeModuleRaw = searchParams.get("scopeModule") || "";
+  const scopeModule = SCOPED_FEATURES.has(scopeModuleRaw) ? scopeModuleRaw : "m1.hoso";
   const where: Record<string, unknown> = {};
-  const scope = await resolveScope(userId, userRole, "m1.hoso");
+  const scope = await resolveScope(userId, userRole, scopeModule);
   applyScope(where, scopeWhere(scope, {
     deptPath: (ids) => ({ departmentId: { in: ids } }),
     selfPath: (empId) => ({ id: empId }),
@@ -130,6 +135,11 @@ export async function POST(request: NextRequest) {
   }
 
   const data = parsed.data;
+
+  // PHẠM VI: chỉ tạo NV cho phòng ban trong phạm vi được cấp (m1.hoso).
+  if (!(await canActOnDeptScope((session.user as any).id, (session.user as any).role, "m1.hoso", data.departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Phòng ban này ngoài phạm vi được cấp" } }, { status: 403 });
+  }
 
   // Check idNumber uniqueness
   const existingById = await prisma.employee.findFirst({ where: { idNumber: data.idNumber } });

@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
-import { resolveScope, applyScope } from "@/lib/data-scope.server";
+import { resolveScope, applyScope, canActOnDeptScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -73,6 +73,10 @@ export async function POST(request: NextRequest) {
   const parsed = CreateSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
+  }
+  // PHẠM VI: kế hoạch gắn phòng → phòng phải trong phạm vi (m5.daotao). Không gắn phòng = toàn cty (giữ nguyên).
+  if (parsed.data.departmentId && !(await canActOnDeptScope((session.user as any).id, userRole, "m5.daotao", parsed.data.departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Phòng ban này ngoài phạm vi được cấp" } }, { status: 403 });
   }
 
   const plan = await prisma.trainingPlan.create({

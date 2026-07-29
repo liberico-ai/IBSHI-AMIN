@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnDeptScope, canActOnEmployeeScope } from "@/lib/data-scope.server";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
@@ -58,6 +59,14 @@ export async function POST(request: NextRequest) {
   const parsed = CreateSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
+  }
+  // PHẠM VI (m6.chamdiem): bản ghi KPI gắn phòng/NV phải trong phạm vi được cấp.
+  const _uid = (session.user as any).id;
+  if (parsed.data.departmentId && !(await canActOnDeptScope(_uid, userRole, "m6.chamdiem", parsed.data.departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Phòng ban này ngoài phạm vi được cấp" } }, { status: 403 });
+  }
+  if (parsed.data.employeeId && !(await canActOnEmployeeScope(_uid, userRole, "m6.chamdiem", parsed.data.employeeId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Nhân viên này ngoài phạm vi được cấp" } }, { status: 403 });
   }
 
   // Calculate score based on target

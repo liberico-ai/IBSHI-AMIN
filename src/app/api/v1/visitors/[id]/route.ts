@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnDeptScope } from "@/lib/data-scope.server";
 import { logAudit } from "@/lib/audit";
 import QRCode from "qrcode";
 import { sendTelegramMessage } from "@/services/telegram.service";
@@ -43,6 +44,10 @@ export async function PUT(
     include: { host: { select: { id: true, departmentId: true } } },
   });
   if (!visitor) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  // PHẠM VI (m10.khach): chỉ duyệt/xử lý khách của host thuộc phòng trong phạm vi được cấp.
+  if (!visitor.host?.departmentId || !(await canActOnDeptScope((session.user as any).id, (session.user as any).role, "m10.khach", visitor.host.departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Khách này ngoài phạm vi được cấp" } }, { status: 403 });
+  }
 
   const body = await request.json();
   const { action } = body;

@@ -63,8 +63,15 @@ export async function PUT(
   if (action === "EDIT") {
     const userId = (session.user as any).id;
     const isOwner = leaveRequest.employee.userId === userId;
-    if (!isOwner && !canUser(session.user as any, "m3.nghiphep:edit")) {
-      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ đơn hoặc người có quyền sửa mới sửa được" } }, { status: 403 });
+    if (!isOwner) {
+      if (!canUser(session.user as any, "m3.nghiphep:edit")) {
+        return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ đơn hoặc người có quyền sửa mới sửa được" } }, { status: 403 });
+      }
+      // PHẠM VI: sửa đơn của người khác phải trong phạm vi được cấp (m3.nghiphep).
+      const escope = await resolveScope(userId, userRole, "m3.nghiphep");
+      if (!scopeAllowsDept(escope, leaveRequest.employee.departmentId)) {
+        return NextResponse.json({ error: { code: "FORBIDDEN", message: "Đơn này ngoài phạm vi được cấp" } }, { status: 403 });
+      }
     }
     const { leaveType, startDate, endDate, reason, halfDay } = body as any;
     const sd = new Date(startDate), ed = new Date(endDate);
@@ -172,16 +179,24 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   const userId = (session.user as any).id;
+  const userRole = (session.user as any).role;
 
   const { id } = await params;
-  const lr = await prisma.leaveRequest.findUnique({ where: { id }, include: { employee: { select: { userId: true } } } });
+  const lr = await prisma.leaveRequest.findUnique({ where: { id }, include: { employee: { select: { userId: true, departmentId: true } } } });
   if (!lr) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   if (lr.status !== "PENDING") {
     return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ xóa được đơn đang CHỜ DUYỆT" } }, { status: 400 });
   }
   const isOwner = lr.employee.userId === userId;
-  if (!isOwner && !canUser(session.user as any, "m3.nghiphep:delete")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ đơn hoặc người có quyền xóa mới xóa được" } }, { status: 403 });
+  if (!isOwner) {
+    if (!canUser(session.user as any, "m3.nghiphep:delete")) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ đơn hoặc người có quyền xóa mới xóa được" } }, { status: 403 });
+    }
+    // PHẠM VI: xóa đơn của người khác phải trong phạm vi được cấp.
+    const dscope = await resolveScope(userId, userRole, "m3.nghiphep");
+    if (!scopeAllowsDept(dscope, lr.employee.departmentId)) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Đơn này ngoài phạm vi được cấp" } }, { status: 403 });
+    }
   }
   await prisma.leaveRequest.delete({ where: { id } });
   return NextResponse.json({ data: { ok: true } });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
+import { resolveScope, scopeWhere, applyScope, canActOnEmployeeScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const EVAL_CRITERIA = ["leadership", "teamwork", "technical", "communication", "punctuality"];
@@ -82,6 +82,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       error: { code: "VALIDATION_ERROR", message: "Chỉ có thể tự đánh giá bản thân" },
     }, { status: 422 });
+  }
+  // PHẠM VI: đánh giá người KHÁC (không phải tự đánh giá) phải trong phạm vi được cấp (m6.chamdiem).
+  if (relationship !== "SELF" && !(await canActOnEmployeeScope((session.user as any).id, (session.user as any).role, "m6.chamdiem", employeeId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Nhân viên này ngoài phạm vi được cấp" } }, { status: 403 });
   }
 
   // Check for duplicate submission

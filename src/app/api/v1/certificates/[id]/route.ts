@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
+import { canActOnEmployeeScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const UpdateCertificateSchema = z.object({
@@ -32,6 +33,9 @@ export async function PUT(
   const certificate = await prisma.certificate.findUnique({ where: { id } });
   if (!certificate) {
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  }
+  if (!(await canActOnEmployeeScope((session.user as any).id, userRole, "m5.chungchi", certificate.employeeId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Nhân viên này ngoài phạm vi được cấp" } }, { status: 403 });
   }
 
   const body = await req.json();
@@ -83,6 +87,9 @@ export async function DELETE(
   const certificate = await prisma.certificate.findUnique({ where: { id } });
   if (!certificate) {
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  }
+  if (!(await canActOnEmployeeScope((session.user as any).id, userRole, "m5.chungchi", certificate.employeeId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Nhân viên này ngoài phạm vi được cấp" } }, { status: 403 });
   }
 
   await prisma.certificate.update({ where: { id }, data: { status: "REVOKED" } });

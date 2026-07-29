@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnEmployeeScope } from "@/lib/data-scope.server";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
@@ -27,6 +28,10 @@ export async function PUT(
   const { id } = await params;
   const incident = await prisma.hSEIncident.findUnique({ where: { id } });
   if (!incident) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  // PHẠM VI (m9.suco): chỉ xử lý sự cố của NV (người báo) trong phạm vi được cấp.
+  if (!(await canActOnEmployeeScope((session.user as any).id, userRole, "m9.suco", incident.reportedBy))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Sự cố này ngoài phạm vi được cấp" } }, { status: 403 });
+  }
 
   const body = await request.json();
   const parsed = UpdateSchema.safeParse(body);

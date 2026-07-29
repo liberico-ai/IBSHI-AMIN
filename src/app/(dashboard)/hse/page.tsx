@@ -163,7 +163,7 @@ export default function HsePage() {
   }
 
   useEffect(() => {
-    fetch("/api/v1/employees?limit=300").then((r) => r.json()).then((res) => setEmployees(res.data || []));
+    fetch("/api/v1/employees?limit=300&scopeModule=m9.suco").then((r) => r.json()).then((res) => setEmployees(res.data || []));
     fetch("/api/v1/departments").then((r) => r.json()).then((res) => setDepartments(res.data || []));
     fetchIncidents();
     fetchInductions();

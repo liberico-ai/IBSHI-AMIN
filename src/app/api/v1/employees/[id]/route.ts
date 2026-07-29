@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { canDo } from "@/lib/permissions";
 import { canViewPayroll } from "@/lib/access";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnEmployeeScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 export async function GET(
@@ -112,9 +113,15 @@ export async function PUT(
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   }
 
-  // Tự sửa thông tin của mình luôn được; sửa hồ sơ người KHÁC cần quyền ma trận m1.hoso:edit.
-  if (employee.userId !== userId && !canUser(session.user as any, "m1.hoso:edit")) {
-    return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+  // Tự sửa thông tin của mình luôn được; sửa hồ sơ người KHÁC cần quyền ma trận m1.hoso:edit
+  //   VÀ hồ sơ đó phải trong PHẠM VI được cấp (m1.hoso).
+  if (employee.userId !== userId) {
+    if (!canUser(session.user as any, "m1.hoso:edit")) {
+      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+    }
+    if (!(await canActOnEmployeeScope(userId, userRole, "m1.hoso", id))) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Hồ sơ này ngoài phạm vi được cấp" } }, { status: 403 });
+    }
   }
 
   const body = await request.json();
@@ -241,6 +248,8 @@ export async function DELETE(
   if (!canUser(session.user as any, "m1.hoso:delete")) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   }
+  const userId = (session.user as any).id;
+  const userRole = (session.user as any).role;
 
   const { id } = await params;
   const employee = await prisma.employee.findUnique({
@@ -249,6 +258,10 @@ export async function DELETE(
   });
   if (!employee) {
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  }
+  // PHẠM VI: chỉ xóa hồ sơ trong phạm vi được cấp (m1.hoso).
+  if (!(await canActOnEmployeeScope(userId, userRole, "m1.hoso", id))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Hồ sơ này ngoài phạm vi được cấp" } }, { status: 403 });
   }
 
   // Soft delete

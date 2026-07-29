@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
-import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
+import { resolveScope, scopeWhere, applyScope, canActOnEmployeeScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const CreateSchema = z.object({
@@ -69,6 +69,10 @@ export async function POST(request: NextRequest) {
     include: { user: true },
   });
   if (!employee) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy nhân viên" } }, { status: 404 });
+  // PHẠM VI (m8.kyluat): chỉ lập kỷ luật cho NV trong phạm vi được cấp.
+  if (!(await canActOnEmployeeScope((session.user as any).id, (session.user as any).role, "m8.kyluat", parsed.data.employeeId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Nhân viên này ngoài phạm vi được cấp" } }, { status: 403 });
+  }
 
   const action = await prisma.disciplinaryAction.create({
     data: {

@@ -948,7 +948,7 @@ function RequestModal({ onClose, onSuccess, editing }: { onClose: () => void; on
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/v1/employees?limit=500").then((r) => r.json()).then((res) => setEmployees(res.data || []));
+    fetch("/api/v1/employees?limit=500&scopeModule=m10.vpp.denghi").then((r) => r.json()).then((res) => setEmployees(res.data || []));
   }, []);
 
   async function searchItem(idx: number, q: string) {

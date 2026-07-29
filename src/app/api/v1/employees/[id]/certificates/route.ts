@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { checkPermission } from "@/lib/permissions";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnEmployeeScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const createCertificateSchema = z.object({
@@ -32,6 +33,9 @@ export async function POST(
   const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!employee) {
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  }
+  if (!(await canActOnEmployeeScope((session.user as any).id, userRole, "m5.chungchi", employeeId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Nhân viên này ngoài phạm vi được cấp" } }, { status: 403 });
   }
 
   const body = await req.json();

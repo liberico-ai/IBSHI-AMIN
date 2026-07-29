@@ -122,6 +122,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // PHẠM VI (m3.bangcong): chỉ nhập/sửa công cho NV thuộc các phòng trong phạm vi được cấp.
+  const scope = await resolveScope((session.user as any).id, (session.user as any).role, "m3.bangcong");
+  if (!("all" in scope)) {
+    let deptIds = scope.deptIds;
+    if (deptIds.length === 0) {
+      const me = await prisma.employee.findFirst({ where: { userId: (session.user as any).id }, select: { departmentId: true } });
+      if (me?.departmentId) deptIds = [me.departmentId];
+    }
+    const empIds = Array.from(new Set(records.map((r: { employeeId: string }) => r.employeeId)));
+    const emps = await prisma.employee.findMany({ where: { id: { in: empIds } }, select: { departmentId: true } });
+    if (emps.some((e) => !e.departmentId || !deptIds.includes(e.departmentId))) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Có nhân viên ngoài phạm vi được cấp" } }, { status: 403 });
+    }
+  }
+
   const created = await Promise.all(
     records.map((r: { employeeId: string; date: string; status: string; checkIn?: string; checkOut?: string; otHours?: number; note?: string }) =>
       prisma.attendanceRecord.upsert({

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnDeptScope } from "@/lib/data-scope.server";
 import { canDo } from "@/lib/permissions";
 import { z } from "zod";
 
@@ -53,6 +54,9 @@ export async function PUT(
   const { id } = await params;
   const plan = await prisma.trainingPlan.findUnique({ where: { id } });
   if (!plan) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  if (plan.departmentId && !(await canActOnDeptScope((session.user as any).id, userRole, "m5.daotao", plan.departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Kế hoạch này ngoài phạm vi được cấp" } }, { status: 403 });
+  }
 
   const body = await request.json();
   const parsed = UpdateSchema.safeParse(body);

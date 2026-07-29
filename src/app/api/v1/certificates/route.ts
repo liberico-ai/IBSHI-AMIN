@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
 import { canDo } from "@/lib/permissions";
-import { resolveScope, scopeWhere, applyScope } from "@/lib/data-scope.server";
+import { resolveScope, scopeWhere, applyScope, canActOnEmployeeScope } from "@/lib/data-scope.server";
 import { z } from "zod";
 
 const CreateCertificateSchema = z.object({
@@ -76,6 +76,10 @@ export async function POST(request: NextRequest) {
   const employee = await prisma.employee.findUnique({ where: { id: parsed.data.employeeId } });
   if (!employee) {
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Nhân viên không tồn tại" } }, { status: 404 });
+  }
+  // PHẠM VI: chỉ thêm chứng chỉ cho NV trong phạm vi được cấp (m5.chungchi).
+  if (!(await canActOnEmployeeScope((session.user as any).id, userRole, "m5.chungchi", parsed.data.employeeId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Nhân viên này ngoài phạm vi được cấp" } }, { status: 403 });
   }
 
   const cert = await prisma.certificate.create({

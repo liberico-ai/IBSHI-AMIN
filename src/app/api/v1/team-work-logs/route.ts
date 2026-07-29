@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnDeptScope } from "@/lib/data-scope.server";
 import { generateReconcileForLog } from "@/lib/attendance-reconcile";
 import { z } from "zod";
 
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   if (!canUser(session.user as any, "m3.phieuto:create")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
   const userId = (session.user as any).id;
+  const role = (session.user as any).role;
 
   const parsed = CreateSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -67,6 +69,12 @@ export async function POST(request: NextRequest) {
 
   const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { name: true } });
   if (!dept) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Phòng ban không tồn tại" } }, { status: 404 });
+
+  // PHẠM VI: chỉ khai báo cho phòng/tổ trong phạm vi (m3.bangcong). Tổ trưởng mặc định = phòng mình
+  //   (canActOnDeptScope fallback về phòng của chính mình khi chưa cấu hình); đầu mối = các phòng được cấp.
+  if (!(await canActOnDeptScope(userId, role, "m3.bangcong", departmentId))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Phòng ban này ngoài phạm vi được cấp" } }, { status: 403 });
+  }
 
   const log = await prisma.teamWorkLog.create({
     data: {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canUser } from "@/lib/permission-catalog";
+import { canActOnEmployeeScope } from "@/lib/data-scope.server";
 
 // XÓA MỀM nhân sự — KHÁC "Nghỉ việc":
 //   - Ẩn hoàn toàn khỏi mọi danh sách (mã gắn tiền tố "#DEL#" → bị lọc ở API list).
@@ -31,6 +32,10 @@ export async function POST(
   const emp = await prisma.employee.findUnique({ where: { id }, include: { user: true } });
   if (!emp) {
     return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  }
+  // PHẠM VI: chỉ xóa mềm hồ sơ trong phạm vi được cấp (m1.hoso).
+  if (!(await canActOnEmployeeScope((session.user as any).id, (session.user as any).role, "m1.hoso", id))) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Hồ sơ này ngoài phạm vi được cấp" } }, { status: 403 });
   }
   if (emp.code.startsWith(DEL)) {
     return NextResponse.json({ error: { code: "ALREADY_DELETED", message: "Nhân sự này đã bị xóa" } }, { status: 400 });

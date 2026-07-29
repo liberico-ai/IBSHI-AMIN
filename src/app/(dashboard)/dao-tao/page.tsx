@@ -270,7 +270,7 @@ function CertificateManager({ canManage }: { canManage: boolean }) {
   useEffect(() => {
     fetchCerts();
     if (canManage) {
-      fetch("/api/v1/employees?limit=500")
+      fetch("/api/v1/employees?limit=500&scopeModule=m5.daotao")
         .then((r) => r.json()).then((res) => setEmployees(res.data || []));
     }
   }, [filterStatus]);
