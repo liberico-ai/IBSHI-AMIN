@@ -24,7 +24,7 @@ function Dialog({ opts, mode, onClose }: { opts: ConfirmOptions; mode: "confirm"
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4" onClick={() => onClose(false)}>
+    <div className="fixed inset-0 flex items-center justify-center bg-black/50 p-4" style={{ zIndex: 1000 }} onClick={() => onClose(false)}>
       <div className="rounded-2xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}
         style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}>
         {opts.title && <div className="text-[15px] font-bold mb-1.5" style={{ color: "var(--ibs-text)" }}>{opts.title}</div>}

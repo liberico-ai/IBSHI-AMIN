@@ -26,7 +26,7 @@ type OTRequest = {
   projectCode?: string | null;
   memberIds?: string[];
   memberNames?: string[];
-  memberProjects?: { id: string; employeeId: string; employeeName: string; projectCode: string; hours: number }[];
+  memberProjects?: { id: string; employeeId: string; employeeName: string; projectCode: string; hours: number; reason?: string | null }[];
   employee: {
     id: string;
     code: string;
@@ -55,7 +55,15 @@ function calcHours(start: string, end: string): number {
   const [eh, em] = end.split(":").map(Number);
   return Math.max(0, Math.round(((eh * 60 + em - sh * 60 - sm) / 60) * 100) / 100);
 }
+// Cộng thêm `hours` giờ vào mốc "HH:mm" (kẹp trong ngày) — dùng tái tạo khung giờ khối khi SỬA đơn.
+function addHoursTo(start: string, hours: number): string {
+  const [h, m] = (start || "0:0").split(":").map(Number);
+  const total = Math.max(0, Math.min(23 * 60 + 59, (h || 0) * 60 + (m || 0) + Math.round((hours || 0) * 60)));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
 type ProjAlloc = { projectCode: string; hours: number };
+// Tab "theo dự án": mỗi KHỐI = 1 dự án + NHIỀU xưởng/phòng + nhiều NV + 1 lý do + 1 KHUNG GIỜ (giờ tự tính).
+type ProjBlock = { projectCode: string; groupKeys: string[]; memberIds: string[]; reason: string; startTime: string; endTime: string };
 
 // ── New OT Dialog ──────────────────────────────────────────────────────────────
 function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (item: OTRequest) => void }) {
@@ -70,6 +78,9 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Chế độ khai: theo nhân sự (mặc định) | theo dự án.
+  const [mode, setMode] = useState<"byEmployee" | "byProject">("byEmployee");
+  const [blocks, setBlocks] = useState<ProjBlock[]>([{ projectCode: "", groupKeys: [""], memberIds: [], reason: "", startTime: "17:30", endTime: "20:00" }]);
 
   useEffect(() => {
     fetch(`/api/v1/ot-requests/team-members`).then((r) => r.json())
@@ -163,6 +174,55 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     setError(null);
   }
 
+  // ── Tab "theo dự án": handlers cho các KHỐI dự án ──
+  // NV của NHIỀU xưởng (gộp, bỏ trùng; bỏ key rỗng).
+  function membersOfKeys(keys: string[]) {
+    const seen = new Set<string>();
+    const out: typeof emps = [];
+    for (const k of keys) { if (!k) continue; for (const m of membersOfKey(k)) if (!seen.has(m.id)) { seen.add(m.id); out.push(m); } }
+    return out;
+  }
+  function addBlock() {
+    setBlocks((bs) => [...bs, { projectCode: "", groupKeys: [""], memberIds: [], reason: "", startTime: "17:30", endTime: "20:00" }]);
+  }
+  function removeBlock(idx: number) {
+    setBlocks((bs) => bs.filter((_, i) => i !== idx));
+  }
+  function updateBlock(idx: number, patch: Partial<ProjBlock>) {
+    setBlocks((bs) => bs.map((b, i) => (i === idx ? { ...b, ...patch } : b)));
+    setError(null);
+  }
+  // Đặt lại xưởng ở dòng thứ gi của khối + loại NV không còn thuộc xưởng nào.
+  function setBlockGroupAt(idx: number, gi: number, key: string) {
+    setBlocks((bs) => bs.map((b, i) => {
+      if (i !== idx) return b;
+      const groupKeys = b.groupKeys.map((k, j) => (j === gi ? key : k));
+      const allowed = new Set(membersOfKeys(groupKeys).map((m) => m.id));
+      return { ...b, groupKeys, memberIds: b.memberIds.filter((id) => allowed.has(id)) };
+    }));
+    setError(null);
+  }
+  function addBlockGroup(idx: number) {
+    setBlocks((bs) => bs.map((b, i) => (i === idx ? { ...b, groupKeys: [...b.groupKeys, ""] } : b)));
+  }
+  function removeBlockGroup(idx: number, gi: number) {
+    setBlocks((bs) => bs.map((b, i) => {
+      if (i !== idx) return b;
+      const groupKeys = b.groupKeys.filter((_, j) => j !== gi);
+      const allowed = new Set(membersOfKeys(groupKeys).map((m) => m.id));
+      return { ...b, groupKeys: groupKeys.length ? groupKeys : [""], memberIds: b.memberIds.filter((id) => allowed.has(id)) };
+    }));
+    setError(null);
+  }
+  function toggleBlockMember(idx: number, empId: string) {
+    setBlocks((bs) => bs.map((b, i) => {
+      if (i !== idx) return b;
+      const has = b.memberIds.includes(empId);
+      return { ...b, memberIds: has ? b.memberIds.filter((x) => x !== empId) : [...b.memberIds, empId] };
+    }));
+    setError(null);
+  }
+
   // Auto-detect OT rate from date
   function getOTRate(dateStr: string): number {
     if (!dateStr) return 1.5;
@@ -170,25 +230,72 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     return d === 0 || d === 6 ? 2.0 : 1.5;
   }
 
+  const nameOf = (id: string) => emps.find((e2) => e2.id === id)?.fullName || "";
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!groupKey) { setError("Vui lòng chọn Phòng ban / Tổ"); return; }
-    if (memberIds.length === 0) { setError("Vui lòng chọn ít nhất 1 nhân sự"); return; }
+
+    // ── Chế độ THEO DỰ ÁN ──
+    if (mode === "byProject") {
+      const fail = (msg: string) => { setError(msg); alertDialog(msg); };
+      if (!form.date) { fail("Vui lòng chọn ngày tăng ca"); return; }
+      const payload: { employeeId: string; employeeName: string; projectCode: string; hours: number; reason: string }[] = [];
+      const allMembers = new Set<string>();
+      for (let i = 0; i < blocks.length; i++) {
+        const b = blocks[i];
+        const h = calcHours(b.startTime, b.endTime); // số giờ = khung giờ của khối
+        if (!b.projectCode) { fail(`Dự án ${i + 1}: chọn dự án`); return; }
+        if (b.groupKeys.filter(Boolean).length === 0) { fail(`Dự án ${i + 1}: chọn Xưởng / Phòng ban`); return; }
+        if (b.memberIds.length === 0) { fail(`Dự án ${i + 1}: chọn ít nhất 1 nhân sự`); return; }
+        if (!b.reason.trim()) { fail(`Dự án ${i + 1}: nhập lý do`); return; }
+        if (!(h > 0)) { fail(`Dự án ${i + 1}: khung giờ không hợp lệ (giờ kết thúc phải sau giờ bắt đầu)`); return; }
+        for (const id of b.memberIds) {
+          allMembers.add(id);
+          payload.push({ employeeId: id, employeeName: nameOf(id), projectCode: b.projectCode, hours: h, reason: b.reason.trim() });
+        }
+      }
+      const batchReason = Array.from(new Set(blocks.map((b) => b.reason.trim()).filter(Boolean))).join(" | ");
+      // Khung giờ TỔNG của đơn = sớm nhất → muộn nhất (chỉ để hiển thị + suy hệ số; giờ mỗi NV theo khối).
+      const starts = blocks.map((b) => b.startTime).filter(Boolean).sort();
+      const ends = blocks.map((b) => b.endTime).filter(Boolean).sort();
+      const overallStart = starts[0] || "17:30";
+      const overallEnd = ends[ends.length - 1] || "20:00";
+      setSaving(true);
+      try {
+        const res = await fetch("/api/v1/ot-requests", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: form.date, startTime: overallStart, endTime: overallEnd,
+            reason: batchReason, allocMode: "byProject",
+            teamId: null, teamName: null, // theo dự án → không gắn tên phòng ban, nhận diện theo đơn/ngày
+            memberIds: Array.from(allMembers), memberNames: Array.from(allMembers).map(nameOf),
+            memberProjects: payload,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) { fail(apiError(res.status, json?.error)); return; }
+        onSuccess(json.data);
+      } catch { fail("Lỗi kết nối"); } finally { setSaving(false); }
+      return;
+    }
+
+    const fail = (msg: string) => { setError(msg); alertDialog(msg); };
+    if (!groupKey) { fail("Vui lòng chọn Phòng ban / Tổ"); return; }
+    if (memberIds.length === 0) { fail("Vui lòng chọn ít nhất 1 nhân sự"); return; }
 
     // Dựng danh sách NV × dự án × giờ + validate: mỗi NV phải chọn dự án, nhập lý do, và tổng giờ = giờ OT.
-    const nameOf = (id: string) => emps.find((e2) => e2.id === id)?.fullName || "";
     const memberProjectsPayload: { employeeId: string; employeeName: string; projectCode: string; hours: number; reason: string }[] = [];
     for (const id of memberIds) {
       const rows = memberProjects[id] ?? [];
       const rsn = (memberReasons[id] || "").trim();
       if (rows.length === 0 || rows.some((r) => !r.projectCode)) {
-        setError(`Chọn dự án cho ${nameOf(id)}`); return;
+        fail(`Chọn dự án cho ${nameOf(id)}`); return;
       }
-      if (!rsn) { setError(`Nhập lý do tăng ca cho ${nameOf(id)}`); return; }
+      if (!rsn) { fail(`Nhập lý do tăng ca cho ${nameOf(id)}`); return; }
       const sum = rows.reduce((s, r) => s + (r.hours || 0), 0);
       if (Math.abs(sum - durationH) > 0.01) {
-        setError(`Tổng giờ dự án của ${nameOf(id)} (${sum}h) phải bằng giờ OT (${durationH}h)`); return;
+        fail(`Tổng giờ dự án của ${nameOf(id)} (${sum}h) phải bằng giờ OT (${durationH}h)`); return;
       }
       for (const r of rows) memberProjectsPayload.push({ employeeId: id, employeeName: nameOf(id), projectCode: r.projectCode, hours: r.hours, reason: rsn });
     }
@@ -206,12 +313,12 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(apiError(res.status, json?.error));
+        fail(apiError(res.status, json?.error));
         return;
       }
       onSuccess(json.data);
     } catch {
-      setError("Lỗi kết nối");
+      fail("Lỗi kết nối");
     } finally {
       setSaving(false);
     }
@@ -239,6 +346,18 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
             </div>
           )}
 
+          {/* 2 tab: theo nhân sự | theo dự án */}
+          <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: "var(--ibs-border)" }}>
+            {([["byEmployee", "Đăng ký theo nhân sự"], ["byProject", "Đăng ký theo dự án"]] as const).map(([m, lbl]) => (
+              <button key={m} type="button" onClick={() => { setMode(m); setError(null); }}
+                className="flex-1 py-2 text-[12.5px] font-semibold transition-colors"
+                style={{ background: mode === m ? "var(--ibs-accent)" : "var(--ibs-bg)", color: mode === m ? "#fff" : "var(--ibs-text-muted)" }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          {mode === "byEmployee" && (<>
           <div>
             <label className={labelCls} style={labelStyle}>Phòng ban / Tổ <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
             <select required value={groupKey} onChange={(e) => selectGroup(e.target.value)} className={inputCls} style={inputStyle}>
@@ -313,6 +432,80 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               </div>
             </div>
           )}
+          </>)}
+
+          {mode === "byProject" && (
+            <div className="space-y-3">
+              <label className={labelCls} style={labelStyle}>Đăng ký theo dự án <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>(mỗi dự án chọn nhiều xưởng + NV + khung giờ riêng; khác giờ thì "Thêm dự án")</span></label>
+              {blocks.map((b, idx) => {
+                const bMembers = membersOfKeys(b.groupKeys);
+                const bHours = calcHours(b.startTime, b.endTime);
+                return (
+                  <div key={idx} className="rounded-lg border p-3 space-y-2" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg)" }}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[12.5px] font-semibold">Dự án {idx + 1}</span>
+                      {blocks.length > 1 && <button type="button" onClick={() => removeBlock(idx)} className="text-[12px]" style={{ color: "var(--ibs-danger)" }} title="Xóa dự án">× Xóa</button>}
+                    </div>
+                    {/* Dự án */}
+                    <select value={b.projectCode} onChange={(e) => updateBlock(idx, { projectCode: e.target.value })} className={inputCls} style={inputStyle}>
+                      <option value="">-- Chọn dự án --</option>
+                      {OT_PROJECTS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    {/* Xưởng / Phòng ban — mỗi dòng 1 xưởng, "＋ Thêm Xưởng" để thêm */}
+                    <div>
+                      <div className="text-[12px] mb-1" style={{ color: "var(--ibs-text-muted)" }}>Xưởng / Phòng ban</div>
+                      <div className="space-y-1.5">
+                        {b.groupKeys.map((gk, gi) => (
+                          <div key={gi} className="flex items-center gap-1.5">
+                            <select value={gk} onChange={(e) => setBlockGroupAt(idx, gi, e.target.value)} className="flex-1 px-2 py-1.5 rounded-md text-[12px] outline-none" style={inputStyle}>
+                              <option value="">-- Chọn Xưởng / Phòng ban --</option>
+                              {departments.length > 0 && <optgroup label="Phòng ban">{departments.map((d) => <option key={"dept:" + d.id} value={"dept:" + d.id}>{d.name}</option>)}</optgroup>}
+                              {teams.length > 0 && <optgroup label="Tổ">{teams.map((t) => <option key={"team:" + t.id} value={"team:" + t.id}>{t.name}</option>)}</optgroup>}
+                            </select>
+                            {b.groupKeys.length > 1 && <button type="button" onClick={() => removeBlockGroup(idx, gi)} className="px-1.5 text-[14px]" style={{ color: "var(--ibs-danger)" }} title="Bỏ xưởng">×</button>}
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => addBlockGroup(idx)} className="text-[11px] font-medium" style={{ color: "var(--ibs-accent)" }}>＋ Thêm Xưởng</button>
+                      </div>
+                    </div>
+                    {/* Nhân sự (từ các xưởng đã chọn) */}
+                    {b.groupKeys.some(Boolean) && (
+                      <div>
+                        <div className="text-[12px] mb-1" style={{ color: "var(--ibs-text-muted)" }}>Nhân sự <span style={{ color: "var(--ibs-text-dim)" }}>({b.memberIds.length} chọn)</span></div>
+                        <div className="max-h-[140px] overflow-y-auto rounded-lg border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg-card)" }}>
+                          {bMembers.length === 0 ? (
+                            <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Các xưởng đã chọn chưa có nhân sự.</div>
+                          ) : bMembers.map((m) => (
+                            <label key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer hover:bg-white/[0.04]">
+                              <input type="checkbox" checked={b.memberIds.includes(m.id)} onChange={() => toggleBlockMember(idx, m.id)} />
+                              <span>{m.fullName}{m.department?.name ? <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}> · {m.department.name}</span> : null}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Lý do */}
+                    <textarea rows={2} value={b.reason} onChange={(e) => updateBlock(idx, { reason: e.target.value })}
+                      placeholder="Lý do tăng ca... (bắt buộc)"
+                      className="w-full px-2 py-1.5 rounded-md text-[12px] outline-none resize-none" style={inputStyle} />
+                    {/* Khung giờ — CUỐI khối (số giờ tự tính) */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] shrink-0" style={{ color: "var(--ibs-text-muted)" }}>Khung giờ:</span>
+                      <div className="w-[84px] shrink-0">
+                        <TimeInput value={b.startTime} onChange={(e) => updateBlock(idx, { startTime: e.target.value })} className="w-full px-2 py-1.5 rounded-md text-[12px] text-center outline-none" style={inputStyle} />
+                      </div>
+                      <span className="text-[11px] shrink-0" style={{ color: "var(--ibs-text-dim)" }}>→</span>
+                      <div className="w-[84px] shrink-0">
+                        <TimeInput value={b.endTime} onChange={(e) => updateBlock(idx, { endTime: e.target.value })} className="w-full px-2 py-1.5 rounded-md text-[12px] text-center outline-none" style={inputStyle} />
+                      </div>
+                      <span className="text-[12px] font-semibold shrink-0 ml-1" style={{ color: bHours > 0 ? "var(--ibs-accent)" : "var(--ibs-danger)" }}>= {bHours}h</span>
+                    </div>
+                  </div>
+                );
+              })}
+              <button type="button" onClick={addBlock} className="text-[12px] font-medium" style={{ color: "var(--ibs-accent)" }}>＋ Thêm dự án</button>
+            </div>
+          )}
 
           <div>
             <label className={labelCls} style={labelStyle}>Ngày tăng ca *</label>
@@ -325,6 +518,8 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
             )}
           </div>
 
+          {/* Giờ bắt đầu/kết thúc CHUNG chỉ dùng ở Tab "theo nhân sự". Tab "theo dự án" mỗi khối có khung giờ riêng. */}
+          {mode === "byEmployee" && (<>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelCls} style={labelStyle}>Giờ bắt đầu *</label>
@@ -346,6 +541,7 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               </span>
             </div>
           )}
+          </>)}
 
           </div>
           <div className="flex gap-3 p-5 pt-3 border-t shrink-0" style={{ borderColor: "var(--ibs-border)" }}>
@@ -632,41 +828,124 @@ export default function TangCaPage() {
   );
 }
 
-// ── Edit OT Dialog (Trưởng phòng sửa đơn CHƯA duyệt: ngày / giờ / lý do) ──────────
+// ── Edit OT Dialog — sửa đơn CHƯA duyệt: ngày / khung giờ + CHI TIẾT NV × dự án × giờ × lý do ──────────
 function EditOTDialog({ target, onClose, onSuccess }: { target: OTRequest; onClose: () => void; onSuccess: (item: OTRequest) => void }) {
-  const [form, setForm] = useState({
-    date: String(target.date).slice(0, 10),
-    startTime: target.startTime,
-    endTime: target.endTime,
-    reason: target.reason,
-  });
+  const [dateStr, setDateStr] = useState(String(target.date).slice(0, 10));
+  const [emps, setEmps] = useState<{ id: string; fullName: string; team?: { id: string; name: string } | null; department?: { id: string; name: string } | null }[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const set = (k: string, v: string) => { setForm((f) => ({ ...f, [k]: v })); setError(null); };
 
-  const durationH = form.startTime && form.endTime
-    ? Math.max(0, (parseInt(form.endTime.split(":")[0]) * 60 + parseInt(form.endTime.split(":")[1]) - parseInt(form.startTime.split(":")[0]) * 60 - parseInt(form.startTime.split(":")[1])) / 60)
-    : 0;
-  const otRate = form.date ? ((): number => { const d = new Date(form.date).getDay(); return d === 0 || d === 6 ? 2.0 : 1.5; })() : target.otRate;
+  // Tái tạo các KHỐI DỰ ÁN từ dữ liệu đã lưu — gom theo (dự án + lý do). Mỗi khối = 1 dự án + nhiều NV +
+  //   1 lý do + 1 khung giờ (suy từ giờ đã lưu, bắt đầu từ giờ đơn) → hiển thị đúng như đăng ký THEO DỰ ÁN.
+  const initBlocks: ProjBlock[] = useMemo(() => {
+    const rows = (target.memberProjects && target.memberProjects.length > 0)
+      ? target.memberProjects.map((mp) => ({ employeeId: mp.employeeId, projectCode: mp.projectCode, hours: mp.hours, reason: mp.reason || target.reason || "" }))
+      : (target.memberIds && target.memberIds.length > 0)
+        ? target.memberIds.map((eid) => ({ employeeId: eid, projectCode: target.projectCode || "", hours: target.hours, reason: target.reason || "" }))
+        : [{ employeeId: target.employee.id, projectCode: target.projectCode || "", hours: target.hours, reason: target.reason || "" }];
+    const map = new Map<string, ProjBlock>();
+    for (const r of rows) {
+      const key = r.projectCode + " " + (r.reason || "");
+      let b = map.get(key);
+      if (!b) {
+        const hrs = r.hours > 0 ? r.hours : calcHours(target.startTime, target.endTime);
+        b = { projectCode: r.projectCode, groupKeys: [""], memberIds: [], reason: r.reason || "", startTime: target.startTime, endTime: addHoursTo(target.startTime, hrs) };
+        map.set(key, b);
+      }
+      if (!b.memberIds.includes(r.employeeId)) b.memberIds.push(r.employeeId);
+    }
+    return Array.from(map.values());
+  }, []); // eslint-disable-line
+  const [blocks, setBlocks] = useState<ProjBlock[]>(initBlocks);
+
+  useEffect(() => {
+    fetch(`/api/v1/ot-requests/team-members`).then((r) => r.json())
+      .then((res) => setEmps(res.data || [])).catch(() => {});
+  }, []);
+
+  const departments = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of emps) if (e.department?.id) m.set(e.department.id, e.department.name);
+    return Array.from(m.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [emps]);
+  const teams = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of emps) if (e.team?.id) m.set(e.team.id, e.team.name);
+    return Array.from(m.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [emps]);
+  function membersOfKey(key: string) {
+    if (!key) return [];
+    const [type, id] = key.split(":");
+    return emps.filter((e) => type === "dept" ? e.department?.id === id : e.team?.id === id);
+  }
+  function membersOfKeys(keys: string[]) {
+    const seen = new Set<string>(); const out: typeof emps = [];
+    for (const k of keys) { if (!k) continue; for (const m of membersOfKey(k)) if (!seen.has(m.id)) { seen.add(m.id); out.push(m); } }
+    return out;
+  }
+
+  // Tên NV theo id: danh sách trong phạm vi → snapshot trong đơn → người tạo.
+  const nameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of emps) m.set(e.id, e.fullName);
+    for (const mp of target.memberProjects || []) if (mp.employeeId && !m.has(mp.employeeId)) m.set(mp.employeeId, mp.employeeName);
+    if (!m.has(target.employee.id)) m.set(target.employee.id, target.employee.fullName);
+    return m;
+  }, [emps]); // eslint-disable-line
+
+  const otRate = dateStr ? ((): number => { const d = new Date(dateStr).getDay(); return d === 0 || d === 6 ? 2.0 : 1.5; })() : target.otRate;
+
+  // NV hiện trong 1 khối = NV thuộc các Xưởng đã chọn ∪ NV đã có trong khối (giữ luôn NV ngoài phạm vi).
+  function blockMemberList(b: ProjBlock) {
+    const seen = new Set<string>(); const out: { id: string; name: string; dept?: string; outside?: boolean }[] = [];
+    for (const m of membersOfKeys(b.groupKeys)) { seen.add(m.id); out.push({ id: m.id, name: m.fullName, dept: m.department?.name || m.team?.name }); }
+    for (const id of b.memberIds) if (!seen.has(id)) {
+      seen.add(id);
+      const e = emps.find((x) => x.id === id);
+      out.push({ id, name: nameById.get(id) || id, dept: e?.department?.name || e?.team?.name, outside: !e });
+    }
+    return out;
+  }
+
+  const addBlock = () => setBlocks((bs) => [...bs, { projectCode: "", groupKeys: [""], memberIds: [], reason: "", startTime: "17:30", endTime: "20:00" }]);
+  const removeBlock = (idx: number) => setBlocks((bs) => bs.filter((_, i) => i !== idx));
+  const updateBlock = (idx: number, patch: Partial<ProjBlock>) => { setBlocks((bs) => bs.map((b, i) => (i === idx ? { ...b, ...patch } : b))); setError(null); };
+  const setBlockGroupAt = (idx: number, gi: number, key: string) => { setBlocks((bs) => bs.map((b, i) => (i === idx ? { ...b, groupKeys: b.groupKeys.map((k, j) => (j === gi ? key : k)) } : b))); setError(null); };
+  const addBlockGroup = (idx: number) => setBlocks((bs) => bs.map((b, i) => (i === idx ? { ...b, groupKeys: [...b.groupKeys, ""] } : b)));
+  const removeBlockGroup = (idx: number, gi: number) => setBlocks((bs) => bs.map((b, i) => (i === idx ? { ...b, groupKeys: b.groupKeys.filter((_, j) => j !== gi) } : b)));
+  const toggleBlockMember = (idx: number, empId: string) => { setBlocks((bs) => bs.map((b, i) => (i === idx ? { ...b, memberIds: b.memberIds.includes(empId) ? b.memberIds.filter((x) => x !== empId) : [...b.memberIds, empId] } : b))); setError(null); };
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!form.date) { setError("Vui lòng chọn ngày"); return; }
-    if (durationH <= 0) { setError("Giờ kết thúc phải sau giờ bắt đầu"); return; }
-    if (!form.reason.trim()) { setError("Vui lòng nhập lý do"); return; }
+    const fail = (msg: string) => { setError(msg); alertDialog(msg); };
+    if (!dateStr) { fail("Vui lòng chọn ngày"); return; }
+    const payload: { employeeId: string; employeeName: string; projectCode: string; hours: number; reason: string }[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i]; const h = calcHours(b.startTime, b.endTime);
+      if (!b.projectCode) { fail(`Dự án ${i + 1}: chọn dự án`); return; }
+      if (b.memberIds.length === 0) { fail(`Dự án ${i + 1}: chọn ít nhất 1 nhân sự`); return; }
+      if (!b.reason.trim()) { fail(`Dự án ${i + 1}: nhập lý do`); return; }
+      if (!(h > 0)) { fail(`Dự án ${i + 1}: khung giờ không hợp lệ (giờ kết thúc phải sau giờ bắt đầu)`); return; }
+      for (const id of b.memberIds) payload.push({ employeeId: id, employeeName: nameById.get(id) || "", projectCode: b.projectCode, hours: h, reason: b.reason.trim() });
+    }
+    if (payload.length === 0) { fail("Đơn phải có ít nhất 1 nhân sự"); return; }
+    const starts = blocks.map((b) => b.startTime).filter(Boolean).sort();
+    const ends = blocks.map((b) => b.endTime).filter(Boolean).sort();
+    const overallStart = starts[0] || target.startTime;
+    const overallEnd = ends[ends.length - 1] || target.endTime;
     setSaving(true);
     try {
       const res = await fetch(`/api/v1/ot-requests/${target.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ date: dateStr, startTime: overallStart, endTime: overallEnd, memberProjects: payload }),
       });
       const json = await res.json();
-      if (!res.ok) { setError(apiError(res.status, json?.error)); return; }
+      if (!res.ok) { fail(apiError(res.status, json?.error)); return; }
       onSuccess(json.data);
     } catch {
-      setError("Lỗi kết nối");
+      fail("Lỗi kết nối");
     } finally {
       setSaving(false);
     }
@@ -676,41 +955,94 @@ function EditOTDialog({ target, onClose, onSuccess }: { target: OTRequest; onClo
   const inputStyle = { background: "var(--ibs-bg)", border: "1px solid var(--ibs-border)", color: "var(--ibs-text)" };
   const labelCls = "block text-[12px] font-medium mb-1.5";
   const labelStyle = { color: "var(--ibs-text-dim)" };
+  const totalPeople = new Set(blocks.flatMap((b) => b.memberIds)).size;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl p-5" style={{ background: "var(--ibs-bg-card)" }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
+      <div className="w-full max-w-[540px] max-h-[90vh] flex flex-col rounded-2xl" style={{ background: "var(--ibs-bg-card)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: "var(--ibs-border)" }}>
           <div className="text-[15px] font-bold">Sửa đơn tăng ca</div>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
-        <div className="text-[12px] mb-3" style={{ color: "var(--ibs-text-dim)" }}>
-          {target.teamName || target.employee.department.name} · {(target.memberNames?.length || 1)} người
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className={labelCls} style={labelStyle}>Ngày <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
-            <DateInput value={form.date} onChange={(e) => set("date", e.target.value)} className={inputCls} style={inputStyle} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls} style={labelStyle}>Từ giờ <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
-              <TimeInput value={form.startTime} onChange={(e) => set("startTime", e.target.value)} className={inputCls} style={inputStyle} />
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
+          <div className="p-5 space-y-4 overflow-y-auto">
+            <div className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>
+              {target.teamName || target.employee.department.name} · {blocks.length} dự án · {totalPeople} người
             </div>
             <div>
-              <label className={labelCls} style={labelStyle}>Đến giờ <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
-              <TimeInput value={form.endTime} onChange={(e) => set("endTime", e.target.value)} className={inputCls} style={inputStyle} />
+              <label className={labelCls} style={labelStyle}>Ngày <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
+              <DateInput value={dateStr} onChange={(e) => { setDateStr(e.target.value); setError(null); }} className={inputCls} style={inputStyle} />
+              {dateStr && <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Hệ số: <strong style={{ color: "var(--ibs-accent)" }}>×{otRate}</strong> {otRate === 2 ? "(cuối tuần)" : "(ngày thường)"}</p>}
             </div>
+
+            {/* Chi tiết THEO DỰ ÁN — mỗi khối: dự án + xưởng + NV + lý do + khung giờ (fill sẵn từ đơn) */}
+            <div className="space-y-3">
+              <label className={labelCls} style={labelStyle}>Chi tiết theo dự án <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>(mỗi dự án: nhiều Xưởng + NV + khung giờ riêng)</span></label>
+              {blocks.map((b, idx) => {
+                const bHours = calcHours(b.startTime, b.endTime);
+                const memList = blockMemberList(b);
+                return (
+                  <div key={idx} className="rounded-lg border p-3 space-y-2" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg)" }}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[12.5px] font-semibold">Dự án {idx + 1}</span>
+                      {blocks.length > 1 && <button type="button" onClick={() => removeBlock(idx)} className="text-[12px]" style={{ color: "var(--ibs-danger)" }} title="Xóa dự án">× Xóa</button>}
+                    </div>
+                    {/* Dự án */}
+                    <select value={b.projectCode} onChange={(e) => updateBlock(idx, { projectCode: e.target.value })} className={inputCls} style={inputStyle}>
+                      <option value="">-- Chọn dự án --</option>
+                      {OT_PROJECTS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    {/* Xưởng / Phòng ban — chọn để hiện thêm nhân sự */}
+                    <div>
+                      <div className="text-[12px] mb-1" style={{ color: "var(--ibs-text-muted)" }}>Thêm nhân sự theo Xưởng / Phòng ban</div>
+                      <div className="space-y-1.5">
+                        {b.groupKeys.map((gk, gi) => (
+                          <div key={gi} className="flex items-center gap-1.5">
+                            <select value={gk} onChange={(e) => setBlockGroupAt(idx, gi, e.target.value)} className="flex-1 px-2 py-1.5 rounded-md text-[12px] outline-none" style={inputStyle}>
+                              <option value="">-- Chọn Xưởng / Phòng ban --</option>
+                              {departments.length > 0 && <optgroup label="Phòng ban">{departments.map((d) => <option key={"dept:" + d.id} value={"dept:" + d.id}>{d.name}</option>)}</optgroup>}
+                              {teams.length > 0 && <optgroup label="Tổ">{teams.map((t) => <option key={"team:" + t.id} value={"team:" + t.id}>{t.name}</option>)}</optgroup>}
+                            </select>
+                            {b.groupKeys.length > 1 && <button type="button" onClick={() => removeBlockGroup(idx, gi)} className="px-1.5 text-[14px]" style={{ color: "var(--ibs-danger)" }} title="Bỏ xưởng">×</button>}
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => addBlockGroup(idx)} className="text-[11px] font-medium" style={{ color: "var(--ibs-accent)" }}>＋ Thêm Xưởng</button>
+                      </div>
+                    </div>
+                    {/* Nhân sự trong khối */}
+                    <div>
+                      <div className="text-[12px] mb-1" style={{ color: "var(--ibs-text-muted)" }}>Nhân sự <span style={{ color: "var(--ibs-text-dim)" }}>({b.memberIds.length} chọn)</span></div>
+                      <div className="max-h-[150px] overflow-y-auto rounded-lg border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg-card)" }}>
+                        {memList.length === 0 ? (
+                          <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Chọn Xưởng để hiện nhân sự.</div>
+                        ) : memList.map((m) => (
+                          <label key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer hover:bg-white/[0.04]">
+                            <input type="checkbox" checked={b.memberIds.includes(m.id)} onChange={() => toggleBlockMember(idx, m.id)} />
+                            <span>{m.name}{m.dept ? <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}> · {m.dept}</span> : null}{m.outside ? <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}> (ngoài phạm vi)</span> : null}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Lý do */}
+                    <textarea rows={2} value={b.reason} onChange={(e) => updateBlock(idx, { reason: e.target.value })} placeholder="Lý do tăng ca... (bắt buộc)"
+                      className="w-full px-2 py-1.5 rounded-md text-[12px] outline-none resize-none" style={inputStyle} />
+                    {/* Khung giờ — CUỐI khối (số giờ tự tính) */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] shrink-0" style={{ color: "var(--ibs-text-muted)" }}>Khung giờ:</span>
+                      <div className="w-[84px] shrink-0"><TimeInput value={b.startTime} onChange={(e) => updateBlock(idx, { startTime: e.target.value })} className="w-full px-2 py-1.5 rounded-md text-[12px] text-center outline-none" style={inputStyle} /></div>
+                      <span className="text-[11px] shrink-0" style={{ color: "var(--ibs-text-dim)" }}>→</span>
+                      <div className="w-[84px] shrink-0"><TimeInput value={b.endTime} onChange={(e) => updateBlock(idx, { endTime: e.target.value })} className="w-full px-2 py-1.5 rounded-md text-[12px] text-center outline-none" style={inputStyle} /></div>
+                      <span className="text-[12px] font-semibold shrink-0 ml-1" style={{ color: bHours > 0 ? "var(--ibs-accent)" : "var(--ibs-danger)" }}>= {bHours}h</span>
+                    </div>
+                  </div>
+                );
+              })}
+              <button type="button" onClick={addBlock} className="text-[12px] font-medium" style={{ color: "var(--ibs-accent)" }}>＋ Thêm dự án</button>
+            </div>
+
+            {error && <div className="text-[12px] px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
           </div>
-          <div className="text-[12px]" style={{ color: "var(--ibs-text-muted)" }}>
-            Thời lượng: <strong style={{ color: "var(--ibs-accent)" }}>{durationH.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}h</strong> · Hệ số: <strong style={{ color: "var(--ibs-accent)" }}>×{otRate}</strong> {otRate === 2 ? "(cuối tuần)" : "(ngày thường)"}
-          </div>
-          <div>
-            <label className={labelCls} style={labelStyle}>Lý do <span style={{ color: "var(--ibs-danger)" }}>*</span></label>
-            <textarea value={form.reason} onChange={(e) => set("reason", e.target.value)} rows={2} className={inputCls} style={inputStyle} />
-          </div>
-          {error && <div className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>{error}</div>}
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex justify-end gap-2 px-5 py-3 border-t shrink-0" style={{ borderColor: "var(--ibs-border)" }}>
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ border: "1px solid var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Huỷ</button>
             <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: "var(--ibs-accent)", opacity: saving ? 0.6 : 1 }}>{saving ? "Đang lưu..." : "Lưu"}</button>
           </div>

@@ -129,7 +129,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   const body = await request.json();
-  const { date, startTime, endTime, reason } = body as { date?: string; startTime?: string; endTime?: string; reason?: string };
+  const { date, startTime, endTime, reason, memberProjects } = body as {
+    date?: string; startTime?: string; endTime?: string; reason?: string;
+    // Chi tiết NV × dự án × giờ × lý do — nếu gửi thì THAY TOÀN BỘ danh sách cũ.
+    memberProjects?: { employeeId: string; employeeName?: string | null; projectCode: string; hours: number; reason?: string | null }[];
+  };
   const data: any = {};
   if (date) {
     const d = new Date(date);
@@ -147,11 +151,47 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     data.hours = h;
   }
 
-  const updated = await prisma.oTRequest.update({
-    where: { id }, data,
-    include: { employee: { include: { department: true } } },
+  // Nếu client gửi chi tiết → validate + thay toàn bộ rows + đồng bộ memberIds/memberNames + lý do gộp.
+  let replaceMembers: { employeeId: string; employeeName: string; projectCode: string; hours: number; reason: string | null }[] | null = null;
+  if (Array.isArray(memberProjects)) {
+    if (memberProjects.length === 0) {
+      return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Đơn phải có ít nhất 1 dòng nhân sự × dự án" } }, { status: 400 });
+    }
+    replaceMembers = [];
+    for (const mp of memberProjects) {
+      if (!mp.employeeId) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Thiếu nhân viên ở một dòng" } }, { status: 400 });
+      if (!mp.projectCode) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Thiếu dự án ở một dòng" } }, { status: 400 });
+      if (!(mp.hours > 0)) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Số giờ phải > 0 ở một dòng" } }, { status: 400 });
+      replaceMembers.push({
+        employeeId: mp.employeeId,
+        employeeName: mp.employeeName || "",
+        projectCode: mp.projectCode,
+        hours: mp.hours,
+        reason: mp.reason?.trim() || null,
+      });
+    }
+    // Đồng bộ danh sách NV (dedupe) + lý do cấp đơn = gộp các lý do khác nhau.
+    const byEmp = new Map<string, string>();
+    for (const r of replaceMembers) if (!byEmp.has(r.employeeId)) byEmp.set(r.employeeId, r.employeeName);
+    data.memberIds = Array.from(byEmp.keys());
+    data.memberNames = Array.from(byEmp.values());
+    const merged = Array.from(new Set(replaceMembers.map((r) => (r.reason || "").trim()).filter(Boolean))).join(" | ");
+    if (merged) data.reason = merged;
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    if (replaceMembers) {
+      await tx.oTMemberProject.deleteMany({ where: { otRequestId: id } });
+      await tx.oTMemberProject.createMany({
+        data: replaceMembers.map((r) => ({ otRequestId: id, ...r })),
+      });
+    }
+    return tx.oTRequest.update({
+      where: { id }, data,
+      include: { employee: { include: { department: true } }, memberProjects: true },
+    });
   });
-  logAudit({ userId, action: "UPDATE", entityType: "OTRequest", entityId: id, newValue: data });
+  logAudit({ userId, action: "UPDATE", entityType: "OTRequest", entityId: id, newValue: { ...data, memberProjects: replaceMembers?.length } });
   return NextResponse.json({ data: updated });
 }
 

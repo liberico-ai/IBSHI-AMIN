@@ -14,6 +14,9 @@ const CreateOTSchema = z.object({
   otRate: z.number().optional(),
   teamId: z.string().optional().nullable(),
   teamName: z.string().optional().nullable(),
+  // Chế độ khai: "byEmployee" (theo nhân sự — mỗi NV chia giờ, tổng = giờ OT) | "byProject" (theo dự án —
+  //   mỗi khối dự án chọn nhiều NV + 1 số giờ; các NV có thể khác giờ nhau → KHÔNG ép tổng = giờ OT).
+  allocMode: z.enum(["byEmployee", "byProject"]).optional(),
   projectCode: z.string().optional().nullable(),   // (cũ) Dự án chung của đợt — giữ tương thích
   memberIds: z.array(z.string()).optional(),
   memberNames: z.array(z.string()).optional(),
@@ -91,7 +94,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { date, startTime, endTime, reason, otRate, teamId, teamName, projectCode, memberIds, memberNames, memberProjects } = parsed.data;
+  const { date, startTime, endTime, reason, otRate, teamId, teamName, allocMode, projectCode, memberIds, memberNames, memberProjects } = parsed.data;
 
   if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
     return NextResponse.json(
@@ -144,12 +147,16 @@ export async function POST(request: NextRequest) {
       if (mp.employeeName) cur.name = mp.employeeName;
       byEmp.set(mp.employeeId, cur);
     }
-    for (const [empId, v] of Array.from(byEmp.entries())) {
-      if (Math.abs(v.sum - hours) > 0.01) {
-        return NextResponse.json(
-          { error: { code: "VALIDATION_ERROR", message: `Tổng giờ dự án của ${v.name || empId} (${v.sum}h) phải bằng giờ OT của đơn (${hours}h)` } },
-          { status: 400 }
-        );
+    // Chế độ THEO NHÂN SỰ: ép tổng giờ mỗi NV = giờ OT của đơn. Chế độ THEO DỰ ÁN: bỏ qua (mỗi NV
+    //   có thể khác giờ — vd người 2h người 3h trên cùng/khác dự án).
+    if (allocMode !== "byProject") {
+      for (const [empId, v] of Array.from(byEmp.entries())) {
+        if (Math.abs(v.sum - hours) > 0.01) {
+          return NextResponse.json(
+            { error: { code: "VALIDATION_ERROR", message: `Tổng giờ dự án của ${v.name || empId} (${v.sum}h) phải bằng giờ OT của đơn (${hours}h)` } },
+            { status: 400 }
+          );
+        }
       }
     }
     // Danh sách NV suy ra từ phân bổ (đồng bộ memberIds/memberNames để tương thích hiển thị cũ).
