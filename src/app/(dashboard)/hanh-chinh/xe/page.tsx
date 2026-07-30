@@ -259,8 +259,8 @@ export default function XePage() {
     fetchMaintenance();
   }, [maintenanceVehicleId, maintFrom, maintTo]);
 
-  // Quản lý đội xe (thêm/sửa xe, nhật ký, bảo trì) theo ma trận m10.xe:edit.
-  const canManage = can("m10.xe:edit");
+  // Quản lý đội xe (thêm/sửa xe, nhật ký, bảo trì) theo ma trận Đội xe (key đúng: m10.xe.doixe, KHÔNG phải m10.xe).
+  const canManage = can("m10.xe.doixe:edit") || can("m10.xe.doixe:create");
   // Duyệt phiếu đặt xe: giữ luồng người-duyệt chỉ định (ROOM_VEHICLE_APPROVERS), không theo ma trận phẳng.
   // Duyệt đặt xe: người duyệt được chỉ định (cũ) HOẶC có quyền Duyệt qua ma trận (C1/C2).
   const canApproveBooking = canApproveRoomVehicle(employeeCode, userRole) || can("m10.xe.datxe:approve1") || can("m10.xe.datxe:approve2");

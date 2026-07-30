@@ -6,6 +6,7 @@ import { apiError } from "@/lib/utils";
 import { X, Calendar, ClipboardList, ChevronDown, ChevronRight, Check, XCircle, Download, Pencil } from "lucide-react";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 import { canApproveRoomVehicle } from "@/lib/access";
+import { useCan } from "@/hooks/use-permission";
 
 type Room = { id: string; code: string; name: string; capacity: number; equipment: string[] };
 type Booking = {
@@ -459,7 +460,9 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
 
-  const canApprove = canApproveRoomVehicle(me?.employeeCode, me?.role);
+  // Cộng dồn: người duyệt cố định (allowlist/ADMIN) HOẶC ai được tick Duyệt phòng họp qua ma trận.
+  const can = useCan();
+  const canApprove = canApproveRoomVehicle(me?.employeeCode, me?.role) || can("m10.phonghop.dat:approve");
 
   function load() {
     setLoading(true);

@@ -441,7 +441,9 @@ export default function NghiPhepPage() {
   const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN" || can("m3.nghiphep:approve1") || can("m3.nghiphep:approve2");
   // Đăng ký nghỉ hộ: quyền riêng m3.nghiphep:proxy ("ĐK hộ") — admin tick đích danh, tách khỏi Sửa.
   const canProxy = can("m3.nghiphep:proxy");
-  const isHR = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
+  // Export: HC/BGĐ, hoặc đầu mối được tick Duyệt/Sửa nghỉ phép qua ma trận (không lộ cho NV thường).
+  const isHR = userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN"
+    || canApprove || can("m3.nghiphep:edit");
 
   async function exportExcel() {
     const { default: ExcelJS } = await import("exceljs");

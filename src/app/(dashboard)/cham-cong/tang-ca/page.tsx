@@ -597,7 +597,8 @@ export default function TangCaPage() {
       .finally(() => setLoading(false));
   }, [statusFilter]);
 
-  const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN";
+  const canApprove = userRole === "MANAGER" || userRole === "HR_ADMIN" || userRole === "BOM" || userRole === "ADMIN"
+    || can("m3.tangca:approve");   // cộng dồn: ai được tick Duyệt qua ma trận cũng duyệt/từ chối được
 
   async function handleAction(id: string, action: "APPROVE" | "REJECT") {
     setActionLoading(id + action);
@@ -616,12 +617,13 @@ export default function TangCaPage() {
     }
   }
 
-  // Trưởng phòng (phòng mình) hoặc HC/ADMIN/BOM được SỬA/XOÁ đơn OT CHƯA duyệt.
-  const canManageOT = (r: OTRequest) =>
-    r.status === "PENDING" && (
-      ["HR_ADMIN", "ADMIN", "BOM"].includes(userRole) ||
-      (userRole === "MANAGER" && !!myDeptId && r.employee.department.id === myDeptId)
-    );
+  // SỬA/XOÁ đơn OT CHƯA duyệt — CỘNG DỒN: role cũ (HC/ADMIN/BOM, TP phòng mình) HOẶC tick ma trận
+  //   (m3.tangca:edit / :delete). Phạm vi do backend enforce (danh sách vốn đã lọc theo phạm vi).
+  const roleCanManageOT = (r: OTRequest) =>
+    ["HR_ADMIN", "ADMIN", "BOM"].includes(userRole) ||
+    (userRole === "MANAGER" && !!myDeptId && r.employee.department.id === myDeptId);
+  const canEditOT = (r: OTRequest) => r.status === "PENDING" && (roleCanManageOT(r) || can("m3.tangca:edit"));
+  const canDeleteOT = (r: OTRequest) => r.status === "PENDING" && (roleCanManageOT(r) || can("m3.tangca:delete"));
 
   async function handleDelete(r: OTRequest) {
     if (!(await confirmDialog({ message: `Xoá đơn tăng ca ngày ${formatDate(new Date(r.date))} của ${r.employee.fullName}?`, confirmText: "Xoá", tone: "danger" }))) return;
@@ -775,19 +777,19 @@ export default function TangCaPage() {
                             onReject={() => handleAction(r.id, "REJECT")}
                           />
                         )}
-                        {canManageOT(r) && (
-                          <>
-                            <button type="button" title="Sửa đơn" onClick={() => setEditTarget(r)}
-                              disabled={actionLoading === r.id + "DELETE"}
-                              className="p-1 rounded hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}>
-                              <Pencil size={15} />
-                            </button>
-                            <button type="button" title="Xoá đơn" onClick={() => handleDelete(r)}
-                              disabled={actionLoading === r.id + "DELETE"}
-                              className="p-1 rounded hover:opacity-70" style={{ color: "var(--ibs-danger)" }}>
-                              <Trash2 size={15} />
-                            </button>
-                          </>
+                        {canEditOT(r) && (
+                          <button type="button" title="Sửa đơn" onClick={() => setEditTarget(r)}
+                            disabled={actionLoading === r.id + "DELETE"}
+                            className="p-1 rounded hover:opacity-70" style={{ color: "var(--ibs-text-dim)" }}>
+                            <Pencil size={15} />
+                          </button>
+                        )}
+                        {canDeleteOT(r) && (
+                          <button type="button" title="Xoá đơn" onClick={() => handleDelete(r)}
+                            disabled={actionLoading === r.id + "DELETE"}
+                            className="p-1 rounded hover:opacity-70" style={{ color: "var(--ibs-danger)" }}>
+                            <Trash2 size={15} />
+                          </button>
                         )}
                       </div>
                     </td>
@@ -845,7 +847,7 @@ function EditOTDialog({ target, onClose, onSuccess }: { target: OTRequest; onClo
         : [{ employeeId: target.employee.id, projectCode: target.projectCode || "", hours: target.hours, reason: target.reason || "" }];
     const map = new Map<string, ProjBlock>();
     for (const r of rows) {
-      const key = r.projectCode + " " + (r.reason || "");
+      const key = r.projectCode + "\u0000" + (r.reason || "");
       let b = map.get(key);
       if (!b) {
         const hrs = r.hours > 0 ? r.hours : calcHours(target.startTime, target.endTime);

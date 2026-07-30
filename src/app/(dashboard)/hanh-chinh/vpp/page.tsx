@@ -80,12 +80,14 @@ export default function VppPage() {
   }, []);
 
   const can = useCan();
-  const canSeeStockIn = canManageVpp(me?.role, me?.employeeCode);
+  // Cộng dồn ma trận: cấp phát/nhập kho VPP theo m10.vpp.nhapkho:create; thêm danh mục VPP theo m10.vpp.danhmuc:create.
+  const canStockIn = canManageVpp(me?.role, me?.employeeCode) || can("m10.vpp.nhapkho:create");
+  const canManageStock = canManageVpp(me?.role, me?.employeeCode) || can("m10.vpp.danhmuc:create");
 
   // Mỗi tab gate bằng 1 quyền :view riêng.
   const vppTabs = ([
     { k: "stock", label: "Danh sách VPP", icon: Package, show: can("m10.vpp.danhmuc:view") },
-    { k: "stockIn", label: "Danh sách yêu cầu VPP", icon: FileText, show: canSeeStockIn },
+    { k: "stockIn", label: "Danh sách yêu cầu VPP", icon: FileText, show: canStockIn },
     { k: "requests", label: "Phiếu xuất VPP", icon: FileText, show: can("m10.vpp.denghi:view") },
   ] as { k: "stock" | "stockIn" | "requests"; label: string; icon: any; show: boolean }[]).filter((t) => t.show);
   useEffect(() => {
@@ -112,8 +114,8 @@ export default function VppPage() {
         })}
       </div>
 
-      {tab === "stock" && <StockTab canManage={canSeeStockIn} />}
-      {tab === "stockIn" && canSeeStockIn && <StockInTab />}
+      {tab === "stock" && <StockTab canManage={canManageStock} />}
+      {tab === "stockIn" && canStockIn && <StockInTab />}
       {tab === "requests" && <RequestsTab me={me} />}
     </div>
   );
