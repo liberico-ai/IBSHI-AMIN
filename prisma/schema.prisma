@@ -667,6 +667,8 @@ model OTMemberProject {
   projectCode  String // mã dự án (list fix cứng src/lib/projects.ts)
   hours        Float // giờ OT của NV này cho dự án này
   reason       String? // lý do tăng ca của NV này (theo từng nhân viên)
+  startTime    String? // giờ bắt đầu KHUNG GIỜ của dự án/khối này (HH:mm); null = dùng khung chung của đơn
+  endTime      String? // giờ kết thúc khung giờ của dự án/khối này (HH:mm)
   otRequest    OTRequest @relation(fields: [otRequestId], references: [id], onDelete: Cascade)
 
   @@index([otRequestId])

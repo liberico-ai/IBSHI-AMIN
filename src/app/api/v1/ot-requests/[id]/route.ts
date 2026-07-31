@@ -110,6 +110,8 @@ async function canManageOT(user: any, userRole: string, userId: string, reqDeptI
 }
 
 const toMin = (t: string) => { const [h, m] = (t || "0:0").split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+// Phút kết thúc: "00:00" = CUỐI ngày (24:00) để nhập khung "22:00–00:00"; qua nửa đêm phải tách 2 đơn.
+const toEndMin = (t: string) => { const m = toMin(t); return m === 0 ? 1440 : m; };
 
 // PATCH — Trưởng phòng (hoặc HC+) SỬA đơn OT CHƯA DUYỆT của phòng mình (ngày / giờ / lý do).
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -131,8 +133,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const body = await request.json();
   const { date, startTime, endTime, reason, memberProjects } = body as {
     date?: string; startTime?: string; endTime?: string; reason?: string;
-    // Chi tiết NV × dự án × giờ × lý do — nếu gửi thì THAY TOÀN BỘ danh sách cũ.
-    memberProjects?: { employeeId: string; employeeName?: string | null; projectCode: string; hours: number; reason?: string | null }[];
+    // Chi tiết NV × dự án × giờ × lý do (+ khung giờ riêng của dự án) — nếu gửi thì THAY TOÀN BỘ danh sách cũ.
+    memberProjects?: { employeeId: string; employeeName?: string | null; projectCode: string; hours: number; reason?: string | null; startTime?: string | null; endTime?: string | null }[];
   };
   const data: any = {};
   if (date) {
@@ -146,13 +148,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (reason !== undefined) data.reason = reason;
   if (startTime !== undefined || endTime !== undefined) {
     const st = startTime ?? ot.startTime, et = endTime ?? ot.endTime;
-    const h = (toMin(et) - toMin(st)) / 60;
-    if (h <= 0) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Giờ kết thúc phải sau giờ bắt đầu" } }, { status: 400 });
+    const h = (toEndMin(et) - toMin(st)) / 60;
+    if (h <= 0) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Giờ kết thúc phải sau giờ bắt đầu. Qua nửa đêm hãy tách 2 đơn (…→00:00 và 00:00→…)" } }, { status: 400 });
     data.hours = h;
   }
 
   // Nếu client gửi chi tiết → validate + thay toàn bộ rows + đồng bộ memberIds/memberNames + lý do gộp.
-  let replaceMembers: { employeeId: string; employeeName: string; projectCode: string; hours: number; reason: string | null }[] | null = null;
+  let replaceMembers: { employeeId: string; employeeName: string; projectCode: string; hours: number; reason: string | null; startTime: string | null; endTime: string | null }[] | null = null;
   if (Array.isArray(memberProjects)) {
     if (memberProjects.length === 0) {
       return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Đơn phải có ít nhất 1 dòng nhân sự × dự án" } }, { status: 400 });
@@ -168,6 +170,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         projectCode: mp.projectCode,
         hours: mp.hours,
         reason: mp.reason?.trim() || null,
+        startTime: mp.startTime || null,
+        endTime: mp.endTime || null,
       });
     }
     // Đồng bộ danh sách NV (dedupe) + lý do cấp đơn = gộp các lý do khác nhau.

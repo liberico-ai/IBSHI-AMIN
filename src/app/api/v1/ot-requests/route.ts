@@ -27,12 +27,19 @@ const CreateOTSchema = z.object({
     projectCode: z.string().min(1),
     hours: z.number().positive(),
     reason: z.string().optional().nullable(),   // lý do OT theo từng NV
+    startTime: z.string().optional().nullable(), // khung giờ RIÊNG của dự án/khối (tab theo dự án)
+    endTime: z.string().optional().nullable(),
   })).optional(),
 });
 
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
+}
+// Phút kết thúc: "00:00" = CUỐI ngày (24:00) để nhập được khung "22:00–00:00".
+function endToMinutes(t: string): number {
+  const m = timeToMinutes(t);
+  return m === 0 ? 1440 : m;
 }
 
 export async function GET(request: NextRequest) {
@@ -96,9 +103,9 @@ export async function POST(request: NextRequest) {
 
   const { date, startTime, endTime, reason, otRate, teamId, teamName, allocMode, projectCode, memberIds, memberNames, memberProjects } = parsed.data;
 
-  if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+  if (endToMinutes(endTime) <= timeToMinutes(startTime)) {
     return NextResponse.json(
-      { error: { code: "VALIDATION_ERROR", message: "Giờ kết thúc phải sau giờ bắt đầu" } },
+      { error: { code: "VALIDATION_ERROR", message: "Giờ kết thúc phải sau giờ bắt đầu. Nếu làm qua nửa đêm, hãy tách 2 đơn: …→00:00 và 00:00→…" } },
       { status: 400 }
     );
   }
@@ -119,22 +126,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy nhân viên" } }, { status: 404 });
   }
 
-  // Duplicate OT check — same employee, same date, overlapping time
-  const existingOT = await prisma.oTRequest.findFirst({
-    where: {
-      employeeId: employee.id,
-      date,
-      status: { not: "REJECTED" },
-    },
-  });
-  if (existingOT) {
-    return NextResponse.json(
-      { error: { code: "DUPLICATE", message: `Đã có đơn OT cho ngày ${date.toLocaleDateString("vi-VN")} chưa bị từ chối` } },
-      { status: 409 }
-    );
-  }
+  // (Đã bỏ chặn trùng đơn OT theo người gửi — đầu mối gửi nhiều đề xuất cùng ngày là bình thường.)
 
-  const hours = (timeToMinutes(endTime) - timeToMinutes(startTime)) / 60;
+  const hours = (endToMinutes(endTime) - timeToMinutes(startTime)) / 60;
 
   // MỚI: nếu có phân bổ dự án theo NV → validate tổng giờ mỗi NV = giờ OT của đơn (sai số nhỏ cho float).
   let finalMemberIds = memberIds ?? [];
@@ -191,6 +185,8 @@ export async function POST(request: NextRequest) {
             projectCode: mp.projectCode,
             hours: mp.hours,
             reason: mp.reason || null,
+            startTime: mp.startTime || null,
+            endTime: mp.endTime || null,
           })),
         },
       } : {}),
