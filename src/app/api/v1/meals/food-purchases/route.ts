@@ -9,11 +9,12 @@ import { canUser } from "@/lib/permission-catalog";
 // Sổ chi phí mua thực phẩm theo ngày. HCNS (HR_ADMIN/BOM) quản lý.
 const CreateSchema = z.object({
   date: z.string(),
+  menuId: z.string().optional().nullable(),   // gắn danh sách vào 1 thực đơn
   items: z.array(z.object({
     name: z.string().min(1),
     unit: z.string().default("Kg"),
     quantity: z.number().positive(),
-    unitPrice: z.number().int().min(0),
+    unitPrice: z.number().int().min(0).default(0),   // để 0 khi mới lập; người đi mua cập nhật sau
   })).min(1),
 });
 
@@ -73,12 +74,30 @@ export async function POST(request: NextRequest) {
 
   const parsed = CreateSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
-  const { date, items } = parsed.data;
+  const { date, items, menuId } = parsed.data;
 
   await prisma.foodPurchase.createMany({
-    data: items.map((it) => ({ date: new Date(date), name: it.name, unit: it.unit || "Kg", quantity: it.quantity, unitPrice: it.unitPrice, createdBy: userId })),
+    data: items.map((it) => ({ date: new Date(date), name: it.name, unit: it.unit || "Kg", quantity: it.quantity, unitPrice: it.unitPrice ?? 0, menuId: menuId || null, createdBy: userId })),
   });
   return NextResponse.json({ data: { ok: true, count: items.length } }, { status: 201 });
+}
+
+// Cập nhật 1 dòng thực phẩm — chủ yếu là ĐƠN GIÁ (người đi mua nhập sau). Cho sửa cả SL/tên/ĐVT.
+export async function PATCH(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
+  if (!canUser(session.user as any, "m10.nhaan.chiphi:edit")) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
+
+  const body = await request.json();
+  const { id, unitPrice, quantity, name, unit } = body as { id?: string; unitPrice?: number; quantity?: number; name?: string; unit?: string };
+  if (!id) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Thiếu id" } }, { status: 400 });
+  const data: any = {};
+  if (unitPrice !== undefined) data.unitPrice = Math.max(0, Math.round(unitPrice));
+  if (quantity !== undefined) { if (!(quantity > 0)) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Số lượng phải > 0" } }, { status: 400 }); data.quantity = quantity; }
+  if (name !== undefined) data.name = name;
+  if (unit !== undefined) data.unit = unit;
+  const updated = await prisma.foodPurchase.update({ where: { id }, data });
+  return NextResponse.json({ data: updated });
 }
 
 export async function DELETE(request: NextRequest) {

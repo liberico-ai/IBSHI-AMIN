@@ -1352,17 +1352,33 @@ model MealActual {
 }
 
 // Chi phí mua thực phẩm theo ngày (sổ chợ nhà bếp): mỗi dòng = 1 lô NHẬP kho trong ngày.
-model FoodPurchase {
-  id        String   @id @default(uuid())
+// Thực đơn (các món ăn dự định nấu trong 1 ngày). Danh sách thực phẩm mua ĐI CÙNG 1 thực đơn.
+model FoodMenu {
+  id        String         @id @default(uuid())
   date      DateTime
-  name      String
-  unit      String   @default("Kg")
-  quantity  Float    @default(0)
-  unitPrice Int      @default(0)
-  createdBy String
-  createdAt DateTime @default(now())
+  name      String?        // nhãn tuỳ chọn (vd "Trưa"/"Tối"); có thể trống
+  dishes    String[]       // danh sách tên món ăn
+  createdBy String?
+  createdAt DateTime       @default(now())
+  purchases FoodPurchase[]
 
   @@index([date])
+}
+
+model FoodPurchase {
+  id        String    @id @default(uuid())
+  date      DateTime
+  name      String
+  unit      String    @default("Kg")
+  quantity  Float     @default(0)
+  unitPrice Int       @default(0) // để 0 khi mới lập danh sách; người đi mua cập nhật sau
+  createdBy String
+  createdAt DateTime  @default(now())
+  menuId    String?   // thuộc thực đơn nào (null = dữ liệu cũ trước khi có thực đơn)
+  menu      FoodMenu? @relation(fields: [menuId], references: [id], onDelete: Cascade)
+
+  @@index([date])
+  @@index([menuId])
 }
 
 // Thực XUẤT thực phẩm: lượng thực phẩm bếp thực sự nấu trong ngày → trừ tồn kho theo FIFO.

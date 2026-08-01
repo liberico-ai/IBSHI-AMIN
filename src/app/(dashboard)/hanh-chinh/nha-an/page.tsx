@@ -36,7 +36,8 @@ type MealFeedback = {
   employee: { code: string; fullName: string };
 };
 type FeedbackMeta = { total: number; avgRating: number | null; distribution: { star: number; count: number }[] };
-type FoodPurchase = { id: string; date: string; name: string; unit: string; quantity: number; unitPrice: number };
+type FoodPurchase = { id: string; date: string; name: string; unit: string; quantity: number; unitPrice: number; menuId?: string | null };
+type FoodMenu = { id: string; date: string; name: string | null; dishes: string[]; purchases: FoodPurchase[] };
 type Subcontractor = { id: string; name: string; companyName: string; phone?: string | null; note?: string | null; active: boolean };
 type SubMeal = { id: string; subcontractorId: string; date: string; lunchCount: number; dinnerCount: number; specialNote?: string | null; subcontractor: { id: string; name: string; companyName: string } };
 
@@ -224,6 +225,14 @@ export default function NhaAnPage() {
   const [foodLoading, setFoodLoading] = useState(false);
   const [showFoodForm, setShowFoodForm] = useState(false);
   const [foodFormDate, setFoodFormDate] = useState(new Date().toISOString().slice(0, 10));
+  const [foodFormMenuId, setFoodFormMenuId] = useState<string | null>(null); // thêm thực phẩm cho thực đơn nào
+  // ── Thực đơn ──
+  const [foodMenus, setFoodMenus] = useState<FoodMenu[]>([]);
+  const [showMenuForm, setShowMenuForm] = useState(false);
+  const [editingMenu, setEditingMenu] = useState<FoodMenu | null>(null);
+  const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
+  const [priceEditMenu, setPriceEditMenu] = useState<string | null>(null); // thực đơn đang sửa đơn giá
+  const [priceDraft, setPriceDraft] = useState<Record<string, string>>({}); // id → đơn giá (chuỗi)
   // ── Tồn kho + thực xuất thực phẩm (FIFO) ──
   type InventoryItem = { name: string; unit: string; quantity: number; value: number };
   type FoodIssueRow = { id: string; date: string; name: string; unit: string; quantity: number; cost: number };
@@ -248,16 +257,47 @@ export default function NhaAnPage() {
     Promise.all([
       fetch(`/api/v1/meals/food-purchases?month=${m}&year=${y}`).then((r) => r.json()),
       fetch(`/api/v1/meals/food-issues?month=${m}&year=${y}`).then((r) => r.json()),
+      fetch(`/api/v1/meals/food-menus?month=${m}&year=${y}`).then((r) => r.json()),
     ])
-      .then(([buy, issue]) => {
+      .then(([buy, issue, menus]) => {
         setFoodRows(buy.data || []); setFoodTotal(buy.meta?.total || 0); setFoodCanManage(!!buy.meta?.canManage);
         setFoodInventory(buy.meta?.inventory || []);
         setFoodEndInventory(buy.meta?.inventoryAtEnd || []);
         setFoodEndInvValue(buy.meta?.endOfMonthInventoryValue || 0);
         setFoodIssueCostTotal(issue.meta?.total || 0);
         setFoodIssues(issue.data || []);
+        setFoodMenus(menus.data || []);
       })
       .finally(() => setFoodLoading(false));
+  }
+
+  const toggleMenuExpand = (id: string) => setExpandedMenus((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  async function deleteMenu(m: FoodMenu) {
+    if (!(await confirmDialog({ message: `Xóa thực đơn ngày ${formatDate(m.date)}${m.name ? ` (${m.name})` : ""}? Danh sách thực phẩm của thực đơn cũng bị xóa.`, tone: "danger", confirmText: "Xóa" }))) return;
+    await fetch(`/api/v1/meals/food-menus?id=${m.id}`, { method: "DELETE" });
+    fetchFood();
+  }
+  async function deleteFoodItem(id: string) {
+    if (!(await confirmDialog({ message: "Xóa dòng thực phẩm này?", tone: "danger", confirmText: "Xóa" }))) return;
+    await fetch(`/api/v1/meals/food-purchases?id=${id}`, { method: "DELETE" });
+    fetchFood();
+  }
+  // Cập nhật đơn giá: bật chế độ sửa cho 1 thực đơn (nạp giá hiện tại) → nhập → Lưu (PATCH từng dòng đổi giá).
+  function startPriceEdit(m: FoodMenu) {
+    const draft: Record<string, string> = {};
+    for (const p of m.purchases) draft[p.id] = p.unitPrice ? p.unitPrice.toLocaleString("vi-VN") : "";
+    setPriceDraft(draft);
+    setPriceEditMenu(m.id);
+    setExpandedMenus((prev) => new Set(prev).add(m.id));
+  }
+  async function savePriceEdit(m: FoodMenu) {
+    const changed = m.purchases.filter((p) => (parseInt((priceDraft[p.id] || "").replace(/\D/g, "")) || 0) !== p.unitPrice);
+    await Promise.all(changed.map((p) => fetch("/api/v1/meals/food-purchases", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: p.id, unitPrice: parseInt((priceDraft[p.id] || "").replace(/\D/g, "")) || 0 }),
+    })));
+    setPriceEditMenu(null);
+    fetchFood();
   }
 
   async function deleteFoodDay(date: string) {
@@ -1134,8 +1174,11 @@ export default function NhaAnPage() {
                 <button onClick={() => setShowIssueForm(true)} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}>
                   <Plus size={14} /> Thực xuất thực phẩm
                 </button>
-                <button onClick={() => { setFoodFormDate(new Date().toISOString().slice(0, 10)); setShowFoodForm(true); }} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
-                  <Plus size={14} /> Thêm danh sách thực phẩm hôm nay
+                <button onClick={() => { setEditingMenu(null); setShowMenuForm(true); }} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", background: "transparent" }}>
+                  <Plus size={14} /> Thêm Thực đơn
+                </button>
+                <button onClick={() => { setFoodFormMenuId(null); setFoodFormDate(new Date().toISOString().slice(0, 10)); setShowFoodForm(true); }} className="flex items-center gap-1.5 text-[13px] px-3 py-2 rounded-lg font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>
+                  <Plus size={14} /> Thêm danh sách thực phẩm
                 </button>
               </div>
             )}
@@ -1172,69 +1215,150 @@ export default function NhaAnPage() {
             <div className="rounded-xl border py-12 text-center text-[13px]" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Đang tải...</div>
           ) : (
             <div className="flex flex-col gap-4">
-              {/* 1) Danh sách mua theo ngày — thu gọn dạng dropdown */}
-              {(() => {
+              {/* 1) Danh sách THỰC ĐƠN — mỗi thực đơn xổ ra danh sách thực phẩm mua của nó */}
+              <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                <div className="px-5 py-3 flex items-center justify-between text-[14px] font-semibold">
+                  <span>Thực đơn tháng {foodMonth}/{foodYear} <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>· {foodMenus.length} thực đơn</span></span>
+                </div>
+                {foodMenus.length === 0 ? (
+                  <div className="px-5 pb-4 text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có thực đơn trong tháng. Bấm <strong>＋ Thêm Thực đơn</strong> để tạo.</div>
+                ) : (
+                  <div className="px-4 pb-4 flex flex-col gap-3">
+                    {foodMenus.map((m) => {
+                      const expanded = expandedMenus.has(m.id);
+                      const editingPrice = priceEditMenu === m.id;
+                      const menuTotal = m.purchases.reduce((s, p) => s + Math.round(p.quantity * p.unitPrice), 0);
+                      return (
+                        <div key={m.id} className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--ibs-border)" }}>
+                          <div className="px-4 py-2.5 border-b flex items-start justify-between gap-2 flex-wrap" style={{ borderColor: "var(--ibs-border)" }}>
+                            <div className="min-w-0">
+                              <div className="text-[13px] font-semibold">{formatDate(m.date)} <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>· {vnDow(new Date(m.date))}{m.name ? ` · ${m.name}` : ""}</span></div>
+                              <div className="text-[11.5px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>🍽 {m.dishes.length ? m.dishes.join(", ") : "Chưa nhập món"}</div>
+                            </div>
+                            {foodCanManage && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button onClick={() => { setFoodFormMenuId(m.id); setFoodFormDate(m.date.slice(0, 10)); setShowFoodForm(true); }} className="text-[12px] font-medium" style={{ color: "var(--ibs-accent)" }}>＋ Thêm thực phẩm</button>
+                                <button onClick={() => { setEditingMenu(m); setShowMenuForm(true); }} className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Sửa</button>
+                                <button onClick={() => deleteMenu(m)} className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>Xóa</button>
+                              </div>
+                            )}
+                          </div>
+                          <button onClick={() => toggleMenuExpand(m.id)} className="w-full px-4 py-2 flex items-center justify-between text-[12.5px] font-medium hover:bg-white/[0.02]">
+                            <span>Xem danh sách thực phẩm mua <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>· {m.purchases.length} mục · {fmtNum(menuTotal)}đ</span></span>
+                            <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>{expanded ? "▲ Thu gọn" : "▼ Mở rộng"}</span>
+                          </button>
+                          {expanded && (m.purchases.length === 0 ? (
+                            <div className="px-4 pb-3 text-[12.5px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có thực phẩm. Bấm <strong>＋ Thêm thực phẩm</strong>.</div>
+                          ) : (
+                            <div>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-[13px]">
+                                  <thead>
+                                    <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
+                                      <th className="text-left px-4 py-2 text-[11px] font-semibold w-12" style={{ color: "var(--ibs-text-dim)" }}>STT</th>
+                                      <th className="text-left px-4 py-2 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>TÊN THỰC PHẨM</th>
+                                      <th className="text-left px-4 py-2 text-[11px] font-semibold w-16" style={{ color: "var(--ibs-text-dim)" }}>ĐVT</th>
+                                      <th className="text-right px-4 py-2 text-[11px] font-semibold w-24" style={{ color: "var(--ibs-text-dim)" }}>SỐ LƯỢNG</th>
+                                      <th className="text-right px-4 py-2 text-[11px] font-semibold w-28" style={{ color: "var(--ibs-text-dim)" }}>ĐƠN GIÁ</th>
+                                      <th className="text-right px-5 py-2 text-[11px] font-semibold w-32" style={{ color: "var(--ibs-text-dim)" }}>THÀNH TIỀN</th>
+                                      <th className="w-8" />
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {m.purchases.map((p, i) => {
+                                      const price = editingPrice ? (parseInt((priceDraft[p.id] || "").replace(/\D/g, "")) || 0) : p.unitPrice;
+                                      return (
+                                        <tr key={p.id} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
+                                          <td className="px-4 py-2" style={{ color: "var(--ibs-text-dim)" }}>{i + 1}</td>
+                                          <td className="px-4 py-2 font-medium">{p.name}</td>
+                                          <td className="px-4 py-2" style={{ color: "var(--ibs-text-dim)" }}>{p.unit}</td>
+                                          <td className="px-4 py-2 text-right">{fmtNum(p.quantity)}</td>
+                                          <td className="px-4 py-2 text-right">
+                                            {editingPrice ? (
+                                              <input value={priceDraft[p.id] ?? ""} onChange={(e) => { const v = e.target.value.replace(/\D/g, ""); setPriceDraft((d) => ({ ...d, [p.id]: v ? Number(v).toLocaleString("vi-VN") : "" })); }} inputMode="numeric" placeholder="0" className="w-24 text-right rounded-md border px-2 py-1 text-[13px]" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-accent)", color: "var(--ibs-text)" }} />
+                                            ) : (p.unitPrice ? fmtNum(p.unitPrice) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>)}
+                                          </td>
+                                          <td className="px-5 py-2 text-right font-medium">{price > 0 ? fmtNum(Math.round(p.quantity * price)) : <span style={{ color: "var(--ibs-text-dim)" }}>—</span>}</td>
+                                          <td className="px-1 py-2 text-center">
+                                            {foodCanManage && !editingPrice && <button onClick={() => deleteFoodItem(p.id)} style={{ color: "var(--ibs-text-dim)" }}><X size={13} /></button>}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                    <tr style={{ background: "rgba(234,179,8,0.08)" }}>
+                                      <td className="px-4 py-2.5 font-bold" colSpan={5}>Cộng</td>
+                                      <td className="px-5 py-2.5 text-right font-bold" style={{ color: "var(--ibs-accent)" }}>{fmtNum(m.purchases.reduce((s, p) => s + Math.round(p.quantity * ((editingPrice ? (parseInt((priceDraft[p.id] || "").replace(/\D/g, "")) || 0) : p.unitPrice))), 0))}</td>
+                                      <td />
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                              {foodCanManage && (
+                                <div className="px-4 py-2 flex justify-end gap-2 border-t" style={{ borderColor: "var(--ibs-border)" }}>
+                                  {editingPrice ? (
+                                    <>
+                                      <button onClick={() => setPriceEditMenu(null)} className="px-3 py-1.5 rounded-lg text-[12.5px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+                                      <button onClick={() => savePriceEdit(m)} className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff" }}>Lưu giá</button>
+                                    </>
+                                  ) : (
+                                    <button onClick={() => startPriceEdit(m)} className="px-3 py-1.5 rounded-lg text-[12.5px] font-medium border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)" }}>✎ Cập nhật Đơn giá</button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 1b) Thực phẩm CHƯA gắn thực đơn (dữ liệu cũ) — giữ hiển thị theo ngày */}
+              {foodRows.some((r) => !r.menuId) && (() => {
+                const legacy = foodRows.filter((r) => !r.menuId);
                 const groups: { date: string; rows: FoodPurchase[] }[] = [];
-                for (const r of foodRows) {
-                  const key = r.date.slice(0, 10);
-                  let g = groups.find((x) => x.date === key);
-                  if (!g) { g = { date: key, rows: [] }; groups.push(g); }
-                  g.rows.push(r);
-                }
+                for (const r of legacy) { const key = r.date.slice(0, 10); let g = groups.find((x) => x.date === key); if (!g) { g = { date: key, rows: [] }; groups.push(g); } g.rows.push(r); }
                 return (
                   <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
                     <button onClick={() => setShowPurchaseList((v) => !v)} className="w-full px-5 py-3 flex items-center justify-between text-[14px] font-semibold">
-                      <span>Danh sách mua theo ngày <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>· {groups.length} ngày · {foodRows.length} mục</span></span>
+                      <span>Thực phẩm chưa gắn thực đơn (cũ) <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>· {groups.length} ngày · {legacy.length} mục</span></span>
                       <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{showPurchaseList ? "▲ Thu gọn" : "▼ Mở rộng"}</span>
                     </button>
                     {showPurchaseList && (
-                      foodRows.length === 0 ? (
-                        <div className="px-5 pb-4 text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có dữ liệu mua thực phẩm trong tháng này</div>
-                      ) : (
-                        <div className="px-4 pb-4 flex flex-col gap-4">
-                          {groups.map((g) => {
-                            const dayTotal = g.rows.reduce((s, r) => s + Math.round(r.quantity * r.unitPrice), 0);
-                            return (
-                              <div key={g.date} className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--ibs-border)" }}>
-                                <div className="px-4 py-2.5 border-b flex items-center justify-between" style={{ borderColor: "var(--ibs-border)" }}>
-                                  <span className="text-[13px] font-semibold">{formatDate(g.date)} <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>· {vnDow(new Date(g.date))}</span></span>
-                                  {foodCanManage && <button onClick={() => deleteFoodDay(g.date)} className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>Xóa ngày</button>}
-                                </div>
-                                <div className="overflow-x-auto">
-                                  <table className="w-full text-[13px]">
-                                    <thead>
-                                      <tr className="border-b" style={{ borderColor: "var(--ibs-border)" }}>
-                                        <th className="text-left px-4 py-2 text-[11px] font-semibold w-12" style={{ color: "var(--ibs-text-dim)" }}>STT</th>
-                                        <th className="text-left px-4 py-2 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>TÊN THỰC PHẨM</th>
-                                        <th className="text-left px-4 py-2 text-[11px] font-semibold w-20" style={{ color: "var(--ibs-text-dim)" }}>ĐVT</th>
-                                        <th className="text-right px-4 py-2 text-[11px] font-semibold w-24" style={{ color: "var(--ibs-text-dim)" }}>SỐ LƯỢNG</th>
-                                        <th className="text-right px-4 py-2 text-[11px] font-semibold w-28" style={{ color: "var(--ibs-text-dim)" }}>ĐƠN GIÁ</th>
-                                        <th className="text-right px-5 py-2 text-[11px] font-semibold w-32" style={{ color: "var(--ibs-text-dim)" }}>THÀNH TIỀN</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {g.rows.map((r, i) => (
-                                        <tr key={r.id} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
-                                          <td className="px-4 py-2" style={{ color: "var(--ibs-text-dim)" }}>{i + 1}</td>
-                                          <td className="px-4 py-2 font-medium">{r.name}</td>
-                                          <td className="px-4 py-2" style={{ color: "var(--ibs-text-dim)" }}>{r.unit}</td>
-                                          <td className="px-4 py-2 text-right">{fmtNum(r.quantity)}</td>
-                                          <td className="px-4 py-2 text-right">{fmtNum(r.unitPrice)}</td>
-                                          <td className="px-5 py-2 text-right font-medium">{fmtNum(Math.round(r.quantity * r.unitPrice))}</td>
-                                        </tr>
-                                      ))}
-                                      <tr style={{ background: "rgba(234,179,8,0.08)" }}>
-                                        <td className="px-4 py-2.5 font-bold" colSpan={5}>Cộng</td>
-                                        <td className="px-5 py-2.5 text-right font-bold" style={{ color: "var(--ibs-accent)" }}>{fmtNum(dayTotal)}</td>
-                                      </tr>
-                                    </tbody>
-                                  </table>
-                                </div>
+                      <div className="px-4 pb-4 flex flex-col gap-4">
+                        {groups.map((g) => {
+                          const dayTotal = g.rows.reduce((s, r) => s + Math.round(r.quantity * r.unitPrice), 0);
+                          return (
+                            <div key={g.date} className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--ibs-border)" }}>
+                              <div className="px-4 py-2.5 border-b flex items-center justify-between" style={{ borderColor: "var(--ibs-border)" }}>
+                                <span className="text-[13px] font-semibold">{formatDate(g.date)} <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>· {vnDow(new Date(g.date))}</span></span>
+                                {foodCanManage && <button onClick={() => deleteFoodDay(g.date)} className="text-[12px]" style={{ color: "var(--ibs-danger)" }}>Xóa ngày</button>}
                               </div>
-                            );
-                          })}
-                        </div>
-                      )
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-[13px]">
+                                  <tbody>
+                                    {g.rows.map((r, i) => (
+                                      <tr key={r.id} className="border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
+                                        <td className="px-4 py-2 w-12" style={{ color: "var(--ibs-text-dim)" }}>{i + 1}</td>
+                                        <td className="px-4 py-2 font-medium">{r.name}</td>
+                                        <td className="px-4 py-2 w-16" style={{ color: "var(--ibs-text-dim)" }}>{r.unit}</td>
+                                        <td className="px-4 py-2 text-right w-24">{fmtNum(r.quantity)}</td>
+                                        <td className="px-4 py-2 text-right w-28">{fmtNum(r.unitPrice)}</td>
+                                        <td className="px-5 py-2 text-right font-medium w-32">{fmtNum(Math.round(r.quantity * r.unitPrice))}</td>
+                                      </tr>
+                                    ))}
+                                    <tr style={{ background: "rgba(234,179,8,0.08)" }}>
+                                      <td className="px-4 py-2.5 font-bold" colSpan={5}>Cộng</td>
+                                      <td className="px-5 py-2.5 text-right font-bold" style={{ color: "var(--ibs-accent)" }}>{fmtNum(dayTotal)}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 );
@@ -1350,9 +1474,14 @@ export default function NhaAnPage() {
           )}
 
           {showFoodForm && (
-            <FoodPurchaseModal defaultDate={foodFormDate}
+            <FoodPurchaseModal defaultDate={foodFormDate} menus={foodMenus} defaultMenuId={foodFormMenuId}
               onClose={() => setShowFoodForm(false)}
               onSuccess={(d) => { setShowFoodForm(false); const dt = new Date(d); setFoodMonth(dt.getMonth() + 1); setFoodYear(dt.getFullYear()); fetchFood(dt.getMonth() + 1, dt.getFullYear()); }} />
+          )}
+          {showMenuForm && (
+            <MenuFormModal menu={editingMenu}
+              onClose={() => { setShowMenuForm(false); setEditingMenu(null); }}
+              onSuccess={(d) => { setShowMenuForm(false); setEditingMenu(null); const dt = new Date(d); setFoodMonth(dt.getMonth() + 1); setFoodYear(dt.getFullYear()); fetchFood(dt.getMonth() + 1, dt.getFullYear()); }} />
           )}
           {showIssueForm && (
             <FoodIssueModal inventory={foodInventory} defaultDate={new Date().toISOString().slice(0, 10)}
@@ -2104,34 +2233,36 @@ function RegisterMealModal({ departments, subcontractors = [], selectedDate, onC
   );
 }
 
-function FoodPurchaseModal({ defaultDate, onClose, onSuccess }: {
-  defaultDate: string; onClose: () => void; onSuccess: (date: string) => void;
+// Thêm danh sách thực phẩm mua CHO 1 THỰC ĐƠN — chỉ nhập Tên + ĐVT + Số lượng (KHÔNG nhập đơn giá).
+//   Đơn giá để trống (0), người đi mua "Cập nhật Đơn giá" sau khi mua về.
+function FoodPurchaseModal({ defaultDate, menus, defaultMenuId, onClose, onSuccess }: {
+  defaultDate: string; menus: FoodMenu[]; defaultMenuId: string | null; onClose: () => void; onSuccess: (date: string) => void;
 }) {
-  const [date, setDate] = useState(defaultDate);
-  const [rows, setRows] = useState<{ name: string; unit: string; qty: string; price: string }[]>([{ name: "", unit: "Kg", qty: "", price: "" }]);
+  const [menuId, setMenuId] = useState<string>(defaultMenuId || "");
+  const [rows, setRows] = useState<{ name: string; unit: string; qty: string }[]>([{ name: "", unit: "Kg", qty: "" }]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const parseQty = (s: string) => parseFloat(s.replace(/\s/g, "").replace(",", ".")) || 0;
-  const parsePrice = (s: string) => parseInt(s.replace(/\D/g, "")) || 0;
+  const menu = menus.find((m) => m.id === menuId) || null;
+  const date = menu ? menu.date.slice(0, 10) : defaultDate;
 
-  function updateRow(i: number, k: "name" | "unit" | "qty" | "price", v: string) {
-    setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, [k]: k === "price" ? (v.replace(/\D/g, "") ? Number(v.replace(/\D/g, "")).toLocaleString("vi-VN") : "") : v } : r));
+  function updateRow(i: number, k: "name" | "unit" | "qty", v: string) {
+    setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, [k]: v } : r));
   }
-  function addRow() { setRows((prev) => [...prev, { name: "", unit: "Kg", qty: "", price: "" }]); }
+  function addRow() { setRows((prev) => [...prev, { name: "", unit: "Kg", qty: "" }]); }
   function removeRow(i: number) { setRows((prev) => prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev); }
-
-  const total = rows.reduce((s, r) => s + Math.round(parseQty(r.qty) * parsePrice(r.price)), 0);
 
   async function submit() {
     setError("");
+    if (!menuId) { setError("Vui lòng chọn Thực đơn"); return; }
     const items = rows
       .filter((r) => r.name.trim() && parseQty(r.qty) > 0)
-      .map((r) => ({ name: r.name.trim(), unit: r.unit.trim() || "Kg", quantity: parseQty(r.qty), unitPrice: parsePrice(r.price) }));
+      .map((r) => ({ name: r.name.trim(), unit: r.unit.trim() || "Kg", quantity: parseQty(r.qty) }));
     if (items.length === 0) { setError("Nhập ít nhất 1 thực phẩm có tên và số lượng > 0"); return; }
     setSaving(true);
     const res = await fetch("/api/v1/meals/food-purchases", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, items }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, menuId, items }),
     });
     setSaving(false);
     if (res.ok) { onSuccess(date); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
@@ -2139,30 +2270,38 @@ function FoodPurchaseModal({ defaultDate, onClose, onSuccess }: {
 
   const ic = "w-full rounded-lg px-2.5 py-1.5 text-[13px] border";
   const is = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const menuLabel = (m: FoodMenu) => `${formatDate(m.date)}${m.name ? ` · ${m.name}` : ""}${m.dishes.length ? ` — ${m.dishes.slice(0, 3).join(", ")}${m.dishes.length > 3 ? "…" : ""}` : ""}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="rounded-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-4">
-          <div className="text-[16px] font-bold">Thêm mua thực phẩm</div>
+          <div className="text-[16px] font-bold">Thêm danh sách thực phẩm</div>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
 
         <div className="mb-3">
-          <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày mua *</label>
-          <DateInput required value={date} onChange={(e) => setDate(e.target.value)} className={ic} style={is} />
+          <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Thực đơn *</label>
+          {defaultMenuId && menu ? (
+            <div className="rounded-lg px-2.5 py-1.5 text-[13px] border" style={is}>{menuLabel(menu)}</div>
+          ) : (
+            <select value={menuId} onChange={(e) => setMenuId(e.target.value)} className={ic} style={is}>
+              <option value="">-- Chọn thực đơn --</option>
+              {menus.map((m) => <option key={m.id} value={m.id}>{menuLabel(m)}</option>)}
+            </select>
+          )}
+          {menus.length === 0 && <div className="text-[11.5px] mt-1" style={{ color: "var(--ibs-danger)" }}>Chưa có thực đơn nào trong tháng — hãy tạo Thực đơn trước.</div>}
         </div>
 
+        <div className="text-[12px] mb-2" style={{ color: "var(--ibs-text-dim)" }}>Chỉ nhập <strong>tên + số lượng</strong>. Đơn giá nhập sau ở nút "Cập nhật Đơn giá".</div>
         <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: "var(--ibs-border)" }}>
           <table className="w-full text-[13px]">
             <thead>
               <tr style={{ background: "var(--ibs-bg)" }}>
                 <th className="text-left px-2 py-2 text-[11px] font-semibold w-8" style={{ color: "var(--ibs-text-dim)" }}>#</th>
                 <th className="text-left px-2 py-2 text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>Tên thực phẩm</th>
-                <th className="text-left px-2 py-2 text-[11px] font-semibold w-16" style={{ color: "var(--ibs-text-dim)" }}>ĐVT</th>
-                <th className="text-left px-2 py-2 text-[11px] font-semibold w-20" style={{ color: "var(--ibs-text-dim)" }}>SL</th>
-                <th className="text-left px-2 py-2 text-[11px] font-semibold w-28" style={{ color: "var(--ibs-text-dim)" }}>Đơn giá</th>
-                <th className="text-right px-2 py-2 text-[11px] font-semibold w-28" style={{ color: "var(--ibs-text-dim)" }}>Thành tiền</th>
+                <th className="text-left px-2 py-2 text-[11px] font-semibold w-20" style={{ color: "var(--ibs-text-dim)" }}>ĐVT</th>
+                <th className="text-left px-2 py-2 text-[11px] font-semibold w-24" style={{ color: "var(--ibs-text-dim)" }}>Số lượng</th>
                 <th className="w-8" />
               </tr>
             </thead>
@@ -2173,18 +2312,11 @@ function FoodPurchaseModal({ defaultDate, onClose, onSuccess }: {
                   <td className="px-2 py-1.5"><input value={r.name} onChange={(e) => updateRow(i, "name", e.target.value)} placeholder="Thịt lợn, rau..." className={ic} style={is} /></td>
                   <td className="px-2 py-1.5"><input value={r.unit} onChange={(e) => updateRow(i, "unit", e.target.value)} className={ic} style={is} /></td>
                   <td className="px-2 py-1.5"><input value={r.qty} onChange={(e) => updateRow(i, "qty", e.target.value)} inputMode="decimal" placeholder="0" className={ic} style={is} /></td>
-                  <td className="px-2 py-1.5"><input value={r.price} onChange={(e) => updateRow(i, "price", e.target.value)} inputMode="numeric" placeholder="0" className={ic} style={is} /></td>
-                  <td className="px-2 py-1.5 text-right font-medium">{fmtNum(Math.round(parseQty(r.qty) * parsePrice(r.price)))}</td>
                   <td className="px-1 py-1.5 text-center">
                     <button type="button" onClick={() => removeRow(i)} style={{ color: "var(--ibs-text-dim)" }}><X size={14} /></button>
                   </td>
                 </tr>
               ))}
-              <tr style={{ background: "rgba(234,179,8,0.08)" }}>
-                <td className="px-2 py-2 font-bold" colSpan={5}>Cộng</td>
-                <td className="px-2 py-2 text-right font-bold" style={{ color: "var(--ibs-accent)" }}>{fmtNum(total)}</td>
-                <td />
-              </tr>
             </tbody>
           </table>
         </div>
@@ -2193,6 +2325,78 @@ function FoodPurchaseModal({ defaultDate, onClose, onSuccess }: {
           <Plus size={14} /> Thêm dòng
         </button>
 
+        {error && <div className="text-[12px] text-red-500 mb-2">{error}</div>}
+        <div className="flex gap-2 justify-end">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
+          <button type="button" onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: "var(--ibs-accent)", color: "#fff", opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Đang lưu..." : "Lưu"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Tạo / sửa Thực đơn (ngày + nhãn tuỳ chọn + danh sách món ăn).
+function MenuFormModal({ menu, onClose, onSuccess }: {
+  menu: FoodMenu | null; onClose: () => void; onSuccess: (date: string) => void;
+}) {
+  const [date, setDate] = useState(menu ? menu.date.slice(0, 10) : new Date().toISOString().slice(0, 10));
+  const [name, setName] = useState(menu?.name || "");
+  const [dishes, setDishes] = useState<string[]>(menu && menu.dishes.length ? [...menu.dishes] : [""]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const setDish = (i: number, v: string) => setDishes((prev) => prev.map((d, idx) => (idx === i ? v : d)));
+  const addDish = () => setDishes((prev) => [...prev, ""]);
+  const removeDish = (i: number) => setDishes((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev));
+
+  async function submit() {
+    setError("");
+    if (!date) { setError("Chọn ngày"); return; }
+    const list = dishes.map((d) => d.trim()).filter(Boolean);
+    if (list.length === 0) { setError("Nhập ít nhất 1 món ăn"); return; }
+    setSaving(true);
+    const res = await fetch("/api/v1/meals/food-menus", {
+      method: menu ? "PATCH" : "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: menu?.id, date, name: name.trim() || null, dishes: list }),
+    });
+    setSaving(false);
+    if (res.ok) { onSuccess(date); } else { const d = await res.json(); setError(apiError(res.status, d.error)); }
+  }
+
+  const ic = "w-full rounded-lg px-2.5 py-1.5 text-[13px] border";
+  const is = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[16px] font-bold">{menu ? "Sửa Thực đơn" : "Thêm Thực đơn"}</div>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Ngày *</label>
+            <DateInput required value={date} onChange={(e) => setDate(e.target.value)} className={ic} style={is} />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Nhãn <span style={{ color: "var(--ibs-text-dim)" }}>(tuỳ chọn)</span></label>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="vd: Trưa / Tối" className={ic} style={is} />
+          </div>
+        </div>
+        <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Món ăn *</label>
+        <div className="space-y-1.5 mb-2">
+          {dishes.map((d, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <input value={d} onChange={(e) => setDish(i, e.target.value)} placeholder={`Món ${i + 1} (vd: Gà kho gừng)`} className={ic} style={is} />
+              {dishes.length > 1 && <button type="button" onClick={() => removeDish(i)} className="px-1" style={{ color: "var(--ibs-text-dim)" }}><X size={14} /></button>}
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={addDish} className="flex items-center gap-1 text-[12px] font-medium mb-3" style={{ color: "var(--ibs-accent)" }}>
+          <Plus size={14} /> Thêm món
+        </button>
         {error && <div className="text-[12px] text-red-500 mb-2">{error}</div>}
         <div className="flex gap-2 justify-end">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text-dim)" }}>Hủy</button>
