@@ -170,6 +170,7 @@ export default function XePage() {
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
   const [showNewBooking, setShowNewBooking] = useState(false);
   const [assignTarget, setAssignTarget] = useState<VehicleBooking | null>(null);
+  const [assignSeries, setAssignSeries] = useState(false); // chỉ định cho CẢ series (lịch cố định)
   const [editTripTarget, setEditTripTarget] = useState<VehicleBooking | null>(null); // người duyệt sửa chuyến chưa hoàn thành
   const [showExport, setShowExport] = useState(false);
   const [showNewVehicle, setShowNewVehicle] = useState(false);
@@ -278,21 +279,22 @@ export default function XePage() {
     fetchBookings();
     return true;
   }
-  async function approveSeries(seriesId: string) {
+  async function approveSeries(seriesId: string, driverName: string, vehicleId: string): Promise<boolean> {
     const res = await fetch(`/api/v1/vehicles/bookings/series/${seriesId}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "APPROVE" }),
+      body: JSON.stringify({ action: "APPROVE", driverName, ...(vehicleId ? { vehicleId } : {}) }),
     });
     const j = await res.json().catch(() => null);
-    if (!res.ok) { alert("Duyệt series thất bại: " + apiError(res.status, j?.error)); return; }
+    if (!res.ok) { await alertDialog("Duyệt series thất bại: " + apiError(res.status, j?.error)); return false; }
     const { approved, skipped, conflicts } = j.data || {};
     let msg = `Đã duyệt ${approved} phiếu.`;
     if (skipped > 0) {
       msg += `\n${skipped} phiếu conflict, giữ chờ duyệt:`;
       for (const c of (conflicts || []).slice(0, 5)) msg += `\n• ${c.date.split("-").reverse().join("/")} — trùng "${c.conflictDestination}"`;
     }
-    alert(msg);
+    await alertDialog(msg);
     fetchBookings();
+    return true;
   }
   async function cancelSeries(seriesId: string) {
     if (!(await confirmDialog({ title: "Huỷ cả series", message: "Huỷ toàn bộ series? Mọi phiếu chờ duyệt / đã duyệt trong series sẽ huỷ.", tone: "danger", confirmText: "Huỷ series" }))) return;
@@ -448,13 +450,13 @@ export default function XePage() {
       <div className="flex gap-1 flex-wrap">
         {/* Duyệt cả series — chỉ 3 approver, phiếu PENDING có seriesId */}
         {canApproveBooking && b.status === "PENDING" && b.seriesId && (
-          <button onClick={() => approveSeries(b.seriesId!)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(0,180,216,0.15)", color: "var(--ibs-accent)" }} title="Duyệt cả series">
+          <button onClick={() => { setAssignTarget(b); setAssignSeries(true); }} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(0,180,216,0.15)", color: "var(--ibs-accent)" }} title="Chỉ định lái xe/xe + duyệt cả series">
             <Check size={11} /> Duyệt series
           </button>
         )}
         {/* Người duyệt: Chỉ định lái xe → duyệt, hoặc Từ chối lịch (phiếu lẻ) */}
         {canApproveBooking && b.status === "PENDING" && !b.seriesId && (<>
-          <button onClick={() => setAssignTarget(b)} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}><Check size={11} /> Chỉ định</button>
+          <button onClick={() => { setAssignTarget(b); setAssignSeries(false); }} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "var(--ibs-success)" }}><Check size={11} /> Chỉ định</button>
           <button onClick={async () => { if (!(await confirmDialog({ title: "Từ chối phiếu", message: "Từ chối lịch đặt xe này?", tone: "danger", confirmText: "Từ chối" }))) return; handleBookingAction(b.id, "REJECT"); }} className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}><XCircle size={11} /> Từ chối</button>
         </>)}
         {/* Người DUYỆT: sửa chuyến CHƯA HOÀN THÀNH (PENDING/APPROVED, chưa hoàn thành) — đổi xe/lái xe/giờ.
@@ -876,9 +878,14 @@ export default function XePage() {
           onSuccess={() => { setShowNewBooking(false); setEditBooking(null); fetchBookings(); }} />
       )}
       {assignTarget && (
-        <AssignDriverModal booking={assignTarget} vehicles={vehicles}
-          onClose={() => setAssignTarget(null)}
-          onApprove={async (driver, vehicleId) => { const ok = await handleBookingAction(assignTarget.id, "APPROVE", driver, vehicleId); if (ok) setAssignTarget(null); }} />
+        <AssignDriverModal booking={assignTarget} vehicles={vehicles} isSeries={assignSeries}
+          onClose={() => { setAssignTarget(null); setAssignSeries(false); }}
+          onApprove={async (driver, vehicleId) => {
+            const ok = assignSeries
+              ? await approveSeries(assignTarget.seriesId!, driver, vehicleId)
+              : await handleBookingAction(assignTarget.id, "APPROVE", driver, vehicleId);
+            if (ok) { setAssignTarget(null); setAssignSeries(false); }
+          }} />
       )}
       {editTripTarget && (
         <EditTripModal
@@ -1185,8 +1192,8 @@ function CompleteBookingModal({ booking, onClose, onSuccess }: {
   );
 }
 
-function AssignDriverModal({ booking, vehicles, onClose, onApprove }: {
-  booking: VehicleBooking; vehicles: Vehicle[]; onClose: () => void; onApprove: (driver: string, vehicleId: string) => void | Promise<void>;
+function AssignDriverModal({ booking, vehicles, isSeries, onClose, onApprove }: {
+  booking: VehicleBooking; vehicles: Vehicle[]; isSeries?: boolean; onClose: () => void; onApprove: (driver: string, vehicleId: string) => void | Promise<void>;
 }) {
   const [driver, setDriver] = useState(booking.driverName || "");
   const [vehicleId, setVehicleId] = useState(booking.vehicleId);   // mặc định = xe user xin
@@ -1202,12 +1209,13 @@ function AssignDriverModal({ booking, vehicles, onClose, onApprove }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="rounded-2xl w-full max-w-sm mx-4 p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-4">
-          <div className="text-[16px] font-bold">Chỉ định lái xe</div>
+          <div className="text-[16px] font-bold">{isSeries ? "Chỉ định lái xe — cả lịch cố định" : "Chỉ định lái xe"}</div>
           <button onClick={onClose}><X size={18} /></button>
         </div>
+        {isSeries && <div className="text-[12px] mb-3 rounded-lg px-3 py-2" style={{ background: "rgba(0,180,216,0.1)", color: "var(--ibs-accent)" }}>Lái xe (và xe nếu đổi) sẽ áp cho <b>TẤT CẢ phiếu chờ duyệt</b> trong lịch cố định này. Phiếu trùng lịch sẽ được giữ chờ duyệt.</div>}
         <div className="text-[12px] mb-4 rounded-lg px-3 py-2" style={{ background: "var(--ibs-bg)", color: "var(--ibs-text-dim)" }}>
           <div>Xe user xin: <b style={{ color: "var(--ibs-text)" }}>{booking.vehicle.licensePlate}</b> · {booking.destination}</div>
-          <div>{formatDateTime(booking.startDate)} → {formatDateTime(booking.endDate)}</div>
+          <div>{isSeries ? "Lịch cố định (nhiều ngày)" : `${formatDateTime(booking.startDate)} → ${formatDateTime(booking.endDate)}`}</div>
           <div>Người đặt: {booking.requester.fullName} ({booking.requester.department.name})</div>
         </div>
         <label className="text-[12px] font-medium mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Xe (chỉ định) *</label>

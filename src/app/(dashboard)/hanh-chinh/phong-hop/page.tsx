@@ -450,6 +450,7 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
   const [filter, setFilter] = useState<"all" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "CANCELLED">("all");
   const [rejectTarget, setRejectTarget] = useState<Booking | null>(null);
   const [approveTarget, setApproveTarget] = useState<Booking | null>(null); // duyệt phiếu lẻ + (tuỳ chọn) đổi phòng
+  const [approveIsSeries, setApproveIsSeries] = useState(false);            // duyệt + đổi phòng cho CẢ series
   const [editTarget, setEditTarget] = useState<Booking | null>(null);       // sửa phiếu chưa họp xong
   const [processing, setProcessing] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -558,27 +559,6 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
       load();
     } finally { setProcessing(null); }
   }
-  async function approveSeries(id: string, seriesId: string) {
-    if (!(await confirmDialog("Duyệt cả series? Mỗi phiếu sẽ check conflict riêng — phiếu conflict được giữ chờ duyệt."))) return;
-    setProcessing(id);
-    let res: Response, j: any;
-    try {
-      res = await fetch(`/api/v1/room-bookings/series/${seriesId}/approve`, { method: "POST" });
-      j = await res.json().catch(() => null);
-    } finally { setProcessing(null); }
-    if (!res.ok) { await alertDialog(apiError(res.status, j?.error) || "Duyệt series thất bại"); return; }
-    const { approved, skipped, conflicts } = j.data || {};
-    let msg = `✓ Đã duyệt ${approved} phiếu.`;
-    if (skipped > 0) {
-      msg += `\n\n⚠️ ${skipped} phiếu bị conflict, giữ trạng thái Chờ duyệt:`;
-      for (const c of (conflicts || []).slice(0, 5)) {
-        msg += `\n• Ngày ${c.date.split("-").reverse().join("/")} — trùng với "${c.conflictTitle}"`;
-      }
-      if ((conflicts || []).length > 5) msg += `\n... và ${conflicts.length - 5} phiếu khác`;
-    }
-    await alertDialog(msg);
-    load();
-  }
   function toggle(id: string) {
     const n = new Set(expanded);
     if (n.has(id)) n.delete(id); else n.add(id);
@@ -666,13 +646,13 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   {canApprove && isPending && b.seriesId && (
-                    <button onClick={() => approveSeries(b.id, b.seriesId!)} disabled={processing === b.id} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "var(--ibs-accent)", opacity: processing === b.id ? 0.6 : 1 }} title="Duyệt cả series">
-                      <Check size={12} /> {processing === b.id ? "Đang duyệt..." : "Duyệt series"}
+                    <button onClick={() => { setApproveTarget(b); setApproveIsSeries(true); }} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "var(--ibs-accent)" }} title="Chỉ định phòng + duyệt cả series">
+                      <Check size={12} /> Duyệt series
                     </button>
                   )}
                   {canApprove && isPending && !b.seriesId && (
                     <>
-                      <button onClick={() => setApproveTarget(b)} disabled={processing === b.id} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "#10b981", opacity: processing === b.id ? 0.6 : 1 }}>
+                      <button onClick={() => { setApproveTarget(b); setApproveIsSeries(false); }} disabled={processing === b.id} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 text-white" style={{ background: "#10b981", opacity: processing === b.id ? 0.6 : 1 }}>
                         <Check size={12} /> {processing === b.id ? "Đang duyệt..." : "Duyệt"}
                       </button>
                       <button onClick={() => setRejectTarget(b)} disabled={processing === b.id} className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1" style={{ background: "rgba(239,68,68,0.15)", color: "var(--ibs-danger)" }}>
@@ -741,7 +721,7 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
       <RejectModal booking={rejectTarget} onClose={() => setRejectTarget(null)} onDone={() => { setRejectTarget(null); load(); }} />
     )}
     {approveTarget && (
-      <ApproveRoomModal booking={approveTarget} rooms={rooms} onClose={() => setApproveTarget(null)} onDone={() => { setApproveTarget(null); load(); }} />
+      <ApproveRoomModal booking={approveTarget} rooms={rooms} isSeries={approveIsSeries} onClose={() => { setApproveTarget(null); setApproveIsSeries(false); }} onDone={() => { setApproveTarget(null); setApproveIsSeries(false); load(); }} />
     )}
     {editTarget && (
       <EditBookingModal
@@ -757,8 +737,8 @@ function ListTab({ me }: { me: { id: string; employeeId: string | null; employee
   );
 }
 
-// ── Duyệt phiếu LẺ + (tuỳ chọn) chỉ định lại phòng ──
-function ApproveRoomModal({ booking, rooms, onClose, onDone }: { booking: Booking; rooms: Room[]; onClose: () => void; onDone: () => void }) {
+// ── Duyệt phiếu LẺ hoặc CẢ SERIES + (tuỳ chọn) chỉ định lại phòng ──
+function ApproveRoomModal({ booking, rooms, isSeries, onClose, onDone }: { booking: Booking; rooms: Room[]; isSeries?: boolean; onClose: () => void; onDone: () => void }) {
   const [roomId, setRoomId] = useState(booking.roomId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -767,12 +747,24 @@ function ApproveRoomModal({ booking, rooms, onClose, onDone }: { booking: Bookin
   async function doApprove() {
     setSaving(true); setError("");
     try {
-      const res = await fetch(`/api/v1/room-bookings/${booking.id}/approve`, {
+      const url = isSeries && booking.seriesId
+        ? `/api/v1/room-bookings/series/${booking.seriesId}/approve`
+        : `/api/v1/room-bookings/${booking.id}/approve`;
+      const res = await fetch(url, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ roomId }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setError(apiError(res.status, j?.error) || "Duyệt thất bại"); return; }
+      if (isSeries) {
+        const { approved, skipped, conflicts } = j.data || {};
+        let msg = `✓ Đã duyệt ${approved} phiếu.`;
+        if (skipped > 0) {
+          msg += `\n\n⚠️ ${skipped} phiếu trùng lịch, giữ Chờ duyệt:`;
+          for (const c of (conflicts || []).slice(0, 5)) msg += `\n• Ngày ${String(c.date).split("-").reverse().join("/")} — trùng "${c.conflictTitle}"`;
+        }
+        await alertDialog(msg);
+      }
       onDone();
     } finally { setSaving(false); }
   }
@@ -780,11 +772,12 @@ function ApproveRoomModal({ booking, rooms, onClose, onDone }: { booking: Bookin
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
       <div className="w-full max-w-[420px] rounded-xl border p-5" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[15px] font-semibold">Duyệt phiếu đặt phòng</h3>
+          <h3 className="text-[15px] font-semibold">{isSeries ? "Duyệt cả lịch cố định" : "Duyệt phiếu đặt phòng"}</h3>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
+        {isSeries && <div className="text-[12px] mb-3 rounded-lg px-3 py-2" style={{ background: "rgba(0,180,216,0.1)", color: "var(--ibs-accent)" }}>Phòng chỉ định (nếu đổi) sẽ áp cho <b>TẤT CẢ phiếu chờ duyệt</b> trong lịch cố định này. Phiếu trùng lịch sẽ được giữ chờ duyệt.</div>}
         <div className="text-[12px] mb-3" style={{ color: "var(--ibs-text-muted)" }}>
-          <b>{booking.title}</b> · {start.toLocaleDateString("vi-VN")} {pad2(start.getHours())}:{pad2(start.getMinutes())}–{pad2(end.getHours())}:{pad2(end.getMinutes())}
+          <b>{booking.title}</b> · {isSeries ? "Lịch cố định (nhiều ngày)" : `${start.toLocaleDateString("vi-VN")} ${pad2(start.getHours())}:${pad2(start.getMinutes())}–${pad2(end.getHours())}:${pad2(end.getMinutes())}`}
         </div>
         <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Phòng (đổi nếu cần)</label>
         <select value={roomId} onChange={(e) => setRoomId(e.target.value)} className="w-full px-3 py-2 rounded-lg border text-[13px]" style={{ background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" }}>

@@ -9,6 +9,8 @@ import { resolveScope, scopeAllowsDept } from "@/lib/data-scope.server";
 const Schema = z.object({
   action: z.enum(["APPROVE", "REJECT", "CANCEL"]),
   rejectedReason: z.string().optional(),
+  driverName: z.string().optional(),   // chỉ định LÁI XE cho cả series (bắt buộc khi APPROVE)
+  vehicleId: z.string().uuid().optional(),  // chỉ định lại XE cho cả series (tuỳ chọn)
 });
 
 // PUT /api/v1/vehicles/bookings/series/[seriesId]
@@ -71,7 +73,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ data: { seriesId, rejected: r.count } });
   }
 
-  // APPROVE
+  // APPROVE — phải CHỈ ĐỊNH lái xe (như phiếu lẻ); có thể đổi xe cho cả series.
+  if (!body.driverName?.trim()) {
+    return NextResponse.json({ error: { code: "DRIVER_REQUIRED", message: "Cần chỉ định lái xe cho cả series trước khi duyệt" } }, { status: 422 });
+  }
+  const newVehicleId = body.vehicleId || null;   // null = giữ xe của từng phiếu
+
   const pending = await prisma.vehicleBooking.findMany({
     where: { seriesId, status: "PENDING" },
     orderBy: { startDate: "asc" },
@@ -80,9 +87,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Series không có phiếu chờ duyệt" } }, { status: 404 });
   }
 
+  // Xe hiệu lực của mỗi phiếu = xe chỉ định chung (nếu có) hoặc xe của phiếu.
+  const effVehicle = (b: { vehicleId: string }) => newVehicleId || b.vehicleId;
   // Tối ưu: gộp còn 2 query (thay vì N query/phiếu — chậm 30s–1p với DB từ xa).
   const pendingIds = new Set(pending.map((b) => b.id));
-  const vehicleIds = Array.from(new Set(pending.map((b) => b.vehicleId)));
+  const vehicleIds = Array.from(new Set(pending.map((b) => effVehicle(b))));
   let minStart = pending[0].startDate, maxEnd = pending[0].endDate;
   for (const b of pending) {
     if (b.startDate < minStart) minStart = b.startDate;
@@ -102,7 +111,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const toApprove: string[] = [];
   const conflicts: { id: string; date: string; conflictDestination: string }[] = [];
   for (const b of pending) {
-    const c = approvedOthers.find((o) => o.vehicleId === b.vehicleId && o.startDate < b.endDate && o.endDate > b.startDate);
+    const c = approvedOthers.find((o) => o.vehicleId === effVehicle(b) && o.startDate < b.endDate && o.endDate > b.startDate);
     if (c) {
       conflicts.push({ id: b.id, date: b.startDate.toISOString().slice(0, 10), conflictDestination: c.destination });
       continue;
@@ -113,7 +122,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (toApprove.length > 0) {
     await prisma.vehicleBooking.updateMany({
       where: { id: { in: toApprove } },
-      data: { status: "APPROVED", approvedBy: userId, approvedAt: new Date() },
+      data: { status: "APPROVED", approvedBy: userId, approvedAt: new Date(), driverName: body.driverName.trim(), ...(newVehicleId ? { vehicleId: newVehicleId } : {}) },
     });
   }
 

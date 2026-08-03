@@ -16,6 +16,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ se
   const role = (session.user as any).role;
   const userId = (session.user as any).id;
   const { seriesId } = await params;
+  // Chỉ định lại PHÒNG cho cả series (tuỳ chọn). null/không gửi = giữ phòng của từng phiếu.
+  const body = await _req.json().catch(() => ({}));
+  const newRoomId: string | null = (body?.roomId && typeof body.roomId === "string") ? body.roomId : null;
 
   // Duyệt được khi: allowlist cũ HOẶC có quyền Duyệt ma trận + series thuộc Phạm vi (series cùng 1 người đặt).
   const sample = await prisma.roomBooking.findFirst({ where: { seriesId }, include: { requester: { select: { departmentId: true } } } });
@@ -39,8 +42,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ se
   // Tối ưu: thay vì N query/phiếu (chậm 30s–1p với DB từ xa), gộp còn 2 query —
   // lấy 1 lần mọi phiếu APPROVED khả nghi trong các phòng + khung thời gian, check trùng
   // trong bộ nhớ, rồi updateMany 1 lần.
+  // Phòng hiệu lực của mỗi phiếu = phòng chỉ định chung (nếu có) hoặc phòng của phiếu.
+  const effRoom = (b: { roomId: string }) => newRoomId || b.roomId;
   const pendingIds = new Set(pending.map((b) => b.id));
-  const roomIds = Array.from(new Set(pending.map((b) => b.roomId)));
+  const roomIds = Array.from(new Set(pending.map((b) => effRoom(b))));
   let minStart = pending[0].startTime, maxEnd = pending[0].endTime;
   for (const b of pending) {
     if (b.startTime < minStart) minStart = b.startTime;
@@ -60,7 +65,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ se
   const toApprove: string[] = [];
   const conflicts: { id: string; date: string; conflictTitle: string }[] = [];
   for (const b of pending) {
-    const c = approvedOthers.find((o) => o.roomId === b.roomId && o.startTime < b.endTime && o.endTime > b.startTime);
+    const c = approvedOthers.find((o) => o.roomId === effRoom(b) && o.startTime < b.endTime && o.endTime > b.startTime);
     if (c) {
       conflicts.push({ id: b.id, date: b.startTime.toISOString().slice(0, 10), conflictTitle: c.title });
       continue;
@@ -71,7 +76,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ se
   if (toApprove.length > 0) {
     await prisma.roomBooking.updateMany({
       where: { id: { in: toApprove } },
-      data: { status: "APPROVED", approvedById: userId, approvedAt: new Date() },
+      data: { status: "APPROVED", approvedById: userId, approvedAt: new Date(), ...(newRoomId ? { roomId: newRoomId } : {}) },
     });
   }
 
