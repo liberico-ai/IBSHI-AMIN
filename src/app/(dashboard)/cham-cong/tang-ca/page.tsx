@@ -114,6 +114,35 @@ type ProjBlock = { projectCode: string; groups: ProjGroup[]; reason: string };
 const newGroup = (): ProjGroup => ({ key: "", startTime: "17:30", endTime: "20:00", memberIds: [] });
 const blockMembers = (b: ProjBlock) => Array.from(new Set(b.groups.flatMap((g) => g.memberIds)));
 
+// Checklist chọn NV có Ô GÕ TÌM (lọc theo tên hoặc mã NV) — chỉ lọc trong danh sách đã truyền vào
+//   (đã scope sẵn theo Xưởng/phòng). Hiển thị mã NV bên cạnh để phân biệt trùng tên.
+type PickMember = { id: string; name: string; code?: string | null; dept?: string; outside?: boolean };
+function MemberPicker({ members, selected, onToggle, emptyText }: {
+  members: PickMember[]; selected: string[]; onToggle: (id: string) => void; emptyText?: string;
+}) {
+  const [q, setQ] = useState("");
+  const qq = q.trim().toLowerCase();
+  const filtered = qq ? members.filter((m) => m.name.toLowerCase().includes(qq) || (m.code || "").toLowerCase().includes(qq)) : members;
+  return (
+    <div className="rounded-md border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg-card)" }}>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔎 Gõ tên hoặc mã NV để tìm..."
+        className="w-full px-3 py-1.5 text-[12.5px] outline-none border-b" style={{ background: "transparent", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }} />
+      <div className="max-h-[150px] overflow-y-auto">
+        {members.length === 0 ? (
+          <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{emptyText || "Chưa có nhân sự."}</div>
+        ) : filtered.length === 0 ? (
+          <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không tìm thấy nhân sự khớp.</div>
+        ) : filtered.map((m) => (
+          <label key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer hover:bg-white/[0.04]">
+            <input type="checkbox" checked={selected.includes(m.id)} onChange={() => onToggle(m.id)} />
+            <span>{m.name}{m.code ? <span className="text-[11px] font-mono" style={{ color: "var(--ibs-text-dim)" }}> · {m.code}</span> : null}{m.dept ? <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}> · {m.dept}</span> : null}{m.outside ? <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}> (ngoài phạm vi)</span> : null}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── New OT Dialog ──────────────────────────────────────────────────────────────
 function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (item: OTRequest) => void }) {
   const [form, setForm] = useState({ date: "", startTime: "17:30", endTime: "20:00", reason: "" });
@@ -121,7 +150,7 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
   const [memberProjects, setMemberProjects] = useState<Record<string, ProjAlloc[]>>({});
   // Lý do tăng ca theo TỪNG NV: { employeeId: "lý do" }
   const [memberReasons, setMemberReasons] = useState<Record<string, string>>({});
-  const [emps, setEmps] = useState<{ id: string; fullName: string; team?: { id: string; name: string } | null; department?: { id: string; name: string } | null }[]>([]);
+  const [emps, setEmps] = useState<{ id: string; fullName: string; code?: string | null; team?: { id: string; name: string } | null; department?: { id: string; name: string } | null }[]>([]);
   const [empsLoaded, setEmpsLoaded] = useState(false);
   const [groupKey, setGroupKey] = useState(""); // "dept:<id>" hoặc "team:<id>"
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -430,16 +459,7 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           {groupKey && (
             <div>
               <label className={labelCls} style={labelStyle}>Nhân sự tăng ca <span style={{ color: "var(--ibs-danger)" }}>*</span> <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>({memberIds.length}/{groupMembers.length})</span></label>
-              <div className="max-h-[160px] overflow-y-auto rounded-lg border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg)" }}>
-                {groupMembers.length === 0 ? (
-                  <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Nhóm này chưa có nhân sự đang làm.</div>
-                ) : groupMembers.map((m) => (
-                  <label key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer hover:bg-white/[0.04]">
-                    <input type="checkbox" checked={memberIds.includes(m.id)} onChange={() => toggleMember(m.id)} />
-                    {m.fullName}
-                  </label>
-                ))}
-              </div>
+              <MemberPicker members={groupMembers.map((m) => ({ id: m.id, name: m.fullName, code: m.code }))} selected={memberIds} onToggle={toggleMember} emptyText="Nhóm này chưa có nhân sự đang làm." />
             </div>
           )}
 
@@ -523,20 +543,11 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
                               <div className="text-[10.5px] pl-1 mt-0.5" style={{ color: gh > 0 ? "var(--ibs-text-dim)" : "var(--ibs-danger)" }}>
                                 {gh > 0 ? <>= {gh}h · <strong style={{ color: "var(--ibs-accent)" }}>{fmtRateParts(gParts)}</strong>{gParts.some((p) => p.night) ? " · có đêm" : ""}</> : "Khung giờ không hợp lệ (qua đêm → tách 2 đơn: …→00:00 và 00:00→…)"}
                               </div>
-                              {/* Nhân sự CỦA xưởng này (ngay dưới dòng xưởng) */}
-                              {g.key && (<>
-                                <div className="mt-1 max-h-[130px] overflow-y-auto rounded-md border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg-card)" }}>
-                                  {membersOfKey(g.key).length === 0 ? (
-                                    <div className="px-3 py-1.5 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Xưởng này chưa có nhân sự.</div>
-                                  ) : membersOfKey(g.key).map((m) => (
-                                    <label key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer hover:bg-white/[0.04]">
-                                      <input type="checkbox" checked={g.memberIds.includes(m.id)} onChange={() => toggleGroupMember(idx, gi, m.id)} />
-                                      <span>{m.fullName}</span>
-                                    </label>
-                                  ))}
-                                </div>
+                              {/* Nhân sự CỦA xưởng này (ngay dưới dòng xưởng) — gõ tên/mã NV để tìm */}
+                              {g.key && (<div className="mt-1">
+                                <MemberPicker members={membersOfKey(g.key).map((m) => ({ id: m.id, name: m.fullName, code: m.code }))} selected={g.memberIds} onToggle={(id) => toggleGroupMember(idx, gi, id)} emptyText="Xưởng này chưa có nhân sự." />
                                 <div className="text-[11px] mt-0.5 pl-1" style={{ color: "var(--ibs-text-dim)" }}>Số người đang chọn: <strong style={{ color: "var(--ibs-accent)" }}>{g.memberIds.length}</strong></div>
-                              </>)}
+                              </div>)}
                             </div>
                           );
                         })}
@@ -909,7 +920,7 @@ export default function TangCaPage() {
 // ── Edit OT Dialog — sửa đơn CHƯA duyệt: ngày / khung giờ + CHI TIẾT NV × dự án × giờ × lý do ──────────
 function EditOTDialog({ target, onClose, onSuccess }: { target: OTRequest; onClose: () => void; onSuccess: (item: OTRequest) => void }) {
   const [dateStr, setDateStr] = useState(String(target.date).slice(0, 10));
-  const [emps, setEmps] = useState<{ id: string; fullName: string; team?: { id: string; name: string } | null; department?: { id: string; name: string } | null }[]>([]);
+  const [emps, setEmps] = useState<{ id: string; fullName: string; code?: string | null; team?: { id: string; name: string } | null; department?: { id: string; name: string } | null }[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -995,13 +1006,13 @@ function EditOTDialog({ target, onClose, onSuccess }: { target: OTRequest; onClo
   const otRate = dateStr ? ((): number => { const d = new Date(dateStr).getDay(); return d === 0 || d === 6 ? 2.0 : 1.5; })() : target.otRate;
 
   // NV hiển thị cho 1 XƯỞNG-group = NV thuộc xưởng (theo key) ∪ NV đã có trong group (giữ NV ngoài phạm vi).
-  function groupMemberRows(g: ProjGroup) {
-    const seen = new Set<string>(); const out: { id: string; name: string; dept?: string; outside?: boolean }[] = [];
-    for (const m of membersOfKey(g.key)) { seen.add(m.id); out.push({ id: m.id, name: m.fullName, dept: m.department?.name || m.team?.name }); }
+  function groupMemberRows(g: ProjGroup): PickMember[] {
+    const seen = new Set<string>(); const out: PickMember[] = [];
+    for (const m of membersOfKey(g.key)) { seen.add(m.id); out.push({ id: m.id, name: m.fullName, code: m.code, dept: m.department?.name || m.team?.name }); }
     for (const id of g.memberIds) if (!seen.has(id)) {
       seen.add(id);
       const e = emps.find((x) => x.id === id);
-      out.push({ id, name: nameById.get(id) || id, dept: e?.department?.name || e?.team?.name, outside: !e });
+      out.push({ id, name: nameById.get(id) || id, code: e?.code, dept: e?.department?.name || e?.team?.name, outside: !e });
     }
     return out;
   }
@@ -1122,23 +1133,13 @@ function EditOTDialog({ target, onClose, onSuccess }: { target: OTRequest; onClo
                               <div className="text-[10.5px] pl-1 mt-0.5" style={{ color: gh > 0 ? "var(--ibs-text-dim)" : "var(--ibs-danger)" }}>
                                 {gh > 0 ? <>= {gh}h · <strong style={{ color: "var(--ibs-accent)" }}>{fmtRateParts(gParts)}</strong>{gParts.some((p) => p.night) ? " · có đêm" : ""}</> : "Khung giờ không hợp lệ (qua đêm → tách 2 đơn: …→00:00 và 00:00→…)"}
                               </div>
-                              {/* Nhân sự CỦA xưởng này (ngay dưới dòng xưởng) */}
-                              {(g.key || g.memberIds.length > 0) && (() => {
-                                const rows = groupMemberRows(g);
-                                return (<>
-                                  <div className="mt-1 max-h-[130px] overflow-y-auto rounded-md border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg-card)" }}>
-                                    {rows.length === 0 ? (
-                                      <div className="px-3 py-1.5 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Xưởng này chưa có nhân sự.</div>
-                                    ) : rows.map((m) => (
-                                      <label key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer hover:bg-white/[0.04]">
-                                        <input type="checkbox" checked={g.memberIds.includes(m.id)} onChange={() => toggleGroupMember(idx, gi, m.id)} />
-                                        <span>{m.name}{m.outside ? <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}> (ngoài phạm vi)</span> : null}</span>
-                                      </label>
-                                    ))}
-                                  </div>
+                              {/* Nhân sự CỦA xưởng này (ngay dưới dòng xưởng) — gõ tên/mã NV để tìm */}
+                              {(g.key || g.memberIds.length > 0) && (
+                                <div className="mt-1">
+                                  <MemberPicker members={groupMemberRows(g)} selected={g.memberIds} onToggle={(id) => toggleGroupMember(idx, gi, id)} emptyText="Xưởng này chưa có nhân sự." />
                                   <div className="text-[11px] mt-0.5 pl-1" style={{ color: "var(--ibs-text-dim)" }}>Số người đang chọn: <strong style={{ color: "var(--ibs-accent)" }}>{g.memberIds.length}</strong></div>
-                                </>);
-                              })()}
+                                </div>
+                              )}
                             </div>
                           );
                         })}

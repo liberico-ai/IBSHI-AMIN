@@ -90,9 +90,11 @@ function NewLeaveDialog({ onClose, onSuccess, editing, proxy }: { onClose: () =>
     proofUrls: (editing?.proofUrls || []) as string[],
     halfDay: !!editing && editing.totalDays === 0.5,   // nghỉ nửa ngày (0,5 công)
   });
-  // ĐĂNG KÝ HỘ: chọn nhân sự được nghỉ.
+  // ĐĂNG KÝ HỘ: chọn nhân sự được nghỉ (gõ tên/mã NV để tìm rồi chọn).
   const [targetEmployeeId, setTargetEmployeeId] = useState("");
   const [regEmps, setRegEmps] = useState<RegEmployee[]>([]);
+  const [empQuery, setEmpQuery] = useState("");
+  const [empOpen, setEmpOpen] = useState(false);
   useEffect(() => {
     if (!proxy) return;
     fetch("/api/v1/leave-requests/registerable-employees").then((r) => r.json()).then((res) => setRegEmps(res.data || [])).catch(() => {});
@@ -209,11 +211,36 @@ function NewLeaveDialog({ onClose, onSuccess, editing, proxy }: { onClose: () =>
           {proxy && !editing && (
             <div className="rounded-lg p-3" style={{ background: "rgba(0,180,216,0.06)", border: "1px solid var(--ibs-accent)" }}>
               <label className={labelCls} style={{ color: "var(--ibs-accent)" }}>🤝 Nhân sự nghỉ (đăng ký hộ) *</label>
-              <select required value={targetEmployeeId} onChange={(e) => setTargetEmployeeId(e.target.value)} className={inputCls} style={inputStyle}>
-                <option value="">-- Chọn nhân sự --</option>
-                {regEmps.map((e2) => <option key={e2.id} value={e2.id}>{e2.fullName} ({e2.code}{e2.department?.name ? " · " + e2.department.name : ""})</option>)}
-              </select>
-              <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Đơn sẽ đứng tên nhân sự này; cả bạn và họ đều thấy đơn.</p>
+              {(() => {
+                const sel = regEmps.find((e2) => e2.id === targetEmployeeId) || null;
+                if (sel) return (
+                  <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px]" style={inputStyle}>
+                    <span>{sel.fullName} <span className="font-mono text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>· {sel.code}{sel.department?.name ? " · " + sel.department.name : ""}</span></span>
+                    <button type="button" onClick={() => { setTargetEmployeeId(""); setEmpQuery(""); setEmpOpen(true); }} className="ml-auto text-[12px]" style={{ color: "var(--ibs-accent)" }}>Đổi</button>
+                  </div>
+                );
+                const qq = empQuery.trim().toLowerCase();
+                const filtered = qq ? regEmps.filter((e2) => e2.fullName.toLowerCase().includes(qq) || (e2.code || "").toLowerCase().includes(qq)) : regEmps;
+                return (
+                  <div className="relative">
+                    <input value={empQuery} onChange={(e) => { setEmpQuery(e.target.value); setEmpOpen(true); }} onFocus={() => setEmpOpen(true)} onBlur={() => setTimeout(() => setEmpOpen(false), 150)}
+                      placeholder="🔎 Gõ tên hoặc mã NV để tìm..." className={inputCls} style={inputStyle} />
+                    {empOpen && (
+                      <div className="absolute z-20 left-0 right-0 mt-1 max-h-[190px] overflow-y-auto rounded-lg border shadow-xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+                        {filtered.length === 0 ? (
+                          <div className="px-3 py-2 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{regEmps.length === 0 ? "Không có nhân sự để chọn." : "Không tìm thấy nhân sự khớp."}</div>
+                        ) : filtered.slice(0, 50).map((e2) => (
+                          <button type="button" key={e2.id} onMouseDown={(ev) => ev.preventDefault()} onClick={() => { setTargetEmployeeId(e2.id); setEmpOpen(false); }}
+                            className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-white/[0.05]">
+                            {e2.fullName} <span className="font-mono text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>· {e2.code}{e2.department?.name ? " · " + e2.department.name : ""}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              <p className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Gõ tên/mã NV để tìm rồi chọn. Đơn sẽ đứng tên nhân sự này; cả bạn và họ đều thấy đơn.</p>
             </div>
           )}
 

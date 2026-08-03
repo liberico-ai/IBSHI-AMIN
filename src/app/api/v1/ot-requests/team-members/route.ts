@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest) {
   const data = await prisma.employee.findMany({
     where,
     select: {
-      id: true, fullName: true,
+      id: true, fullName: true, code: true,
       team: { select: { id: true, name: true } },
       department: { select: { id: true, name: true } },
     },
