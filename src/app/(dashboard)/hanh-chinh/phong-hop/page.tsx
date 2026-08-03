@@ -812,6 +812,26 @@ function EditBookingModal({ target, seriesBookings, rooms, onClose, onDone }: { 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  // Sửa ĐỒNG LOẠT cả series (áp cho mọi buổi chưa họp xong). Mặc định lấy từ buổi target.
+  const [seRoom, setSeRoom] = useState(target.roomId);
+  const [seFrom, setSeFrom] = useState(hhmm(new Date(target.startTime)));
+  const [seTo, setSeTo] = useState(hhmm(new Date(target.endTime)));
+  const [seTitle, setSeTitle] = useState(target.title);
+  const [savingSeries, setSavingSeries] = useState(false);
+  const [seriesErr, setSeriesErr] = useState("");
+  async function saveSeries() {
+    if (!seFrom || !seTo) { setSeriesErr("Nhập đủ giờ bắt đầu/kết thúc"); return; }
+    setSavingSeries(true); setSeriesErr("");
+    try {
+      const res = await fetch(`/api/v1/room-bookings/series/${target.seriesId}/edit`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: seRoom, startTime: seFrom, endTime: seTo, title: seTitle.trim() }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setSeriesErr(apiError(res.status, j?.error) || "Sửa thất bại"); return; }
+      onDone();
+    } finally { setSavingSeries(false); }
+  }
 
   useEffect(() => {
     if (!picked) return;
@@ -849,7 +869,31 @@ function EditBookingModal({ target, seriesBookings, rooms, onClose, onDone }: { 
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
         </div>
 
-        {isSeries && (
+        {isSeries && (<>
+          {/* 1) Sửa ĐỒNG LOẠT cả series */}
+          <div className="rounded-lg border p-3 mb-3" style={{ borderColor: "var(--ibs-accent)", background: "rgba(0,180,216,0.06)" }}>
+            <div className="text-[13px] font-semibold mb-2" style={{ color: "var(--ibs-accent)" }}>Sửa CẢ lịch cố định <span className="font-normal text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>(áp cho mọi buổi chưa họp xong)</span></div>
+            <div className="space-y-2">
+              <div>
+                <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Phòng</label>
+                <select value={seRoom} onChange={(e) => setSeRoom(e.target.value)} className={inputCls} style={inputStyle}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.capacity} người)</option>)}</select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Từ giờ</label><input type="time" value={seFrom} onChange={(e) => setSeFrom(e.target.value)} className={inputCls} style={inputStyle} /></div>
+                <div><label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Đến giờ</label><input type="time" value={seTo} onChange={(e) => setSeTo(e.target.value)} className={inputCls} style={inputStyle} /></div>
+              </div>
+              <div><label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Tiêu đề</label><input value={seTitle} onChange={(e) => setSeTitle(e.target.value)} className={inputCls} style={inputStyle} /></div>
+            </div>
+            {seriesErr && <div className="text-[12px] mt-2 px-2 py-1.5 rounded" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{seriesErr}</div>}
+            <button type="button" onClick={saveSeries} disabled={savingSeries} className="mt-2 w-full py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: savingSeries ? "rgba(0,180,216,0.5)" : "var(--ibs-accent)" }}>{savingSeries ? "Đang lưu..." : "Lưu cho CẢ series"}</button>
+          </div>
+          {/* Ngăn cách */}
+          <div className="flex items-center gap-2 my-3">
+            <div className="flex-1 h-px" style={{ background: "var(--ibs-border)" }} />
+            <span className="text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>HOẶC sửa riêng 1 ngày</span>
+            <div className="flex-1 h-px" style={{ background: "var(--ibs-border)" }} />
+          </div>
+          {/* 2) Sửa riêng 1 ngày */}
           <div className="mb-3">
             <label className="text-[12px] mb-1 block" style={{ color: "var(--ibs-text-dim)" }}>Chọn ngày cần sửa (chỉ ngày của lịch này)</label>
             <select value={pickedId} onChange={(e) => setPickedId(e.target.value)} className={inputCls} style={inputStyle}>
@@ -861,7 +905,7 @@ function EditBookingModal({ target, seriesBookings, rooms, onClose, onDone }: { 
             </select>
             {editable.length === 0 && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Không còn ngày nào chưa họp xong để sửa.</div>}
           </div>
-        )}
+        </>)}
 
         {picked && (
           <div className="space-y-3">

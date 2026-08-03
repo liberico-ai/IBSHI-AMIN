@@ -1264,6 +1264,30 @@ function EditTripModal({ target, seriesBookings, vehicles, onClose, onDone }: {
   const [passengers, setPassengers] = useState("1");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Sửa ĐỒNG LOẠT cả series (áp cho mọi buổi chưa hoàn thành). Mặc định lấy từ buổi target.
+  const t0 = vnParts(target.startDate), t1 = vnParts(target.endDate);
+  const [seV, setSeV] = useState(target.vehicleId);
+  const [seDrv, setSeDrv] = useState(target.driverName || "");
+  const [seST, setSeST] = useState(t0.time);
+  const [seET, setSeET] = useState(t1.time);
+  const [seDest, setSeDest] = useState(target.destination || "");
+  const [sePax, setSePax] = useState(String(target.passengers ?? 1));
+  const [savingSeries, setSavingSeries] = useState(false);
+  const [seriesErr, setSeriesErr] = useState("");
+
+  async function saveSeries() {
+    if (!seST || !seET) { setSeriesErr("Nhập đủ giờ đi/về"); return; }
+    setSavingSeries(true); setSeriesErr("");
+    try {
+      const res = await fetch(`/api/v1/vehicles/bookings/series/${target.seriesId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "EDIT", vehicleId: seV, driverName: seDrv || null, startTime: seST, endTime: seET, destination: seDest.trim(), passengers: parseInt(sePax) || 1 }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setSeriesErr(apiError(res.status, j?.error) || "Sửa thất bại"); return; }
+      onDone();
+    } finally { setSavingSeries(false); }
+  }
 
   useEffect(() => {
     if (!picked) return;
@@ -1303,7 +1327,30 @@ function EditTripModal({ target, seriesBookings, vehicles, onClose, onDone }: {
           <button onClick={onClose}><X size={18} /></button>
         </div>
 
-        {isSeries && (
+        {isSeries && (<>
+          {/* 1) Sửa ĐỒNG LOẠT cả series */}
+          <div className="rounded-lg border p-3 mb-3" style={{ borderColor: "var(--ibs-accent)", background: "rgba(0,180,216,0.06)" }}>
+            <div className="text-[13px] font-semibold mb-2" style={{ color: "var(--ibs-accent)" }}>Sửa CẢ lịch cố định <span className="font-normal text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>(áp cho mọi buổi chưa hoàn thành)</span></div>
+            <div className="space-y-2">
+              <div><label className={lbl} style={lblStyle}>Xe</label><select value={seV} onChange={(e) => setSeV(e.target.value)} className={inputCls} style={inputStyle}>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.licensePlate} — {v.model}</option>)}</select></div>
+              <div><label className={lbl} style={lblStyle}>Lái xe</label><select value={seDrv} onChange={(e) => setSeDrv(e.target.value)} className={inputCls} style={inputStyle}><option value="">Chưa chỉ định</option>{VEHICLE_DRIVERS.map((d) => <option key={d} value={d}>{d}</option>)}</select></div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><label className={lbl} style={lblStyle}>Giờ đi</label><input type="time" value={seST} onChange={(e) => setSeST(e.target.value)} className={inputCls} style={inputStyle} /></div>
+                <div><label className={lbl} style={lblStyle}>Giờ về</label><input type="time" value={seET} onChange={(e) => setSeET(e.target.value)} className={inputCls} style={inputStyle} /></div>
+              </div>
+              <div><label className={lbl} style={lblStyle}>Điểm đến</label><input value={seDest} onChange={(e) => setSeDest(e.target.value)} className={inputCls} style={inputStyle} /></div>
+              <div><label className={lbl} style={lblStyle}>Số người</label><input type="number" min={1} value={sePax} onChange={(e) => setSePax(e.target.value)} className={inputCls} style={inputStyle} /></div>
+            </div>
+            {seriesErr && <div className="text-[12px] mt-2 px-2 py-1.5 rounded" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{seriesErr}</div>}
+            <button type="button" onClick={saveSeries} disabled={savingSeries} className="mt-2 w-full py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: savingSeries ? "rgba(0,180,216,0.5)" : "var(--ibs-accent)" }}>{savingSeries ? "Đang lưu..." : "Lưu cho CẢ series"}</button>
+          </div>
+          {/* Ngăn cách */}
+          <div className="flex items-center gap-2 my-3">
+            <div className="flex-1 h-px" style={{ background: "var(--ibs-border)" }} />
+            <span className="text-[11px] font-semibold" style={{ color: "var(--ibs-text-dim)" }}>HOẶC sửa riêng 1 ngày</span>
+            <div className="flex-1 h-px" style={{ background: "var(--ibs-border)" }} />
+          </div>
+          {/* 2) Sửa riêng 1 ngày */}
           <div className="mb-3">
             <label className={lbl} style={lblStyle}>Chọn ngày cần sửa (chỉ ngày của lịch này)</label>
             <select value={pickedId} onChange={(e) => setPickedId(e.target.value)} className={inputCls} style={inputStyle}>
@@ -1315,7 +1362,7 @@ function EditTripModal({ target, seriesBookings, vehicles, onClose, onDone }: {
             </select>
             {editable.length === 0 && <div className="text-[11px] mt-1" style={{ color: "var(--ibs-text-dim)" }}>Không còn ngày nào chưa hoàn thành để sửa.</div>}
           </div>
-        )}
+        </>)}
 
         {picked && (
           <div className="space-y-3">

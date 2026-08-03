@@ -7,10 +7,15 @@ import { canUser } from "@/lib/permission-catalog";
 import { resolveScope, scopeAllowsDept } from "@/lib/data-scope.server";
 
 const Schema = z.object({
-  action: z.enum(["APPROVE", "REJECT", "CANCEL"]),
+  action: z.enum(["APPROVE", "REJECT", "CANCEL", "EDIT"]),
   rejectedReason: z.string().optional(),
   driverName: z.string().optional(),   // chỉ định LÁI XE cho cả series (bắt buộc khi APPROVE)
   vehicleId: z.string().uuid().optional(),  // chỉ định lại XE cho cả series (tuỳ chọn)
+  // EDIT đồng loạt — áp cho MỌI buổi CHƯA hoàn thành (giữ NGÀY mỗi buổi, chỉ đổi giờ + các trường sau):
+  startTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),  // giờ đi HH:mm
+  endTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),    // giờ về HH:mm (<= giờ đi → qua ngày)
+  destination: z.string().optional(),
+  passengers: z.number().int().min(1).optional(),
 });
 
 // PUT /api/v1/vehicles/bookings/series/[seriesId]
@@ -55,6 +60,40 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       data: { status: "CANCELLED" },
     });
     return NextResponse.json({ data: { seriesId, cancelled: r.count } });
+  }
+
+  // EDIT đồng loạt — chỉ approver. Áp cho MỌI buổi CHƯA hoàn thành (PENDING/APPROVED, completedAt null):
+  //   giữ NGÀY mỗi buổi, chỉ đổi GIỜ đi/về + xe/lái xe/điểm đến/số khách.
+  if (body.action === "EDIT") {
+    if (!isApprover) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Bạn không có quyền sửa lịch đặt xe" } }, { status: 403 });
+    }
+    if (!body.startTime || !body.endTime) {
+      return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Cần giờ đi và giờ về" } }, { status: 400 });
+    }
+    const items = await prisma.vehicleBooking.findMany({ where: { seriesId, status: { in: ["PENDING", "APPROVED"] }, completedAt: null } });
+    if (items.length === 0) {
+      return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không còn buổi nào chưa hoàn thành để sửa" } }, { status: 404 });
+    }
+    for (const b of items) {
+      const dateStr = new Date(b.startDate.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10); // NGÀY (VN) của buổi
+      const newStart = new Date(`${dateStr}T${body.startTime}:00+07:00`);
+      const endDateStr = body.endTime <= body.startTime
+        ? new Date(new Date(`${dateStr}T00:00:00+07:00`).getTime() + 86400000).toISOString().slice(0, 10) // qua nửa đêm → +1 ngày
+        : dateStr;
+      const newEnd = new Date(`${endDateStr}T${body.endTime}:00+07:00`);
+      await prisma.vehicleBooking.update({
+        where: { id: b.id },
+        data: {
+          startDate: newStart, endDate: newEnd,
+          ...(body.vehicleId ? { vehicleId: body.vehicleId } : {}),
+          ...(body.driverName !== undefined ? { driverName: body.driverName?.trim() || null } : {}),
+          ...(body.destination !== undefined ? { destination: body.destination } : {}),
+          ...(body.passengers !== undefined ? { passengers: body.passengers } : {}),
+        },
+      });
+    }
+    return NextResponse.json({ data: { seriesId, updated: items.length } });
   }
 
   // APPROVE / REJECT — chỉ approver
