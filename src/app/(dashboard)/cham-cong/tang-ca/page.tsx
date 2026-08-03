@@ -524,7 +524,7 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
                                 {gh > 0 ? <>= {gh}h · <strong style={{ color: "var(--ibs-accent)" }}>{fmtRateParts(gParts)}</strong>{gParts.some((p) => p.night) ? " · có đêm" : ""}</> : "Khung giờ không hợp lệ (qua đêm → tách 2 đơn: …→00:00 và 00:00→…)"}
                               </div>
                               {/* Nhân sự CỦA xưởng này (ngay dưới dòng xưởng) */}
-                              {g.key && (
+                              {g.key && (<>
                                 <div className="mt-1 max-h-[130px] overflow-y-auto rounded-md border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg-card)" }}>
                                   {membersOfKey(g.key).length === 0 ? (
                                     <div className="px-3 py-1.5 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Xưởng này chưa có nhân sự.</div>
@@ -535,7 +535,8 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
                                     </label>
                                   ))}
                                 </div>
-                              )}
+                                <div className="text-[11px] mt-0.5 pl-1" style={{ color: "var(--ibs-text-dim)" }}>Số người đang chọn: <strong style={{ color: "var(--ibs-accent)" }}>{g.memberIds.length}</strong></div>
+                              </>)}
                             </div>
                           );
                         })}
@@ -1124,7 +1125,7 @@ function EditOTDialog({ target, onClose, onSuccess }: { target: OTRequest; onClo
                               {/* Nhân sự CỦA xưởng này (ngay dưới dòng xưởng) */}
                               {(g.key || g.memberIds.length > 0) && (() => {
                                 const rows = groupMemberRows(g);
-                                return (
+                                return (<>
                                   <div className="mt-1 max-h-[130px] overflow-y-auto rounded-md border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg-card)" }}>
                                     {rows.length === 0 ? (
                                       <div className="px-3 py-1.5 text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Xưởng này chưa có nhân sự.</div>
@@ -1135,7 +1136,8 @@ function EditOTDialog({ target, onClose, onSuccess }: { target: OTRequest; onClo
                                       </label>
                                     ))}
                                   </div>
-                                );
+                                  <div className="text-[11px] mt-0.5 pl-1" style={{ color: "var(--ibs-text-dim)" }}>Số người đang chọn: <strong style={{ color: "var(--ibs-accent)" }}>{g.memberIds.length}</strong></div>
+                                </>);
                               })()}
                             </div>
                           );
