@@ -863,7 +863,7 @@ function EditBookingModal({ target, seriesBookings, rooms, onClose, onDone }: { 
   const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)" };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
-      <div className="w-full max-w-[460px] rounded-xl border p-5" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+      <div className="w-full max-w-[460px] rounded-xl border p-5 max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-[15px] font-semibold">{isSeries ? "Sửa 1 ngày trong lịch cố định" : "Sửa phiếu đặt phòng"}</h3>
           <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>

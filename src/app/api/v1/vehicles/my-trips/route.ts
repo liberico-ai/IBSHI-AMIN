@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 
 // GET — các chuyến xe của LÁI XE đang đăng nhập (nhận diện qua họ tên NV === VehicleBooking.driverName).
 //   pending  : đã duyệt, ngày đi ≤ hết hôm nay (giờ VN), chưa hoàn thành → cần xác nhận (gồm cả quá hạn).
+//   upcoming : đã duyệt, ngày đi Ở TƯƠNG LAI (> hết hôm nay), chưa hoàn thành → chuyến sắp tới (lẻ + cố định).
 //   completed: đã hoàn thành — kèm odo để xem lại (mới nhất trước, tối đa 50).
 export async function GET() {
   const session = await auth();
@@ -12,7 +13,7 @@ export async function GET() {
   const userId = (session.user as any).id;
   const emp = await prisma.employee.findFirst({ where: { userId }, select: { fullName: true } });
   const driverName = emp?.fullName;
-  if (!driverName) return NextResponse.json({ data: { driverName: null, pending: [], completed: [] } });
+  if (!driverName) return NextResponse.json({ data: { driverName: null, pending: [], upcoming: [], completed: [] } });
 
   // Cuối ngày HÔM NAY theo giờ VN (server có thể chạy UTC) → mốc lọc chuyến "đến hạn".
   const todayVN = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }); // YYYY-MM-DD
@@ -25,9 +26,13 @@ export async function GET() {
     vehicle: { select: { licensePlate: true, model: true, currentMileage: true } },
   } as const;
 
-  const [pending, completed] = await Promise.all([
+  const [pending, upcoming, completed] = await Promise.all([
     prisma.vehicleBooking.findMany({
       where: { driverName, status: "APPROVED", completedAt: null, startDate: { lte: endOfTodayVN } },
+      select, orderBy: { startDate: "asc" },
+    }),
+    prisma.vehicleBooking.findMany({
+      where: { driverName, status: "APPROVED", completedAt: null, startDate: { gt: endOfTodayVN } },
       select, orderBy: { startDate: "asc" },
     }),
     prisma.vehicleBooking.findMany({
@@ -36,5 +41,5 @@ export async function GET() {
     }),
   ]);
 
-  return NextResponse.json({ data: { driverName, pending, completed } });
+  return NextResponse.json({ data: { driverName, pending, upcoming, completed } });
 }

@@ -193,13 +193,13 @@ export default function XePage() {
   const can = useCan();
   // Lái xe: tab "Chuyến của tôi"
   const [isDriver, setIsDriver] = useState(false);
-  const [myTrips, setMyTrips] = useState<{ pending: MyTrip[]; completed: MyTrip[] }>({ pending: [], completed: [] });
+  const [myTrips, setMyTrips] = useState<{ pending: MyTrip[]; upcoming: MyTrip[]; completed: MyTrip[] }>({ pending: [], upcoming: [], completed: [] });
   const [confirmTrip, setConfirmTrip] = useState<MyTrip | null>(null);
 
   function fetchMyTrips() {
     setLoading(true);
     fetch("/api/v1/vehicles/my-trips")
-      .then((r) => r.json()).then((res) => setMyTrips({ pending: res.data?.pending || [], completed: res.data?.completed || [] }))
+      .then((r) => r.json()).then((res) => setMyTrips({ pending: res.data?.pending || [], upcoming: res.data?.upcoming || [], completed: res.data?.completed || [] }))
       .finally(() => setLoading(false));
   }
 
@@ -829,6 +829,26 @@ export default function XePage() {
               );
             })}
           </div>
+          {/* Chuyến SẮP TỚI (đã duyệt, ngày ở tương lai) — lẻ + cố định, chỉ xem */}
+          <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+            <div className="px-5 py-4 border-b text-[14px] font-semibold flex items-center gap-2" style={{ borderColor: "var(--ibs-border)" }}>
+              🗓️ Chuyến sắp tới
+              <span className="text-[12px] px-2 py-0.5 rounded-full font-semibold" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>{myTrips.upcoming.length}</span>
+            </div>
+            {myTrips.upcoming.length === 0 ? (
+              <div className="px-5 py-10 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có chuyến sắp tới.</div>
+            ) : myTrips.upcoming.map((t) => (
+              <div key={t.id} className="px-5 py-3 border-b last:border-0" style={{ borderColor: "var(--ibs-border)" }}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold">{formatDate(t.startDate)}</span>
+                  <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>{formatTimeHM(new Date(t.startDate))} → {formatTimeHM(new Date(t.endDate))}</span>
+                  {t.seriesId && <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>📅 Lịch cố định</span>}
+                </div>
+                <div className="text-[13px] mt-0.5">{t.origin || "Trụ sở Công ty"} → <span className="font-medium">{t.destination}</span></div>
+                <div className="text-[11px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }}>{t.vehicle.licensePlate} · {t.vehicle.model} · {t.passengers} khách</div>
+              </div>
+            ))}
+          </div>
           {/* Chuyến ĐÃ HOÀN THÀNH */}
           <div className="rounded-xl border" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
             <div className="px-5 py-4 border-b text-[14px] font-semibold" style={{ borderColor: "var(--ibs-border)" }}>✅ Đã hoàn thành</div>
@@ -1321,7 +1341,7 @@ function EditTripModal({ target, seriesBookings, vehicles, onClose, onDone }: {
   const lblStyle = { color: "var(--ibs-text-dim)" };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="rounded-2xl w-full max-w-md p-6" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
+      <div className="rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" style={{ background: "var(--ibs-bg-card)", border: "1px solid var(--ibs-border)" }}>
         <div className="flex items-center justify-between mb-4">
           <div className="text-[16px] font-bold">{isSeries ? "Sửa 1 ngày trong lịch cố định" : "Sửa chuyến (chưa hoàn thành)"}</div>
           <button onClick={onClose}><X size={18} /></button>
