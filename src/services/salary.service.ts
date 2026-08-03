@@ -4,6 +4,13 @@ import { leaveCodeBase, leaveQty, COMPANY_PAID_LEAVE, BHXH_LEAVE } from "@/lib/a
 import { standardWorkDays, isHoliday, isCompensatoryHoliday } from "@/lib/holidays";
 import { computeBhxh, SALARY_CONFIG } from "@/lib/constants";
 
+// ⚠️⚠️ CỜ TẠM THỜI — gate "Nghỉ / Tăng ca phải có ĐƠN DUYỆT mới được tính lương".
+//   true  = BẬT gate (chuẩn nghiệp vụ: mã nghỉ đặc biệt + OT ngày thường chỉ tính khi có đơn duyệt).
+//   false = TẮT gate (dùng khi IMPORT bảng công/lương THÁNG CŨ chưa có đơn — để mã nghỉ + giờ OT
+//           trong file được tính như lịch sử; ngày vắng KL thật (không mã) VẪN là KL). Chủ Nhật/Lễ vốn không cần đơn.
+//   ➜ IMPORT XONG NHỚ ĐỔI LẠI THÀNH true.
+const REQUIRE_APPROVAL_FOR_LEAVE_OT = false;
+
 // ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
 
 export { calcTNCN } from "@/lib/salary-calc";
@@ -140,7 +147,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
       const d = new Date(a.date); const wh = ((a as any).reconciledHours ?? a.workHours) || 0, oh = a.otHours || 0, onh = (a as any).otNightHours || 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT
       // CN/Lễ: toàn bộ giờ làm ngày + OT đêm tính OT (không cần đơn). Ngày thường: OT (ngày+đêm) CHỈ khi có đơn duyệt.
       const isCnLe = isHoliday(d) || d.getUTCDay() === 0;
-      const h = isCnLe ? wh + oh + onh : (priorApprOt.has(`${a.employeeId}|${d.toISOString().slice(0, 10)}`) ? oh + onh : 0);
+      const h = isCnLe ? wh + oh + onh : ((!REQUIRE_APPROVAL_FOR_LEAVE_OT || priorApprOt.has(`${a.employeeId}|${d.toISOString().slice(0, 10)}`)) ? oh + onh : 0);
       if (h > 0) priorOtMap[a.employeeId] = (priorOtMap[a.employeeId] || 0) + h;
     }
   }
@@ -216,21 +223,23 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const onh = (a as any).otNightHours || 0;    // Thêm giờ Đ — OT ca đêm
     // GATE: ngày này có ĐƠN NGHỈ DUYỆT phủ không? (L lễ theo lịch → không cần đơn.)
     const appr = apprLeaveDay.get(`${a.employeeId}|${d.toISOString().slice(0, 10)}`);
-    // Nghỉ phép CÓ LƯƠNG (AL) từ chấm công — CHỈ tính khi CÓ đơn duyệt.
-    if ((a.paidLeaveDays || 0) > 0 && appr) {
+    // GATE OT: ngày này có ĐƠN TĂNG CA DUYỆT không (TẮT gate → luôn true). Áp cho OT ngày thường + OT ĐÊM CN/Lễ.
+    const hasOtReq = !REQUIRE_APPROVAL_FOR_LEAVE_OT || apprOtDay.has(`${a.employeeId}|${d.toISOString().slice(0, 10)}`);
+    // Nghỉ phép CÓ LƯƠNG (AL) từ chấm công — CHỈ tính khi CÓ đơn duyệt (trừ khi TẮT gate).
+    if ((a.paidLeaveDays || 0) > 0 && (appr || !REQUIRE_APPROVAL_FOR_LEAVE_OT)) {
       alDaysFromAttendance[a.employeeId] = (alDaysFromAttendance[a.employeeId] || 0) + (a.paidLeaveDays || 0);
     }
-    // Phân loại mã nghỉ (gồm nửa ngày "0.5XX") — CL/WL/ML/SL/MT cũng CHỈ tính khi có đơn duyệt:
+    // Phân loại mã nghỉ (gồm nửa ngày "0.5XX") — CL/WL/ML/SL/MT cũng CHỈ tính khi có đơn duyệt (trừ khi TẮT gate):
     const lvBase = leaveCodeBase(a.leaveCode);
-    if ((lvBase === "CL" || lvBase === "WL" || lvBase === "ML") && appr) {  // công ty trả → leaveDays
+    if ((lvBase === "CL" || lvBase === "WL" || lvBase === "ML") && (appr || !REQUIRE_APPROVAL_FOR_LEAVE_OT)) {  // công ty trả → leaveDays
       companyExtraLeaveMap[a.employeeId] = (companyExtraLeaveMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
-    } else if ((lvBase === "SL" || lvBase === "MT") && appr) {              // BHXH trả → chỉ hiển thị
+    } else if ((lvBase === "SL" || lvBase === "MT") && (appr || !REQUIRE_APPROVAL_FOR_LEAVE_OT)) {              // BHXH trả → chỉ hiển thị
       bhxhLeaveDaysMap[a.employeeId] = (bhxhLeaveDaysMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
     } else if (lvBase === "L") {                                            // Nghỉ Lễ — theo LỊCH, KHÔNG cần đơn
       holidayCodeMap[a.employeeId] = (holidayCodeMap[a.employeeId] || 0) + leaveQty(a.leaveCode);
     }
-    // Cảnh báo: mã đặc biệt (AL/CL/WL/ML/SL/MT) mà CHƯA có đơn duyệt → ngày này đang KHÔNG được tính lương.
-    if (((a.paidLeaveDays || 0) > 0 || ["CL", "WL", "ML", "SL", "MT"].includes(lvBase)) && !appr) {
+    // Cảnh báo: mã đặc biệt (AL/CL/WL/ML/SL/MT) mà CHƯA có đơn duyệt → ngày này đang KHÔNG được tính lương (chỉ khi BẬT gate).
+    if (((a.paidLeaveDays || 0) > 0 || ["CL", "WL", "ML", "SL", "MT"].includes(lvBase)) && !appr && REQUIRE_APPROVAL_FOR_LEAVE_OT) {
       leaveNeedsApprovalMap[a.employeeId] = (leaveNeedsApprovalMap[a.employeeId] || 0) + 1;
     }
     if (isHoliday(d)) {
@@ -240,11 +249,14 @@ export async function calculatePayrollForPeriod(periodId: string) {
       const compH = isCompensatoryHoliday(d);
       if (wh + oh > 0) (compH ? (ensureOt(a.employeeId).sunday += wh + oh) : (ensureOt(a.employeeId).holiday += wh + oh));
       if (nh > 0) (compH ? (ensureNight(a.employeeId).sunday += nh) : (ensureNight(a.employeeId).holiday += nh));
-      if (onh > 0) (compH ? (ensureOt(a.employeeId).sundayNight += onh) : (ensureOt(a.employeeId).holidayNight += onh));
+      // OT ĐÊM ngày CN/Lễ: CẦN đơn tăng ca duyệt (giống OT đêm ngày thường). Chưa đơn → không tính + cảnh báo.
+      if (onh > 0 && hasOtReq) (compH ? (ensureOt(a.employeeId).sundayNight += onh) : (ensureOt(a.employeeId).holidayNight += onh));
+      if (onh > 0 && !hasOtReq) otNeedsApprovalMap[a.employeeId] = (otNeedsApprovalMap[a.employeeId] || 0) + onh;
     } else if (d.getUTCDay() === 0) {
       if (wh + oh > 0) ensureOt(a.employeeId).sunday += wh + oh;
       if (nh > 0) ensureNight(a.employeeId).sunday += nh;
-      if (onh > 0) ensureOt(a.employeeId).sundayNight += onh;
+      if (onh > 0 && hasOtReq) ensureOt(a.employeeId).sundayNight += onh;   // OT đêm CN → cần đơn
+      if (onh > 0 && !hasOtReq) otNeedsApprovalMap[a.employeeId] = (otNeedsApprovalMap[a.employeeId] || 0) + onh;
     } else {
       // Ngày thường — đếm công theo workHours/8 (chốt 2026-06-15):
       //   PRESENT, LATE, HALF_DAY → workHours / 8 (tính theo GIỜ THỰC, kể cả nửa ngày)
@@ -273,8 +285,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
           // KHÔNG có đơn duyệt → KL cả ngày (kể cả mã CL/WL/ML/SL/MT đã ghi sẵn nhưng CHƯA duyệt).
           unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
         }
-      } else if (a.status === "ABSENT_APPROVED" && !appr) {
-        // AL cả ngày nhưng CHƯA có đơn duyệt → không lương → KL.
+      } else if (a.status === "ABSENT_APPROVED" && !appr && REQUIRE_APPROVAL_FOR_LEAVE_OT) {
+        // AL cả ngày nhưng CHƯA có đơn duyệt → không lương → KL (chỉ khi BẬT gate).
         unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + (a.paidLeaveDays || 0);
       }
       // Nửa ngày KHÔNG lương (vd "0.5UL"): NV làm nửa ngày (HALF_DAY ở trên đã cộng công
@@ -283,8 +295,8 @@ export async function calculatePayrollForPeriod(periodId: string) {
       if (ulHalf && a.status === "HALF_DAY") {
         unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + parseFloat(ulHalf[1]);
       }
-      // Nửa ngày phép AL đi kèm HALF_DAY (HC=4 + 0.5AL) mà CHƯA duyệt → nửa phép đó thành KL.
-      if (a.status === "HALF_DAY" && (a.paidLeaveDays || 0) > 0 && !appr) {
+      // Nửa ngày phép AL đi kèm HALF_DAY (HC=4 + 0.5AL) mà CHƯA duyệt → nửa phép đó thành KL (chỉ khi BẬT gate).
+      if (a.status === "HALF_DAY" && (a.paidLeaveDays || 0) > 0 && !appr && REQUIRE_APPROVAL_FOR_LEAVE_OT) {
         unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + (a.paidLeaveDays || 0);
       }
       // Nửa ngày phép (vd "0.5AL") mà KHÔNG đi làm phần còn lại → phần còn lại = KL (bù OT như ngày KL).
@@ -293,11 +305,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
       if (a.status === "ABSENT_APPROVED_HALF") {
         const gap = Math.max(0, 1 - (a.paidLeaveDays || 0));
         if (gap > 0) unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + gap;
-        if (!appr) unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + (a.paidLeaveDays || 0);
+        if (!appr && REQUIRE_APPROVAL_FOR_LEAVE_OT) unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + (a.paidLeaveDays || 0);
       }
       // Nghỉ phép có lương: đã cộng từ paidLeaveDays ở trên (không suy từ status nữa).
-      // GATE OT ngày thường: chỉ tính khi có ĐƠN TĂNG CA DUYỆT (số giờ = giờ THỰC trong file).
-      const hasOtReq = apprOtDay.has(`${a.employeeId}|${d.toISOString().slice(0, 10)}`);
+      // GATE OT ngày thường (hasOtReq tính ở đầu vòng): số giờ = giờ THỰC trong file. TẮT gate → tính hết.
       if ((oh + onh) > 0 && !hasOtReq) {
         otNeedsApprovalMap[a.employeeId] = (otNeedsApprovalMap[a.employeeId] || 0) + oh + onh; // OT chưa duyệt → cảnh báo
       }
@@ -307,19 +318,36 @@ export async function calculatePayrollForPeriod(periodId: string) {
     }
   }
 
-  // ── TIỀN ĂN TĂNG GIỜ (chốt 2026-06-19; GỘP OT ngày+đêm 2026-06-26; BỎ tiền ăn lễ 2026-06-28) ──
-  // Tự tính từ chấm công, theo GIỜ OT THỰC TẾ (CHƯA bù trừ — dùng giờ gốc, KHÁC lương OT).
-  //   CHỈ NGÀY THƯỜNG (T2–T7, KHÔNG lễ) mới có tiền ăn OT: CỘNG tổng OT ca ngày + OT ca đêm trong NGÀY:
-  //     2h ≤ tổng OT < 4h → 15.000đ; tổng OT ≥ 4h → 20.000đ; < 2h → 0.
-  //     (vd 1 ngày 3h OT ngày + 2h OT đêm = tổng 5h → 20k; 1 ngày chỉ 3h OT đêm → 15k.)
-  //   CHỦ NHẬT + NGÀY LỄ (gồm nghỉ bù): 0 — công ty CÓ NẤU CƠM nên không tính tiền ăn OT.
+  // Đăng ký suất ăn (M10 Nhà ăn) theo PHÒNG × NGÀY — để CHẶN tiền ăn OT ngày CN/Lễ:
+  //   ngày CN/Lễ nếu PHÒNG của NV có đăng ký suất ăn (đã có cơm công ty) → KHÔNG trả tiền ăn OT.
+  const mealRegsMonth = await prisma.mealRegistration.findMany({
+    where: { date: { gte: startDate, lte: endDate } },
+    select: { departmentId: true, date: true, lunchCount: true, dinnerCount: true, guestCount: true },
+  });
+  const mealRegSet = new Set<string>();
+  for (const m of mealRegsMonth) {
+    if (((m.lunchCount || 0) + (m.dinnerCount || 0) + (m.guestCount || 0)) > 0) mealRegSet.add(`${m.departmentId}|${m.date.toISOString().slice(0, 10)}`);
+  }
+  const empDeptMap: Record<string, string | null> = {};
+  for (const e of employees) empDeptMap[e.id] = (e as any).departmentId ?? null;
+
+  // ── TIỀN ĂN TĂNG GIỜ (chốt 2026-06-19; GỘP OT ngày+đêm 2026-06-26; sửa CN/Lễ 2026-08) ──
+  // Tự tính từ chấm công, theo GIỜ THỰC TẾ trong file (giờ gốc, KHÁC lương OT). Thang: 2h≤…<4h → 15k; ≥4h → 20k; <2h → 0.
+  //   NGÀY THƯỜNG (T2–T7, không lễ): tính theo tổng OT (OT ngày + OT đêm).
+  //   CHỦ NHẬT + LỄ (kể cả nghỉ bù): làm là được tiền ăn (cả ngày là OT) → tính theo TỔNG GIỜ LÀM (HC+OT+đêm+OT đêm);
+  //     NHƯNG nếu PHÒNG của NV có ĐĂNG KÝ SUẤT ĂN ngày đó (đã có cơm) → 0.
   const mealByOt = (h: number) => (h >= 4 ? 20000 : h >= 2 ? 15000 : 0);
   const mealOTMap: Record<string, number> = {};
   for (const a of attendanceData) {
     const d = new Date(a.date);
     let meal = 0;
     if (d.getUTCDay() === 0 || isHoliday(d)) {
-      meal = 0; // Chủ nhật + lễ (kể cả nghỉ bù) → có nấu cơm → KHÔNG tiền ăn OT
+      const deptId = empDeptMap[a.employeeId];
+      const hasMeal = !!deptId && mealRegSet.has(`${deptId}|${d.toISOString().slice(0, 10)}`);
+      if (!hasMeal) {
+        const totalH = (((a as any).workHours) || 0) + (a.otHours || 0) + (((a as any).nightHours) || 0) + (((a as any).otNightHours) || 0);
+        meal = mealByOt(totalH); // CN/Lễ: tổng giờ làm (cả ngày là OT)
+      }
     } else {
       meal = mealByOt((a.otHours || 0) + (a.otNightHours || 0)); // ngày thường: gộp OT ngày + đêm
     }
@@ -345,16 +373,17 @@ export async function calculatePayrollForPeriod(periodId: string) {
   for (const a of attendanceData) {
     const d = new Date(a.date); const t = d.getTime();
     const wh = ((a as any).reconciledHours ?? a.workHours) || 0, oh = a.otHours || 0, onh = (a as any).otNightHours || 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT
+    const hasOtReqT = !REQUIRE_APPROVAL_FOR_LEAVE_OT || apprOtDay.has(`${a.employeeId}|${d.toISOString().slice(0, 10)}`);
     if (isHoliday(d)) {
       const compH = isCompensatoryHoliday(d);
       pushOt(a.employeeId, t, wh + oh, compH ? OT_COEF.sunday : OT_COEF.holiday);
-      pushOt(a.employeeId, t, onh, compH ? OT_COEF.sundayNight : OT_COEF.holidayNight);
+      if (hasOtReqT) pushOt(a.employeeId, t, onh, compH ? OT_COEF.sundayNight : OT_COEF.holidayNight); // OT đêm CN/Lễ cần đơn
     } else if (d.getUTCDay() === 0) {
       pushOt(a.employeeId, t, wh + oh, OT_COEF.sunday);
-      pushOt(a.employeeId, t, onh, OT_COEF.sundayNight);
+      if (hasOtReqT) pushOt(a.employeeId, t, onh, OT_COEF.sundayNight); // OT đêm CN cần đơn
     } else {
-      // OT ngày thường: chỉ tính miễn thuế nếu có đơn duyệt (khớp gate lương ở trên).
-      if (apprOtDay.has(`${a.employeeId}|${d.toISOString().slice(0, 10)}`)) {
+      // OT ngày thường: chỉ tính miễn thuế nếu có đơn duyệt (khớp gate lương ở trên). TẮT gate → tính hết.
+      if (hasOtReqT) {
         pushOt(a.employeeId, t, oh, OT_COEF.weekday);
         pushOt(a.employeeId, t, onh, OT_COEF.weekdayNight);
       }
