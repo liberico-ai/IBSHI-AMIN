@@ -3,7 +3,7 @@
 import { useSession } from "next-auth/react";
 import { MODULE_PERMISSIONS } from "@/lib/permissions";
 import { ROLE_HIERARCHY } from "@/lib/constants";
-import { templatePerms } from "@/lib/permission-catalog";
+import { sessionPermSet } from "@/lib/permission-catalog";
 
 type ModuleKey = keyof typeof MODULE_PERMISSIONS;
 type ActionKey<M extends ModuleKey> = keyof (typeof MODULE_PERMISSIONS)[M];
@@ -34,9 +34,7 @@ export function usePermission() {
 export function useCan() {
   const { data: session } = useSession();
   const role: string = (session?.user as any)?.role ?? "";
-  const stored = (session?.user as any)?.perms;
-  // perms là MẢNG (kể cả rỗng) → dùng đúng nó ([] = khóa sạch).
-  // Không phải mảng (session cũ chưa có perms) → fallback gói mẫu, không khóa nhầm nút.
-  const set = Array.isArray(stored) ? new Set(stored) : templatePerms(role);
+  // Quyền hiệu lực từ bitmask (pbits) mới hoặc mảng perms cũ; không tùy chỉnh → gói mẫu của role.
+  const set = sessionPermSet(session?.user as any);
   return (perm: string) => role === "ADMIN" || set.has(perm);
 }

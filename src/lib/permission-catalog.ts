@@ -255,13 +255,52 @@ export function can(role: string, storedGrants: string[] | null | undefined, per
   return effectivePerms(role, storedGrants).has(perm);
 }
 
-// Kiểm tra quyền từ session user (role + perms đã tính sẵn ở JWT). Dùng trong API route.
-// perms là MẢNG (kể cả rỗng) → dùng đúng nó (đã tính ở login, [] = khóa sạch).
-// perms KHÔNG phải mảng (undefined — session cũ chưa có field) → fallback gói mẫu để không chặn nhầm.
-export function canUser(user: { role?: string | null; perms?: string[] | null } | null | undefined, perm: string): boolean {
+// ── Nén perms thành BITMASK (chống 502) ──────────────────────────────────────
+// Đầu mối nhiều quyền (vd HR_ADMIN 223 quyền ~4KB) nếu nhồi cả MẢNG chuỗi vào JWT →
+// cookie phình vượt buffer proxy (nginx) → 502 khi login. Nén thành bitmask theo ALL_PERMS:
+// mỗi quyền = 1 bit → toàn bộ ~ ceil(len/8) byte (base64url ~ vài chục ký tự), cố định & nhỏ.
+const PERM_INDEX: Map<string, number> = new Map(ALL_PERMS.map((p, i) => [p, i]));
+
+export function permsToBits(perms: Iterable<string>): string {
+  const bytes = new Uint8Array(Math.ceil(ALL_PERMS.length / 8));
+  for (const p of Array.from(perms)) {
+    const i = PERM_INDEX.get(p);
+    if (i === undefined) continue;
+    bytes[i >> 3] |= (1 << (i & 7));
+  }
+  let bin = "";
+  for (let k = 0; k < bytes.length; k++) bin += String.fromCharCode(bytes[k]);
+  const b64 = typeof btoa !== "undefined" ? btoa(bin) : Buffer.from(bin, "binary").toString("base64");
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+const _bitsCache = new Map<string, Set<string>>();
+export function bitsToPerms(b64url: string): Set<string> {
+  const cached = _bitsCache.get(b64url);
+  if (cached) return cached;
+  const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = typeof atob !== "undefined" ? atob(b64) : Buffer.from(b64, "base64").toString("binary");
+  const out = new Set<string>();
+  for (let i = 0; i < ALL_PERMS.length; i++) {
+    const byte = bin.charCodeAt(i >> 3) || 0;
+    if (byte & (1 << (i & 7))) out.add(ALL_PERMS[i]);
+  }
+  if (_bitsCache.size > 100) _bitsCache.clear();
+  _bitsCache.set(b64url, out);
+  return out;
+}
+
+// Quyền hiệu lực của session (Set) từ role + pbits (bitmask mới) hoặc perms (mảng cũ, tương thích ngược).
+export function sessionPermSet(user: { role?: string | null; perms?: string[] | null; pbits?: string | null } | null | undefined): Set<string> {
+  const role = user?.role ?? "";
+  if (typeof user?.pbits === "string") return bitsToPerms(user.pbits);
+  if (Array.isArray(user?.perms)) return new Set(user!.perms as string[]);
+  return templatePerms(role); // chưa tùy chỉnh → gói mẫu của role
+}
+
+// Kiểm tra quyền từ session user (role + pbits/perms đã tính sẵn ở JWT). Dùng trong API route.
+export function canUser(user: { role?: string | null; perms?: string[] | null; pbits?: string | null } | null | undefined, perm: string): boolean {
   const role = user?.role ?? "";
   if (role === "ADMIN") return true;
-  const stored = user?.perms;
-  const set = Array.isArray(stored) ? new Set(stored) : templatePerms(role);
-  return set.has(perm);
+  return sessionPermSet(user).has(perm);
 }

@@ -13,6 +13,7 @@ import {
 import { signOut, useSession } from "next-auth/react";
 import { getInitials } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
+import { sessionPermSet } from "@/lib/permission-catalog";
 
 // href → quyền "Xem" cần có để hiện trong menu (không map = luôn hiện).
 const NAV_VIEW_PERM: Record<string, string> = {
@@ -148,13 +149,12 @@ export function Sidebar({ userName = "Admin", userRole = "BOM", userTitle = null
 
   // Quyền hiệu lực (tính lúc đăng nhập, nằm trong session). Ẩn module không có quyền Xem.
   const { data: session } = useSession();
-  const perms: string[] = (session?.user as any)?.perms ?? [];
+  const permSet = sessionPermSet(session?.user as any); // bitmask/perms/gói-mẫu → Set quyền hiệu lực
   const canSee = (href: string) => {
     if (userRole === "ADMIN") return true;
     const req = NAV_VIEW_PERM[href];
     if (!req) return true;                     // không map → luôn hiện (Dashboard, Cài đặt…)
-    if (perms.length === 0) return true;        // session cũ chưa có perms → hiện hết (không phá)
-    return perms.includes(req);
+    return permSet.has(req);
   };
 
   const isActive = (href: string) => {

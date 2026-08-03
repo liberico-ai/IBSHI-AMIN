@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
-import { effectivePerms } from "@/lib/permission-catalog";
+import { effectivePerms, permsToBits } from "@/lib/permission-catalog";
 
 // Chuẩn hoá 1 số về dạng "0xxxxxxxxx": bỏ ký tự thừa, +84/84 -> 0.
 function canonPhone(raw: string): string {
@@ -101,20 +101,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.employeeCode = (user as any).employeeCode;
         token.forcePasswordChange = (user as any).forcePasswordChange;
         // QUAN TRỌNG (chống 502): KHÔNG nhồi mảng quyền lớn vào JWT — cookie phình vượt
-        // giới hạn header của proxy (nginx) → 502. Dính các role có gói mẫu lớn (ADMIN 210 quyền,
-        // HR_ADMIN/BOM…). Cơ chế:
-        //  - ADMIN = toàn quyền theo role (canUser/useCan tự nhận ADMIN) → để rỗng, không lưu gì.
-        //  - Account CÓ ma trận riêng → chỉ lưu ĐÚNG bộ quyền riêng đó.
-        //  - Account KHÔNG tùy chỉnh → KHÔNG lưu perms; canUser/useCan tự fallback gói mẫu của role
-        //    (kết quả y hệt) → cookie nhỏ gọn.
+        // buffer header của proxy (nginx) → 502. Đầu mối nhiều quyền (HR_ADMIN 223 quyền ~4KB) dính.
+        // Cơ chế: lưu quyền dạng BITMASK (token.pbits, ~vài chục byte cố định) thay vì mảng chuỗi.
+        //  - ADMIN = toàn quyền theo role (canUser/useCan tự nhận ADMIN) → không lưu gì.
+        //  - Account CÓ ma trận riêng → lưu bitmask của bộ quyền hiệu lực.
+        //  - Account KHÔNG tùy chỉnh → không lưu; canUser/useCan fallback gói mẫu của role (y hệt).
+        token.perms = undefined; // bỏ mảng cũ (giữ tương thích đọc, nhưng không ghi nữa)
         if ((user as any).role === "ADMIN") {
-          token.perms = [];
+          token.pbits = undefined;
         } else {
           try {
             const grant = await prisma.accessGrant.findUnique({ where: { userId: (user as any).id } });
-            token.perms = grant ? Array.from(effectivePerms((user as any).role, grant.perms)) : undefined;
+            token.pbits = grant ? permsToBits(effectivePerms((user as any).role, grant.perms)) : undefined;
           } catch {
-            token.perms = undefined; // lỗi đọc (vd thiếu bảng) → fallback gói mẫu, KHÔNG khóa nhầm
+            token.pbits = undefined; // lỗi đọc (vd thiếu bảng) → fallback gói mẫu, KHÔNG khóa nhầm
           }
         }
       }
@@ -126,8 +126,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         (session.user as any).role = token.role;
         (session.user as any).employeeCode = token.employeeCode;
         (session.user as any).forcePasswordChange = token.forcePasswordChange;
-        // Giữ nguyên: mảng (kể cả []) → dùng đúng nó; undefined (không tùy chỉnh) → để undefined
-        // cho canUser/useCan tự fallback gói mẫu của role. KHÔNG ép thành [] (sẽ khóa nhầm).
+        // Quyền: ưu tiên bitmask (pbits) mới; giữ đọc mảng perms cũ cho session cũ (tương thích ngược).
+        // Không tùy chỉnh → cả 2 undefined → canUser/useCan fallback gói mẫu của role.
+        (session.user as any).pbits = typeof (token as any).pbits === "string" ? (token as any).pbits : undefined;
         (session.user as any).perms = Array.isArray((token as any).perms) ? (token as any).perms : undefined;
       }
       return session;
