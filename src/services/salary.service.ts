@@ -1,6 +1,6 @@
 import prisma from "@/lib/prisma";
 import { calculateSalary, type SalaryInput } from "@/lib/salary-calc";
-import { leaveCodeBase, leaveQty, COMPANY_PAID_LEAVE, BHXH_LEAVE } from "@/lib/attendance-codes";
+import { leaveCodeBase, leaveQty, COMPANY_PAID_LEAVE, BHXH_LEAVE, UNPAID_NO_OFFSET } from "@/lib/attendance-codes";
 import { standardWorkDays, isHoliday, isCompensatoryHoliday } from "@/lib/holidays";
 import { computeBhxh, SALARY_CONFIG } from "@/lib/constants";
 
@@ -271,6 +271,10 @@ export async function calculatePayrollForPeriod(periodId: string) {
       } else if (a.status === "ABSENT_UNAPPROVED") {
         // KL (vắng không lương → mục tiêu bù công bằng OT) = nghỉ KHÔNG lương (UL) + vắng không mã.
         const code = leaveCodeBase(a.leaveCode);
+        if (UNPAID_NO_OFFSET.includes(code)) {
+          // Mã "OT" = NGÀY NGHỈ không lương và KHÔNG bù trừ tăng ca (khác UL). Không cộng vào KL bù,
+          //   không nâng thành có lương kể cả khi có đơn → OT được giữ nguyên cho tính lương tăng ca.
+        } else {
         const isPaidCode = [...COMPANY_PAID_LEAVE, ...BHXH_LEAVE].includes(code); // AL/L/CL/WL/ML/SL/MT
         if (appr) {
           // Có đơn duyệt phủ ngày này:
@@ -284,6 +288,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
         } else {
           // KHÔNG có đơn duyệt → KL cả ngày (kể cả mã CL/WL/ML/SL/MT đã ghi sẵn nhưng CHƯA duyệt).
           unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
+        }
         }
       } else if (a.status === "ABSENT_APPROVED" && !appr && REQUIRE_APPROVAL_FOR_LEAVE_OT) {
         // AL cả ngày nhưng CHƯA có đơn duyệt → không lương → KL (chỉ khi BẬT gate).

@@ -9,6 +9,9 @@
 export const COMPANY_PAID_LEAVE = ["AL", "L", "CL", "WL", "ML"];
 // Mã do BHXH chi trả — chỉ hiển thị, công ty không trả.
 export const BHXH_LEAVE = ["SL", "MT"];
+// Mã "OT" (KHÔNG phải tăng ca) — NGÀY NGHỈ không lương và KHÔNG bù trừ bằng tăng ca.
+//   Khác UL (cũng không lương nhưng ĐƯỢC bù trừ OT). OT giữ nguyên giờ tăng ca cho tính lương OT.
+export const UNPAID_NO_OFFSET = ["OT"];
 // Mã chữ thuần (bỏ số/fraction): "0.5CL" → "CL".
 export const leaveCodeBase = (code: unknown): string => String(code ?? "").toUpperCase().replace(/[0-9.,\s]/g, "");
 // Số ngày của 1 mã nghỉ (fraction): "0.5CL" → 0.5, "CL" → 1, không phải mã → 0.
