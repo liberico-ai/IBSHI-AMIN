@@ -6,11 +6,11 @@ import { DateInput } from "@/components/shared/date-input";
 import { useCan } from "@/hooks/use-permission";
 import { OT_PROJECTS } from "@/lib/projects";
 import { WORK_CATALOG, categoriesOf } from "@/lib/team-work-codes";
-import { Plus, X, Send, Trash2, Pencil, ChevronRight, ChevronDown } from "lucide-react";
+import { Plus, X, Send, Trash2, Pencil, ChevronRight, ChevronDown, Download } from "lucide-react";
 
-type LogEntry = { id: string; employeeId: string; employeeName: string; employeeCode?: string | null; projectCode: string; hours: number; workCode?: string | null; categoryCode?: string | null; category: string };
+type LogEntry = { id: string; employeeId: string; employeeName: string; employeeCode?: string | null; projectCode: string; hours: number; workCode?: string | null; categoryCode?: string | null; reinforce?: string | null; category: string };
 type Log = {
-  id: string; date: string; departmentId: string; departmentName: string; status: string;
+  id: string; date: string; batchId?: string | null; departmentId: string; departmentName: string; status: string;
   rejectReason?: string | null; entries: LogEntry[];
 };
 
@@ -21,14 +21,27 @@ const STATUS: Record<string, { label: string; color: string; bg: string }> = {
   REJECTED: { label: "Từ chối", color: "#ef4444", bg: "rgba(239,68,68,0.12)" },
 };
 
+// Gom logs theo đợt (batchId) → mỗi đợt là 1 "phiếu" ở giao diện. Giữ thứ tự xuất hiện.
+function groupByBatch(logs: Log[]): { key: string; logs: Log[] }[] {
+  const order: string[] = [];
+  const map = new Map<string, Log[]>();
+  for (const l of logs) {
+    const k = l.batchId || l.id;
+    if (!map.has(k)) { map.set(k, []); order.push(k); }
+    map.get(k)!.push(l);
+  }
+  return order.map((k) => ({ key: k, logs: map.get(k)! }));
+}
+
 export default function PhieuToPage() {
   const can = useCan();
   const canCreate = can("m3.phieuto:create");
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
-  const [editLog, setEditLog] = useState<Log | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [showExport, setShowExport] = useState(false);
+  const [editLogs, setEditLogs] = useState<Log[] | null>(null);
+  const [openKey, setOpenKey] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
@@ -36,21 +49,30 @@ export default function PhieuToPage() {
   }
   useEffect(load, []);
 
-  async function doAction(id: string, path: string, body?: any) {
-    const res = await fetch(`/api/v1/team-work-logs/${id}${path}`, {
-      method: path === "" ? "DELETE" : "POST",
-      headers: { "Content-Type": "application/json" },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-    if (!res.ok) { const j = await res.json().catch(() => ({})); alert(j?.error?.message || "Thao tác thất bại"); return; }
-    load();
+  async function callLog(id: string, path: string) {
+    const res = await fetch(`/api/v1/team-work-logs/${id}${path}`, { method: path === "" ? "DELETE" : "POST" });
+    if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error?.message || "Thao tác thất bại"); }
   }
+  async function submitBatch(gl: Log[]) {
+    try { for (const l of gl) if (l.status === "DRAFT") await callLog(l.id, "/submit"); load(); }
+    catch (e: any) { alert(e.message); }
+  }
+  async function deleteBatch(gl: Log[]) {
+    if (!confirm(`Xóa phiếu này (${gl.length} xưởng)?`)) return;
+    try { for (const l of gl) await callLog(l.id, ""); load(); }
+    catch (e: any) { alert(e.message); }
+  }
+
+  const groups = groupByBatch(logs);
 
   return (
     <div>
-      <PageTitle title="Phiếu kê khai tổ trưởng (hàng ngày)" description="Tổ trưởng kê khai sản xuất — NV × dự án × giờ × hạng mục" />
+      <PageTitle title="Phiếu kê khai tổ trưởng (hàng ngày)" description="Tổ trưởng kê khai sản xuất — NV × dự án × giờ × nội dung" />
 
-      <div className="flex justify-end mb-3">
+      <div className="flex justify-end gap-2 mb-3">
+        <button onClick={() => setShowExport(true)} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-border)", color: "var(--ibs-text)" }}>
+          <Download size={15} /> Export Excel
+        </button>
         {canCreate && (
           <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)" }}>
             <Plus size={15} /> Thêm phiếu
@@ -61,7 +83,7 @@ export default function PhieuToPage() {
       <div className="rounded-xl border overflow-hidden" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
         {loading ? (
           <div className="px-4 py-10 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Đang tải...</div>
-        ) : logs.length === 0 ? (
+        ) : groups.length === 0 ? (
           <div className="px-4 py-10 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Chưa có phiếu kê khai nào</div>
         ) : (
           <table className="w-full text-[13px]">
@@ -73,67 +95,50 @@ export default function PhieuToPage() {
               </tr>
             </thead>
             <tbody>
-              {logs.map((l) => {
-                const totalH = l.entries.reduce((s, e) => s + (e.hours || 0), 0);
-                const st = STATUS[l.status] || STATUS.DRAFT;
-                const isDraft = l.status === "DRAFT";
-                const open = openId === l.id;
-                // Gom dòng theo nhân viên để hiển thị "ai làm dự án gì".
-                const grouped: Record<string, { name: string; rows: LogEntry[] }> = {};
-                for (const e of l.entries) (grouped[e.employeeId] ??= { name: e.employeeName, rows: [] }).rows.push(e);
+              {groups.map((g) => {
+                const first = g.logs[0];
+                const totalH = g.logs.reduce((s, l) => s + l.entries.reduce((a, e) => a + (e.hours || 0), 0), 0);
+                const totalRows = g.logs.reduce((s, l) => s + l.entries.length, 0);
+                const st = STATUS[first.status] || STATUS.DRAFT;
+                const anyDraft = g.logs.some((l) => l.status === "DRAFT");
+                const open = openKey === g.key;
+                const deptLabel = g.logs.length === 1 ? first.departmentName : `${g.logs.length} xưởng: ${g.logs.map((l) => l.departmentName).join(", ")}`;
                 return (
-                  <Fragment key={l.id}>
-                  <tr style={{ borderBottom: open ? "none" : "1px solid var(--ibs-border)" }} className="hover:bg-white/[0.02] cursor-pointer" onClick={() => setOpenId(open ? null : l.id)}>
+                  <Fragment key={g.key}>
+                  <tr style={{ borderBottom: open ? "none" : "1px solid var(--ibs-border)" }} className="hover:bg-white/[0.02] cursor-pointer" onClick={() => setOpenKey(open ? null : g.key)}>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1.5">
                         {open ? <ChevronDown size={14} style={{ color: "var(--ibs-text-dim)" }} /> : <ChevronRight size={14} style={{ color: "var(--ibs-text-dim)" }} />}
-                        {new Date(l.date).toLocaleDateString("vi-VN")}
+                        {new Date(first.date).toLocaleDateString("vi-VN")}
                       </span>
                     </td>
-                    <td className="px-4 py-3">{l.departmentName}</td>
-                    <td className="px-4 py-3">{l.entries.length}</td>
+                    <td className="px-4 py-3">{deptLabel}</td>
+                    <td className="px-4 py-3">{totalRows}</td>
                     <td className="px-4 py-3 font-semibold" style={{ color: "var(--ibs-accent)" }}>{totalH.toLocaleString("vi-VN")}h</td>
                     <td className="px-4 py-3">
                       <span className="text-[11px] px-2 py-0.5 rounded font-semibold" style={{ color: st.color, background: st.bg }}>{st.label}</span>
-                      {l.status === "REJECTED" && l.rejectReason && <div className="text-[10px] mt-0.5" style={{ color: "var(--ibs-text-dim)" }} title={l.rejectReason}>Lý do: {l.rejectReason}</div>}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        {isDraft && canCreate && (
-                          <>
-                            <button onClick={() => setEditLog(l)} className="p-1.5 rounded" title="Sửa" style={{ color: "var(--ibs-accent)" }}><Pencil size={14} /></button>
-                            <button onClick={() => doAction(l.id, "/submit")} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold" style={{ color: "#f59e0b", background: "rgba(245,158,11,0.1)" }}><Send size={12} /> Gửi</button>
-                          </>
+                        {anyDraft && canCreate && (
+                          <button onClick={() => submitBatch(g.logs)} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold" style={{ color: "#f59e0b", background: "rgba(245,158,11,0.1)" }}><Send size={12} /> Gửi</button>
                         )}
-                        {(isDraft && canCreate) && (
-                          <button onClick={() => { if (confirm("Xóa phiếu này?")) doAction(l.id, ""); }} className="p-1.5 rounded" title="Xóa" style={{ color: "var(--ibs-danger)" }}><Trash2 size={14} /></button>
+                        {canCreate && (
+                          <button onClick={() => deleteBatch(g.logs)} className="p-1.5 rounded" title="Xóa phiếu" style={{ color: "var(--ibs-danger)" }}><Trash2 size={14} /></button>
                         )}
                       </div>
                     </td>
                   </tr>
                   {open && (
                     <tr style={{ borderBottom: "1px solid var(--ibs-border)" }}>
-                      <td colSpan={6} className="px-4 pb-3 pt-0" style={{ background: "var(--ibs-bg)" }}>
-                        <div className="rounded-lg border" style={{ borderColor: "var(--ibs-border)" }}>
-                          {Object.entries(grouped).map(([eid, g], gi) => (
-                            <div key={eid} className="px-3 py-2" style={{ borderTop: gi > 0 ? "1px solid var(--ibs-border)" : "none" }}>
-                              <div className="text-[12.5px] font-semibold mb-1">
-                                {g.rows[0]?.employeeCode && <span className="font-mono text-[11px] mr-1.5" style={{ color: "var(--ibs-text-dim)" }}>{g.rows[0].employeeCode}</span>}
-                                {g.name}
-                              </div>
-                              <div className="space-y-0.5">
-                                {g.rows.map((r) => (
-                                  <div key={r.id} className="flex items-center gap-2 text-[12px] flex-wrap" style={{ color: "var(--ibs-text-muted)" }}>
-                                    <span className="inline-block px-1.5 py-0.5 rounded font-medium" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>📁 {r.projectCode}</span>
-                                    <span className="font-semibold">{r.hours}h</span>
-                                    {r.workCode && <><span>·</span><span title="Mã CV">CV: <b>{r.workCode}</b></span></>}
-                                    {r.categoryCode && <><span>·</span><span title="Mã chủng loại">CL: <b>{r.categoryCode}</b></span></>}
-                                    {r.category && <><span>·</span><span>{r.category}</span></>}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
+                      <td colSpan={6} className="px-4 pb-4 pt-1" style={{ background: "var(--ibs-bg)" }}>
+                        <div className="space-y-3">
+                          {g.logs.map((l) => <LogView key={l.id} log={l} />)}
+                          {canCreate && (
+                            <button onClick={() => setEditLogs(g.logs)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-white" style={{ background: "var(--ibs-accent)" }}>
+                              <Pencil size={14} /> Sửa phiếu
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -146,29 +151,157 @@ export default function PhieuToPage() {
         )}
       </div>
 
-      {(showNew || editLog) && (
-        <PhieuModal log={editLog} onClose={() => { setShowNew(false); setEditLog(null); }} onDone={() => { setShowNew(false); setEditLog(null); load(); }} />
+      {(showNew || editLogs) && (
+        <PhieuModal logs={editLogs} onClose={() => { setShowNew(false); setEditLogs(null); }} onDone={() => { setShowNew(false); setEditLogs(null); load(); }} />
       )}
+      {showExport && <ExportModal onClose={() => setShowExport(false)} />}
+    </div>
+  );
+}
+
+// ── Modal chọn khoảng ngày để Export Excel ────────────────────────────────────
+function ExportModal({ onClose }: { onClose: () => void }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const firstOfMonth = today.slice(0, 8) + "01";
+  const [from, setFrom] = useState(firstOfMonth);
+  const [to, setTo] = useState(today);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    if (!from || !to) { setError("Chọn khoảng ngày"); return; }
+    if (from > to) { setError("Từ ngày phải ≤ Đến ngày"); return; }
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/v1/team-work-logs/export?from=${from}&to=${to}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error?.message || "Export thất bại");
+      const { title, columns, rows } = json.data as { title: string; columns: { header: string; key: string; width?: number }[]; rows: Record<string, unknown>[] };
+      if (rows.length === 0) { setError("Không có dữ liệu kê khai trong khoảng ngày này"); setBusy(false); return; }
+
+      const { default: ExcelJS } = await import("exceljs");
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "IBS ONE Platform"; wb.created = new Date();
+      const ws = wb.addWorksheet("Kê khai tổ");
+
+      ws.mergeCells(1, 1, 1, columns.length);
+      const tc = ws.getCell(1, 1); tc.value = title; tc.font = { bold: true, size: 14 };
+      ws.addRow([]);
+      const hr = ws.addRow(columns.map((c) => c.header));
+      hr.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      hr.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } }; c.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; });
+      for (const r of rows) {
+        const row = ws.addRow(columns.map((c) => (r[c.key] ?? "") as any));
+        row.eachCell((c) => { c.border = { top: { style: "thin", color: { argb: "FFE2E8F0" } }, bottom: { style: "thin", color: { argb: "FFE2E8F0" } }, left: { style: "thin", color: { argb: "FFE2E8F0" } }, right: { style: "thin", color: { argb: "FFE2E8F0" } } }; });
+      }
+      columns.forEach((c, i) => { ws.getColumn(i + 1).width = c.width || 16; });
+      ws.views = [{ state: "frozen", ySplit: 3 }];
+
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = `ke-khai-to_${from}_${to}.xlsx`; a.click(); URL.revokeObjectURL(a.href);
+      onClose();
+    } catch (e: any) { setError(e?.message || "Có lỗi khi export"); } finally { setBusy(false); }
+  }
+
+  const inputCls = "w-full px-3 py-2 rounded-lg text-[13px] outline-none border";
+  const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
+  const lbl = "block text-[12px] font-medium mb-1";
+  const lblStyle = { color: "var(--ibs-text-muted)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+      <div className="w-full max-w-[420px] rounded-xl border shadow-2xl" style={{ background: "var(--ibs-bg-card)", borderColor: "var(--ibs-border)" }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+          <h3 className="text-[15px] font-semibold">Export Excel — Kê khai tổ</h3>
+          <button onClick={onClose} style={{ color: "var(--ibs-text-dim)" }}><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          {error && <div className="text-[13px] px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "var(--ibs-danger)" }}>{error}</div>}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl} style={lblStyle}>Từ ngày *</label>
+              <DateInput value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} style={inputStyle} />
+            </div>
+            <div>
+              <label className={lbl} style={lblStyle}>Đến ngày *</label>
+              <DateInput value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} style={inputStyle} />
+            </div>
+          </div>
+          <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Xuất các phiếu ĐÃ KÊ KHAI trong khoảng ngày, theo đúng form (Ngày · Mã NV · Tên · Tổ · Mã dự án · Hành chính · Mã CV · Mã chủng loại · Tăng cường · Nội dung).</div>
+        </div>
+        <div className="flex gap-3 p-5 pt-0">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg text-[13px] font-medium" style={{ border: "1px solid var(--ibs-border)", color: "var(--ibs-text-muted)" }}>Hủy</button>
+          <button onClick={run} disabled={busy} className="flex-1 py-2 rounded-lg text-[13px] font-semibold text-white flex items-center justify-center gap-1.5" style={{ background: busy ? "rgba(0,180,216,0.5)" : "var(--ibs-accent)" }}>
+            <Download size={15} /> {busy ? "Đang xuất..." : "Tải file"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Hiển thị 1 xưởng (read-only) dạng bảng giống form ─────────────────────────
+function LogView({ log }: { log: Log }) {
+  const byEmp = new Map<string, LogEntry[]>();
+  for (const e of log.entries) { if (!byEmp.has(e.employeeId)) byEmp.set(e.employeeId, []); byEmp.get(e.employeeId)!.push(e); }
+  const totalH = log.entries.reduce((s, e) => s + (e.hours || 0), 0);
+  const td = "px-2 py-1.5 align-top whitespace-nowrap";
+  return (
+    <div className="rounded-lg border" style={{ borderColor: "var(--ibs-border)", background: "var(--ibs-bg-card)" }}>
+      <div className="px-3 py-2 text-[13px] font-semibold flex items-center gap-2 border-b" style={{ borderColor: "var(--ibs-border)" }}>
+        🏭 {log.departmentName}
+        <span className="text-[11px] font-normal" style={{ color: "var(--ibs-text-dim)" }}>· {log.entries.length} dòng · {totalH.toLocaleString("vi-VN")}h</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px]" style={{ minWidth: 840 }}>
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--ibs-border)" }}>
+              {["Mã NV", "Tên nhân viên", "Mã dự án", "Hành chính", "Mã CV", "Mã chủng loại", "Tăng cường", "Nội dung công việc"].map((h, i) => (
+                <th key={i} className="px-2 py-2 text-left text-[11px] font-semibold uppercase whitespace-nowrap" style={{ color: "var(--ibs-text-dim)" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from(byEmp.values()).map((rows) => rows.map((e, i) => (
+              <tr key={e.id} style={{ borderBottom: i === rows.length - 1 ? "1px solid var(--ibs-border)" : "1px dashed var(--ibs-border)" }}>
+                {i === 0 && <td className={td + " font-mono"} rowSpan={rows.length} style={{ color: "var(--ibs-text-muted)", borderRight: "1px solid var(--ibs-border)" }}>{e.employeeCode || "—"}</td>}
+                {i === 0 && <td className={td + " font-medium"} rowSpan={rows.length} style={{ borderRight: "1px solid var(--ibs-border)" }}>{e.employeeName}</td>}
+                <td className={td}><span className="px-1.5 py-0.5 rounded font-medium" style={{ background: "rgba(0,180,216,0.12)", color: "var(--ibs-accent)" }}>{e.projectCode}</span></td>
+                <td className={td + " font-semibold"}>{e.hours}h</td>
+                <td className={td}>{e.workCode || "—"}</td>
+                <td className={td}>{e.categoryCode || "—"}</td>
+                <td className="px-2 py-1.5 align-top" style={{ color: "var(--ibs-text-muted)" }}>{e.reinforce || "—"}</td>
+                <td className="px-2 py-1.5 align-top" style={{ color: "var(--ibs-text-muted)" }}>{e.category || "—"}</td>
+              </tr>
+            )))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
 // ── Modal thêm/sửa phiếu — mỗi XƯỞNG 1 khối (đóng/mở), 1 đơn nhiều xưởng ───────
-type Emp = { id: string; fullName: string; departmentId?: string | null; erpCode?: string | null; employeeCode?: string | null };
-type Proj = { key: string; projectCode: string; hours: number; workCode: string; categoryCode: string; content: string };
+type Emp = { id: string; fullName: string; departmentId?: string | null; code?: string | null; erpCode?: string | null; employeeCode?: string | null };
+type Proj = { key: string; projectCode: string; hours: number; workCode: string; categoryCode: string; reinforce: string; content: string };
 type EmpRow = { rowId: string; employeeId: string; employeeCode: string; employeeName: string; projects: Proj[] };
-type Block = { blockId: string; departmentId: string; collapsed: boolean; rows: EmpRow[] };
+type Block = { blockId: string; logId?: string; departmentId: string; collapsed: boolean; rows: EmpRow[] };
 
-const emptyProj = (key: string): Proj => ({ key, projectCode: "", hours: 0, workCode: "", categoryCode: "", content: "" });
-const empCodeOf = (e: Emp) => e.erpCode || e.employeeCode || "";
+const emptyProj = (key: string): Proj => ({ key, projectCode: "", hours: 0, workCode: "", categoryCode: "", reinforce: "", content: "" });
+const empCodeOf = (e: Emp) => e.code || e.erpCode || e.employeeCode || "";
 const isFilled = (p: Proj) => !!p.projectCode || (!!p.hours && p.hours > 0);
+// Chuẩn hoá để tìm không phân biệt dấu/hoa-thường ("yen" khớp "Yến").
+const norm = (s: string) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d");
 
-function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => void; onDone: () => void }) {
-  const isEdit = !!log;
+function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: () => void; onDone: () => void }) {
+  const isEdit = !!logs && logs.length > 0;
   const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
   const [emps, setEmps] = useState<Emp[]>([]);
-  const [date, setDate] = useState(log ? String(log.date).slice(0, 10) : new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(isEdit ? String(logs![0].date).slice(0, 10) : new Date().toISOString().slice(0, 10));
   const [blocks, setBlocks] = useState<Block[]>([]);
+  const [search, setSearch] = useState<Record<string, string>>({}); // gõ tên lọc NV theo từng khối (chỉ lọc hiển thị)
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const cnt = useRef(0);
@@ -180,18 +313,20 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
     fetch("/api/v1/employees?limit=1000&scopeModule=m3.bangcong").then((r) => r.json()).then((j) => setEmps((j.data || []).filter((e: any) => e.status === "ACTIVE" || e.status === "PROBATION"))).catch(() => {});
   }, []);
 
-  // Khởi tạo blocks: TẠO mới → 1 khối trống; SỬA → 1 khối dựng từ log.entries (gom theo NV).
+  // Khởi tạo blocks: TẠO → 1 khối trống; SỬA → mỗi log 1 khối (gom entries theo NV).
   useEffect(() => {
     if (seeded.current) return;
     seeded.current = true;
-    if (!log) { setBlocks([{ blockId: uid(), departmentId: "", collapsed: false, rows: [] }]); return; }
-    const byEmp = new Map<string, EmpRow>();
-    for (const e of log.entries) {
-      if (!byEmp.has(e.employeeId)) byEmp.set(e.employeeId, { rowId: uid(), employeeId: e.employeeId, employeeCode: e.employeeCode || "", employeeName: e.employeeName, projects: [] });
-      byEmp.get(e.employeeId)!.projects.push({ key: uid(), projectCode: e.projectCode, hours: e.hours, workCode: e.workCode || "", categoryCode: e.categoryCode || "", content: e.category || "" });
-    }
-    setBlocks([{ blockId: uid(), departmentId: log.departmentId, collapsed: false, rows: Array.from(byEmp.values()) }]);
-  }, [log]);
+    if (!isEdit) { setBlocks([{ blockId: uid(), departmentId: "", collapsed: false, rows: [] }]); return; }
+    setBlocks(logs!.map((lg) => {
+      const byEmp = new Map<string, EmpRow>();
+      for (const e of lg.entries) {
+        if (!byEmp.has(e.employeeId)) byEmp.set(e.employeeId, { rowId: uid(), employeeId: e.employeeId, employeeCode: e.employeeCode || "", employeeName: e.employeeName, projects: [] });
+        byEmp.get(e.employeeId)!.projects.push({ key: uid(), projectCode: e.projectCode, hours: e.hours, workCode: e.workCode || "", categoryCode: e.categoryCode || "", reinforce: e.reinforce || "", content: e.category || "" });
+      }
+      return { blockId: uid(), logId: lg.id, departmentId: lg.departmentId, collapsed: false, rows: Array.from(byEmp.values()) };
+    }));
+  }, [logs]);
 
   // Backfill Mã NV (erpCode) từ danh sách NV khi tải xong.
   useEffect(() => {
@@ -205,7 +340,6 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
 
   const patchBlock = (blockId: string, fn: (b: Block) => Block) => setBlocks((bs) => bs.map((b) => b.blockId === blockId ? fn(b) : b));
 
-  // Chọn xưởng cho 1 khối → tự nạp toàn bộ NV của xưởng, mỗi NV 1 dòng dự án trống.
   function loadBlockDept(blockId: string, deptId: string) {
     setError(null);
     patchBlock(blockId, (b) => ({
@@ -233,7 +367,6 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
     }));
   };
   const addProj = (blockId: string, rowId: string) => patchBlock(blockId, (b) => ({ ...b, rows: b.rows.map((r) => r.rowId === rowId ? { ...r, projects: [...r.projects, emptyProj(uid())] } : r) }));
-  // Xóa 1 dòng dự án; nếu là dòng cuối của NV → gỡ luôn NV khỏi khối.
   const removeProj = (blockId: string, rowId: string, key: string) => patchBlock(blockId, (b) => ({
     ...b, rows: b.rows.flatMap((r) => {
       if (r.rowId !== rowId) return [r];
@@ -247,7 +380,6 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
     patchBlock(blockId, (b) => ({ ...b, rows: [...b.rows, { rowId: uid(), employeeId: m.id, employeeCode: empCodeOf(m), employeeName: m.fullName, projects: [emptyProj(uid())] }] }));
   }
 
-  // Gom entries của 1 khối; trả { err } nếu thiếu, hoặc { entries }.
   function collectBlock(b: Block): { err?: string; entries: any[] } {
     const entries: any[] = [];
     const tag = `[${deptName(b.departmentId)}] `;
@@ -256,45 +388,47 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
       if (!p.projectCode) return { err: `${tag}Chọn Mã dự án cho ${r.employeeName}`, entries: [] };
       if (!p.hours || p.hours <= 0) return { err: `${tag}Nhập Hành chính (giờ) cho ${r.employeeName}`, entries: [] };
       if (!p.workCode) return { err: `${tag}Chọn Mã CV cho ${r.employeeName}`, entries: [] };
-      if (categoriesOf(p.workCode).length > 0 && !p.categoryCode) return { err: `${tag}Chọn Mã chủng loại cho ${r.employeeName}`, entries: [] };
-      if (!p.content.trim()) return { err: `${tag}Nhập Nội dung công việc cho ${r.employeeName}`, entries: [] };
-      entries.push({ employeeId: r.employeeId, employeeName: r.employeeName, employeeCode: r.employeeCode || null, projectCode: p.projectCode, hours: p.hours, workCode: p.workCode, categoryCode: p.categoryCode || null, category: p.content.trim() });
+      // Mã chủng loại / Tăng cường / Nội dung: không bắt buộc.
+      entries.push({ employeeId: r.employeeId, employeeName: r.employeeName, employeeCode: r.employeeCode || null, projectCode: p.projectCode, hours: p.hours, workCode: p.workCode, categoryCode: p.categoryCode || null, reinforce: p.reinforce.trim() || null, category: p.content.trim() });
     }
     return { entries };
   }
 
   async function save(submit: boolean) {
-    // SỬA: 1 khối = 1 phiếu (PUT).
+    // SỬA: mỗi khối = 1 phiếu (PUT theo logId).
     if (isEdit) {
-      const b = blocks[0];
-      const r = collectBlock(b);
-      if (r.err) { setError(r.err); return; }
-      if (r.entries.length === 0) { setError("Chưa có dòng nào được kê khai"); return; }
+      const payloads: { logId: string; entries: any[] }[] = [];
+      for (const b of blocks) {
+        const r = collectBlock(b);
+        if (r.err) { setError(r.err); return; }
+        if (r.entries.length === 0) { setError(`[${deptName(b.departmentId)}] Cần ít nhất 1 dòng kê khai`); return; }
+        payloads.push({ logId: b.logId!, entries: r.entries });
+      }
       setSaving(true);
       try {
-        const res = await fetch(`/api/v1/team-work-logs/${log!.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, submit, entries: r.entries }) });
-        const j = await res.json();
-        if (!res.ok) { setError(j?.error?.message || j?.error?.issues?.[0]?.message || "Lưu thất bại"); return; }
+        for (const pl of payloads) {
+          const res = await fetch(`/api/v1/team-work-logs/${pl.logId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, submit, entries: pl.entries }) });
+          if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j?.error?.message || j?.error?.issues?.[0]?.message || "Lưu thất bại"); setSaving(false); return; }
+        }
         onDone();
       } catch { setError("Lỗi kết nối"); } finally { setSaving(false); }
       return;
     }
-    // TẠO: mỗi xưởng (có kê khai) → 1 phiếu riêng, gửi tuần tự.
+    // TẠO: gửi 1 lần cả đợt (nhiều xưởng chung batchId).
     const active = blocks.filter((b) => b.departmentId);
     if (active.length === 0) { setError("Chọn ít nhất 1 xưởng"); return; }
-    const payloads: { departmentId: string; entries: any[] }[] = [];
+    const payloadBlocks: { departmentId: string; entries: any[] }[] = [];
     for (const b of active) {
       const r = collectBlock(b);
       if (r.err) { setError(r.err); return; }
-      if (r.entries.length) payloads.push({ departmentId: b.departmentId, entries: r.entries });
+      if (r.entries.length) payloadBlocks.push({ departmentId: b.departmentId, entries: r.entries });
     }
-    if (payloads.length === 0) { setError("Chưa có dòng nào được kê khai"); return; }
+    if (payloadBlocks.length === 0) { setError("Chưa có dòng nào được kê khai"); return; }
     setSaving(true);
     try {
-      for (const pl of payloads) {
-        const res = await fetch("/api/v1/team-work-logs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, departmentId: pl.departmentId, submit, entries: pl.entries }) });
-        if (!res.ok) { const j = await res.json().catch(() => ({})); setError(`[${deptName(pl.departmentId)}] ${j?.error?.message || j?.error?.issues?.[0]?.message || "Lưu thất bại"}`); setSaving(false); return; }
-      }
+      const res = await fetch("/api/v1/team-work-logs/batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, submit, blocks: payloadBlocks }) });
+      const j = await res.json();
+      if (!res.ok) { setError(j?.error?.message || j?.error?.issues?.[0]?.message || "Lưu thất bại"); return; }
       onDone();
     } catch { setError("Lỗi kết nối"); } finally { setSaving(false); }
   }
@@ -322,13 +456,14 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
             <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} style={inputStyle} />
           </div>
 
-          {/* Mỗi XƯỞNG 1 khối, đóng/mở được */}
           {blocks.map((b) => {
             const filledCount = b.rows.reduce((s, r) => s + r.projects.filter(isFilled).length, 0);
             const missing = membersOf(b.departmentId).filter((m) => !b.rows.some((r) => r.employeeId === m.id));
+            const q = (search[b.blockId] || "").trim();
+            const nq = norm(q);
+            const visibleRows = nq ? b.rows.filter((r) => norm(r.employeeName).includes(nq) || norm(r.employeeCode).includes(nq)) : b.rows;
             return (
               <div key={b.blockId} className="rounded-lg border" style={{ borderColor: "var(--ibs-border)" }}>
-                {/* Header khối */}
                 <div className="flex items-center gap-2 px-3 py-2.5 flex-wrap" style={{ background: "var(--ibs-bg)", borderBottom: b.collapsed ? "none" : "1px solid var(--ibs-border)" }}>
                   <button type="button" onClick={() => toggleCollapse(b.blockId)} className="p-0.5" style={{ color: "var(--ibs-text-dim)" }} title={b.collapsed ? "Mở" : "Thu gọn"}>
                     {b.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
@@ -351,18 +486,39 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
                     <div className="px-3 py-6 text-center text-[13px]" style={{ color: "var(--ibs-text-dim)" }}>Xưởng này chưa có nhân sự.</div>
                   ) : (
                     <div className="p-3 space-y-3">
+                      {/* Gõ tên tìm nhanh NV — chỉ lọc hiển thị, dữ liệu đã nhập vẫn giữ nguyên */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="relative">
+                          <input
+                            value={search[b.blockId] || ""}
+                            onChange={(e) => setSearch((s) => ({ ...s, [b.blockId]: e.target.value }))}
+                            placeholder="🔍 Gõ tên hoặc mã NV để tìm nhanh..."
+                            className="px-3 py-1.5 rounded-lg text-[13px] outline-none border"
+                            style={{ ...inputStyle, minWidth: 280 }}
+                          />
+                        </div>
+                        {q && (
+                          <>
+                            <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Hiện {visibleRows.length}/{b.rows.length} NV</span>
+                            <button type="button" onClick={() => setSearch((s) => ({ ...s, [b.blockId]: "" }))} className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold text-white" style={{ background: "var(--ibs-accent)" }}>Xong</button>
+                          </>
+                        )}
+                      </div>
                       <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Dòng để trống sẽ tự bỏ khi lưu · bấm <b>＋ dự án</b> để 1 NV khai thêm dự án.</div>
                       <div className="rounded-lg border overflow-x-auto" style={{ borderColor: "var(--ibs-border)" }}>
-                        <table className="w-full text-[12px]" style={{ minWidth: 820 }}>
+                        <table className="w-full text-[12px]" style={{ minWidth: 960 }}>
                           <thead>
                             <tr style={{ borderBottom: "1px solid var(--ibs-border)", background: "var(--ibs-bg)" }}>
-                              {["Mã NV", "Tên nhân viên", "Mã dự án", "Hành chính", "Mã CV", "Mã chủng loại", "Nội dung công việc", ""].map((h, i) => (
+                              {["Mã NV", "Tên nhân viên", "Mã dự án", "Hành chính", "Mã CV", "Mã chủng loại", "Tăng cường", "Nội dung công việc", ""].map((h, i) => (
                                 <th key={i} className={th} style={{ color: "var(--ibs-text-dim)" }}>{h}</th>
                               ))}
                             </tr>
                           </thead>
                           <tbody>
-                            {b.rows.map((r) => r.projects.map((p, pi) => {
+                            {visibleRows.length === 0 && (
+                              <tr><td colSpan={9} className="px-3 py-4 text-center text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không tìm thấy NV khớp "{q}"</td></tr>
+                            )}
+                            {visibleRows.map((r) => r.projects.map((p, pi) => {
                               const cats = categoriesOf(p.workCode);
                               const first = pi === 0;
                               return (
@@ -398,6 +554,9 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
                                     </select>
                                   </td>
                                   <td className="px-2 py-1.5">
+                                    <input value={p.reinforce} onChange={(e) => setProj(b.blockId, r.rowId, p.key, "reinforce", e.target.value)} placeholder="Tăng cường..." className="px-2 py-1.5 rounded-md text-[12px] outline-none border w-full" style={{ ...inputStyle, minWidth: 120 }} />
+                                  </td>
+                                  <td className="px-2 py-1.5">
                                     <input value={p.content} onChange={(e) => setProj(b.blockId, r.rowId, p.key, "content", e.target.value)} placeholder="Nội dung..." className="px-2 py-1.5 rounded-md text-[12px] outline-none border w-full" style={{ ...inputStyle, minWidth: 150 }} />
                                   </td>
                                   <td className="px-2 py-1.5 text-center">
@@ -409,7 +568,6 @@ function PhieuModal({ log, onClose, onDone }: { log: Log | null; onClose: () => 
                           </tbody>
                         </table>
                       </div>
-                      {/* Thêm lại NV (chỉ trong xưởng của khối) */}
                       <div className="flex items-center gap-2 flex-wrap">
                         <select value="" onChange={(e) => addEmp(b.blockId, b.departmentId, e.target.value)} className="px-3 py-1.5 rounded-lg text-[12.5px] outline-none border" style={inputStyle}>
                           <option value="">＋ Thêm nhân sự...</option>

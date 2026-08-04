@@ -13,7 +13,8 @@ const EntrySchema = z.object({
   hours: z.number().positive(),
   workCode: z.string().optional().nullable(),
   categoryCode: z.string().optional().nullable(),
-  category: z.string().min(1),
+  reinforce: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
 });
 const UpdateSchema = z.object({
   date: z.string().transform((s) => new Date(s)).optional(),
@@ -30,7 +31,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const log = await prisma.teamWorkLog.findUnique({ where: { id }, select: { createdById: true, status: true } });
   if (!log) return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
-  if (log.status !== "DRAFT") return NextResponse.json({ error: { code: "INVALID_STATE", message: "Chỉ sửa được phiếu đang NHÁP" } }, { status: 400 });
+  // Cho sửa khi NHÁP hoặc ĐÃ KÊ KHAI (không có bước duyệt); sửa xong sẽ so khớp lại.
+  if (log.status !== "DRAFT" && log.status !== "PENDING") return NextResponse.json({ error: { code: "INVALID_STATE", message: "Phiếu này không sửa được" } }, { status: 400 });
   const isOwner = log.createdById === userId;
   if (!isOwner && !canUser(session.user as any, "m3.phieuto:edit"))
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Chỉ chủ phiếu hoặc người có quyền sửa" } }, { status: 403 });
@@ -50,7 +52,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           create: entries.map((e) => ({
             employeeId: e.employeeId, employeeName: e.employeeName || "", employeeCode: e.employeeCode || null,
             projectCode: e.projectCode, hours: e.hours,
-            workCode: e.workCode || null, categoryCode: e.categoryCode || null, category: e.category,
+            workCode: e.workCode || null, categoryCode: e.categoryCode || null, reinforce: e.reinforce || null, category: e.category || "",
           })),
         },
       },
@@ -58,7 +60,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     });
   });
 
-  if (submit) {
+  // So khớp lại nếu phiếu ở trạng thái ĐÃ KÊ KHAI (gồm cả trường hợp sửa phiếu đã gửi trước đó).
+  if (updated.status === "PENDING") {
     await generateReconcileForLog({
       date: updated.date, departmentId: updated.departmentId, departmentName: updated.departmentName,
       entries: updated.entries.map((e) => ({ employeeId: e.employeeId, employeeName: e.employeeName, hours: e.hours })),

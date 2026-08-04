@@ -14,7 +14,8 @@ const EntrySchema = z.object({
   hours: z.number().positive("Giờ phải > 0"),
   workCode: z.string().optional().nullable(),
   categoryCode: z.string().optional().nullable(),
-  category: z.string().min(1, "Nhập nội dung công việc"),
+  reinforce: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
 });
 const CreateSchema = z.object({
   date: z.string().transform((s) => new Date(s)),
@@ -95,7 +96,8 @@ export async function POST(request: NextRequest) {
           hours: e.hours,
           workCode: e.workCode || null,
           categoryCode: e.categoryCode || null,
-          category: e.category,
+          reinforce: e.reinforce || null,
+          category: e.category || "",
         })),
       },
     },

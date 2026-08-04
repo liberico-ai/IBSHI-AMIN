@@ -627,6 +627,7 @@ model AttendanceReconcile {
 model TeamWorkLog {
   id             String             @id @default(uuid())
   date           DateTime // ngày kê khai
+  batchId        String? // đợt kê khai: gom nhiều xưởng tạo cùng lúc thành 1 "phiếu" ở giao diện
   departmentId   String // phòng/ban/xưởng
   departmentName String // snapshot tên phòng để hiển thị
   createdById    String // user id người tạo (tổ trưởng/người phụ trách)
@@ -640,6 +641,7 @@ model TeamWorkLog {
   @@index([departmentId])
   @@index([status])
   @@index([date])
+  @@index([batchId])
 }
 
 // 1 dòng kê khai: 1 nhân viên × 1 dự án × số giờ × hạng mục (1 NV có thể nhiều dòng/dự án).
@@ -653,7 +655,8 @@ model TeamWorkLogEntry {
   hours        Float // số giờ HÀNH CHÍNH (thập phân, vd 4.5) — dùng so khớp chấm công
   workCode     String? // Mã CV (list fix cứng src/lib/team-work-codes.ts)
   categoryCode String? // Mã chủng loại (list fix cứng src/lib/team-work-codes.ts)
-  category     String // nội dung công việc (nhập tay)
+  reinforce    String? // Tăng cường (nhập tay tự do, không bắt buộc)
+  category     String // nội dung công việc (nhập tay, không bắt buộc)
   log          TeamWorkLog @relation(fields: [logId], references: [id], onDelete: Cascade)
 
   @@index([logId])
