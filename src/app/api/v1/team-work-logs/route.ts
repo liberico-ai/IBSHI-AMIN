@@ -9,9 +9,12 @@ import { z } from "zod";
 const EntrySchema = z.object({
   employeeId: z.string().min(1),
   employeeName: z.string().optional().nullable(),
+  employeeCode: z.string().optional().nullable(),
   projectCode: z.string().min(1, "Chọn dự án"),
   hours: z.number().positive("Giờ phải > 0"),
-  category: z.string().min(1, "Nhập hạng mục"),
+  workCode: z.string().optional().nullable(),
+  categoryCode: z.string().optional().nullable(),
+  category: z.string().min(1, "Nhập nội dung công việc"),
 });
 const CreateSchema = z.object({
   date: z.string().transform((s) => new Date(s)),
@@ -87,8 +90,11 @@ export async function POST(request: NextRequest) {
         create: entries.map((e) => ({
           employeeId: e.employeeId,
           employeeName: e.employeeName || "",
+          employeeCode: e.employeeCode || null,
           projectCode: e.projectCode,
           hours: e.hours,
+          workCode: e.workCode || null,
+          categoryCode: e.categoryCode || null,
           category: e.category,
         })),
       },

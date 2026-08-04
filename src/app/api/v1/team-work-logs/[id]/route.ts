@@ -8,8 +8,11 @@ import { z } from "zod";
 const EntrySchema = z.object({
   employeeId: z.string().min(1),
   employeeName: z.string().optional().nullable(),
+  employeeCode: z.string().optional().nullable(),
   projectCode: z.string().min(1),
   hours: z.number().positive(),
+  workCode: z.string().optional().nullable(),
+  categoryCode: z.string().optional().nullable(),
   category: z.string().min(1),
 });
 const UpdateSchema = z.object({
@@ -45,8 +48,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         ...(submit ? { status: "PENDING" } : {}),
         entries: {
           create: entries.map((e) => ({
-            employeeId: e.employeeId, employeeName: e.employeeName || "",
-            projectCode: e.projectCode, hours: e.hours, category: e.category,
+            employeeId: e.employeeId, employeeName: e.employeeName || "", employeeCode: e.employeeCode || null,
+            projectCode: e.projectCode, hours: e.hours,
+            workCode: e.workCode || null, categoryCode: e.categoryCode || null, category: e.category,
           })),
         },
       },

@@ -648,9 +648,12 @@ model TeamWorkLogEntry {
   logId        String
   employeeId   String
   employeeName String // snapshot tên NV
+  employeeCode String? // snapshot Mã NV (erpCode, vd "190483") để hiển thị/xuất báo cáo
   projectCode  String // mã dự án (list fix cứng src/lib/projects.ts)
-  hours        Float // số giờ (thập phân, vd 4.5)
-  category     String // hạng mục (nhập tay, bắt buộc)
+  hours        Float // số giờ HÀNH CHÍNH (thập phân, vd 4.5) — dùng so khớp chấm công
+  workCode     String? // Mã CV (list fix cứng src/lib/team-work-codes.ts)
+  categoryCode String? // Mã chủng loại (list fix cứng src/lib/team-work-codes.ts)
+  category     String // nội dung công việc (nhập tay)
   log          TeamWorkLog @relation(fields: [logId], references: [id], onDelete: Cascade)
 
   @@index([logId])
