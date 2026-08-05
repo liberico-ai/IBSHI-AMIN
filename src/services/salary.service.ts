@@ -11,6 +11,12 @@ import { computeBhxh, SALARY_CONFIG } from "@/lib/constants";
 //   ➜ IMPORT XONG NHỚ ĐỔI LẠI THÀNH true.
 const REQUIRE_APPROVAL_FOR_LEAVE_OT = false;
 
+// Làm tròn giờ 1 ca CHỈ để TÍNH LƯƠNG: >7.8 (gần đủ 8h) → 8; còn lại giữ nguyên số lẻ.
+//   Áp cho HC ca ngày/đêm + tăng ca (workHours/reconciledHours/nightHours/otHours/otNightHours).
+//   KHÔNG đổi Bảng chấm công (bảng công vẫn hiện số lẻ máy chấm — đây chỉ áp trong service tính lương).
+const roundShiftHours = (v: number | null | undefined): number | null | undefined =>
+  (v != null && v > 7.8 && v < 8 ? 8 : v);
+
 // ─── TNCN re-export (backwards compat — vẫn dùng được nơi khác) ─────────────
 
 export { calcTNCN } from "@/lib/salary-calc";
@@ -56,6 +62,15 @@ export async function calculatePayrollForPeriod(periodId: string) {
         return ds < w.from || ds > w.to; // chỉ giữ ngày NGOÀI khoảng tạm nghỉ
       });
     }
+  }
+
+  // Làm tròn giờ >7.8 → 8 CHỈ để tính lương (bảng chấm công giữ nguyên số lẻ máy chấm).
+  for (const a of attendanceData) {
+    (a as any).workHours = roundShiftHours(a.workHours);
+    (a as any).reconciledHours = roundShiftHours((a as any).reconciledHours);
+    (a as any).otHours = roundShiftHours(a.otHours);
+    (a as any).nightHours = roundShiftHours((a as any).nightHours);
+    (a as any).otNightHours = roundShiftHours((a as any).otNightHours);
   }
 
   // CHỈ tính lương cho NV CÓ DỮ LIỆU CHẤM CÔNG trong tháng (sau khi đã ẩn ngày tạm nghỉ)
@@ -144,7 +159,7 @@ export async function calculatePayrollForPeriod(periodId: string) {
     const priorApprOt = new Set<string>();
     for (const o of priorOt) priorApprOt.add(`${o.employeeId}|${o.date.toISOString().slice(0, 10)}`);
     for (const a of priorAtt) {
-      const d = new Date(a.date); const wh = ((a as any).reconciledHours ?? a.workHours) || 0, oh = a.otHours || 0, onh = (a as any).otNightHours || 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT
+      const d = new Date(a.date); const wh = (roundShiftHours((a as any).reconciledHours ?? a.workHours) as number) || 0, oh = (roundShiftHours(a.otHours) as number) || 0, onh = (roundShiftHours((a as any).otNightHours) as number) || 0; // ưu tiên giờ ĐÃ ĐỐI SOÁT + làm tròn >7.8→8
       // CN/Lễ: toàn bộ giờ làm ngày + OT đêm tính OT (không cần đơn). Ngày thường: OT (ngày+đêm) CHỈ khi có đơn duyệt.
       const isCnLe = isHoliday(d) || d.getUTCDay() === 0;
       const h = isCnLe ? wh + oh + onh : ((!REQUIRE_APPROVAL_FOR_LEAVE_OT || priorApprOt.has(`${a.employeeId}|${d.toISOString().slice(0, 10)}`)) ? oh + onh : 0);
