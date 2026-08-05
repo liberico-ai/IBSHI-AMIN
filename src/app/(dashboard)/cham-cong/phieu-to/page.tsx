@@ -427,20 +427,30 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
   }
 
   async function save(submit: boolean) {
-    // SỬA: mỗi khối = 1 phiếu (PUT theo logId).
+    // SỬA: khối cũ (có logId) → PUT; khối XƯỞNG MỚI thêm lúc sửa (chưa có logId) → POST kèm batchId của đợt.
     if (isEdit) {
-      const payloads: { logId: string; entries: any[] }[] = [];
+      const groupBatchId = logs![0].batchId || logs![0].id;
+      const puts: { logId: string; entries: any[] }[] = [];
+      const posts: { departmentId: string; entries: any[] }[] = [];
       for (const b of blocks) {
         const r = collectBlock(b);
         if (r.err) { setError(r.err); return; }
-        if (r.entries.length === 0) { setError(`[${deptName(b.departmentId)}] Cần ít nhất 1 dòng kê khai`); return; }
-        payloads.push({ logId: b.logId!, entries: r.entries });
+        if (b.logId) {
+          if (r.entries.length === 0) { setError(`[${deptName(b.departmentId)}] Cần ít nhất 1 dòng kê khai`); return; }
+          puts.push({ logId: b.logId, entries: r.entries });
+        } else if (b.departmentId && r.entries.length > 0) {
+          posts.push({ departmentId: b.departmentId, entries: r.entries }); // xưởng mới có dữ liệu → tạo mới
+        }
       }
       setSaving(true);
       try {
-        for (const pl of payloads) {
+        for (const pl of puts) {
           const res = await fetch(`/api/v1/team-work-logs/${pl.logId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, submit, entries: pl.entries }) });
           if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j?.error?.message || j?.error?.issues?.[0]?.message || "Lưu thất bại"); setSaving(false); return; }
+        }
+        for (const pl of posts) {
+          const res = await fetch("/api/v1/team-work-logs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, departmentId: pl.departmentId, batchId: groupBatchId, submit, entries: pl.entries }) });
+          if (!res.ok) { const j = await res.json().catch(() => ({})); setError(`[${deptName(pl.departmentId)}] ${j?.error?.message || j?.error?.issues?.[0]?.message || "Lưu thất bại"}`); setSaving(false); return; }
         }
         onDone();
       } catch { setError("Lỗi kết nối"); } finally { setSaving(false); }
@@ -505,12 +515,12 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
                     {b.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
                   </button>
                   <span className="text-[13px] font-semibold">🏭 Xưởng/Phòng ban:</span>
-                  <select value={b.departmentId} onChange={(e) => loadBlockDept(b.blockId, e.target.value)} disabled={isEdit} className="px-2.5 py-1.5 rounded-lg text-[13px] outline-none border" style={inputStyle}>
+                  <select value={b.departmentId} onChange={(e) => loadBlockDept(b.blockId, e.target.value)} disabled={!!b.logId} className="px-2.5 py-1.5 rounded-lg text-[13px] outline-none border" style={inputStyle}>
                     <option value="">-- Chọn xưởng --</option>
                     {depts.filter((d) => d.id === b.departmentId || !usedDepts.includes(d.id)).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
                   {b.departmentId && <span className="text-[12px]" style={{ color: "var(--ibs-text-dim)" }}><b style={{ color: "var(--ibs-accent)" }}>{filledCount}</b> dòng đã khai</span>}
-                  {!isEdit && blocks.length > 1 && (
+                  {!b.logId && blocks.length > 1 && (
                     <button type="button" onClick={() => removeBlock(b.blockId)} className="ml-auto p-1 rounded" style={{ color: "var(--ibs-danger)" }} title="Bỏ xưởng này"><Trash2 size={14} /></button>
                   )}
                 </div>
@@ -641,11 +651,9 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
             );
           })}
 
-          {!isEdit && (
-            <button type="button" onClick={addBlock} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", borderStyle: "dashed" }}>
-              <Plus size={15} /> Thêm xưởng
-            </button>
-          )}
+          <button type="button" onClick={addBlock} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "var(--ibs-accent)", color: "var(--ibs-accent)", borderStyle: "dashed" }}>
+            <Plus size={15} /> Thêm xưởng
+          </button>
         </div>
 
         <div className="flex gap-3 p-5 pt-3 border-t shrink-0" style={{ borderColor: "var(--ibs-border)" }}>

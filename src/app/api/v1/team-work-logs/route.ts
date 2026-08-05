@@ -20,6 +20,7 @@ const EntrySchema = z.object({
 const CreateSchema = z.object({
   date: z.string().transform((s) => new Date(s)),
   departmentId: z.string().uuid(),
+  batchId: z.string().optional().nullable(), // gộp vào đợt sẵn có (khi thêm xưởng lúc SỬA phiếu)
   submit: z.boolean().optional(),           // true = gửi duyệt (PENDING); mặc định = lưu nháp (DRAFT)
   entries: z.array(EntrySchema).min(1, "Cần ít nhất 1 dòng kê khai"),
 });
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR", issues: parsed.error.issues } }, { status: 422 });
   }
-  const { date, departmentId, submit, entries } = parsed.data;
+  const { date, departmentId, batchId, submit, entries } = parsed.data;
 
   const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { name: true } });
   if (!dept) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Phòng ban không tồn tại" } }, { status: 404 });
@@ -83,6 +84,7 @@ export async function POST(request: NextRequest) {
   const log = await prisma.teamWorkLog.create({
     data: {
       date,
+      batchId: batchId || null,
       departmentId,
       departmentName: dept.name,
       createdById: userId,
