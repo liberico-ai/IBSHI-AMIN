@@ -286,8 +286,13 @@ export async function calculatePayrollForPeriod(periodId: string) {
           }
           // isPaidCode + appr: đã đếm ở khối phân loại mã phía trên → KHÔNG tính KL.
         } else {
-          // KHÔNG có đơn duyệt → KL cả ngày (kể cả mã CL/WL/ML/SL/MT đã ghi sẵn nhưng CHƯA duyệt).
-          unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
+          // KHÔNG có đơn duyệt:
+          //  - Gate BẬT: mã đặc biệt (CL/WL/ML/SL/MT) chưa duyệt → KL (chờ duyệt mới có lương).
+          //  - Gate TẮT: các mã đó ĐÃ được tính là nghỉ có lương/BHXH ở khối phân loại phía trên →
+          //    KHÔNG tính KL lại (tránh double-count + bù nhầm bằng OT). Chỉ vắng KHÔNG mã / UL mới KL.
+          if (REQUIRE_APPROVAL_FOR_LEAVE_OT || !isPaidCode) {
+            unpaidWeekdayMap[a.employeeId] = (unpaidWeekdayMap[a.employeeId] || 0) + 1;
+          }
         }
         }
       } else if (a.status === "ABSENT_APPROVED" && !appr && REQUIRE_APPROVAL_FOR_LEAVE_OT) {
