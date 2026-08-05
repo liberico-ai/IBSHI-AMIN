@@ -302,8 +302,17 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
   const [date, setDate] = useState(isEdit ? String(logs![0].date).slice(0, 10) : new Date().toISOString().slice(0, 10));
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [search, setSearch] = useState<Record<string, string>>({}); // gõ tên lọc NV theo từng khối (chỉ lọc hiển thị)
+  const [sel, setSel] = useState<Record<string, boolean>>({});     // tick chọn NV (theo rowId) để điền hàng loạt
+  const [bulk, setBulk] = useState<Record<string, { projectCode: string; hours: string; workCode: string; categoryCode: string; reinforce: string; content: string }>>({}); // bản nháp áp hàng loạt / khối
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const bulkOf = (blockId: string) => bulk[blockId] || { projectCode: "", hours: "", workCode: "", categoryCode: "", reinforce: "", content: "" };
+  const setBulkField = (blockId: string, f: string, v: string) => setBulk((s) => {
+    const cur = s[blockId] || { projectCode: "", hours: "", workCode: "", categoryCode: "", reinforce: "", content: "" };
+    const nx = { ...cur, [f]: v };
+    if (f === "workCode" && !categoriesOf(v).some((c) => c.code === nx.categoryCode)) nx.categoryCode = "";
+    return { ...s, [blockId]: nx };
+  });
   const cnt = useRef(0);
   const seeded = useRef(false);
   const uid = () => `k${cnt.current++}`;
@@ -350,6 +359,29 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
   const addBlock = () => setBlocks((bs) => [...bs, { blockId: uid(), departmentId: "", collapsed: false, rows: [] }]);
   const removeBlock = (blockId: string) => setBlocks((bs) => bs.filter((b) => b.blockId !== blockId));
   const toggleCollapse = (blockId: string) => patchBlock(blockId, (b) => ({ ...b, collapsed: !b.collapsed }));
+
+  const toggleSel = (rowId: string) => setSel((s) => ({ ...s, [rowId]: !s[rowId] }));
+  const setAllSel = (rowIds: string[], checked: boolean) => setSel((s) => { const n = { ...s }; rowIds.forEach((id) => (n[id] = checked)); return n; });
+  // Áp các tiêu chí ĐÃ NHẬP ở thanh hàng loạt vào DÒNG DỰ ÁN ĐẦU của mỗi NV đã tick (ghi đè trường có nhập).
+  function applyBulk(blockId: string) {
+    const d = bulkOf(blockId);
+    setError(null);
+    patchBlock(blockId, (b) => ({
+      ...b,
+      rows: b.rows.map((r) => !sel[r.rowId] ? r : {
+        ...r,
+        projects: r.projects.map((p, i) => i !== 0 ? p : {
+          ...p,
+          ...(d.projectCode ? { projectCode: d.projectCode } : {}),
+          ...(Number(d.hours) > 0 ? { hours: Number(d.hours) } : {}),
+          ...(d.workCode ? { workCode: d.workCode } : {}),
+          ...(d.categoryCode ? { categoryCode: d.categoryCode } : {}),
+          ...(d.reinforce.trim() ? { reinforce: d.reinforce } : {}),
+          ...(d.content.trim() ? { content: d.content } : {}),
+        }),
+      }),
+    }));
+  }
 
   const setProj = (blockId: string, rowId: string, key: string, f: keyof Proj, v: string) => {
     setError(null);
@@ -462,6 +494,10 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
             const q = (search[b.blockId] || "").trim();
             const nq = norm(q);
             const visibleRows = nq ? b.rows.filter((r) => norm(r.employeeName).includes(nq) || norm(r.employeeCode).includes(nq)) : b.rows;
+            const bd = bulkOf(b.blockId);
+            const bulkCats = categoriesOf(bd.workCode);
+            const selCount = b.rows.filter((r) => sel[r.rowId]).length;
+            const allVisSel = visibleRows.length > 0 && visibleRows.every((r) => sel[r.rowId]);
             return (
               <div key={b.blockId} className="rounded-lg border" style={{ borderColor: "var(--ibs-border)" }}>
                 <div className="flex items-center gap-2 px-3 py-2.5 flex-wrap" style={{ background: "var(--ibs-bg)", borderBottom: b.collapsed ? "none" : "1px solid var(--ibs-border)" }}>
@@ -504,11 +540,31 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
                           </>
                         )}
                       </div>
+                      {/* ⚡ Điền hàng loạt: tick NV rồi nhập tiêu chí chung → Áp (ghi đè dòng dự án đầu của người đã tick) */}
+                      <div className="rounded-lg border p-2.5" style={{ borderColor: "var(--ibs-accent)", background: "rgba(0,180,216,0.06)" }}>
+                        <div className="text-[12px] font-semibold mb-2" style={{ color: "var(--ibs-accent)" }}>⚡ Điền hàng loạt <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>— tick NV bên dưới, nhập tiêu chí chung rồi bấm Áp</span></div>
+                        <div className="flex items-end gap-2 flex-wrap">
+                          <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Mã dự án</div>
+                            <select value={bd.projectCode} onChange={(e) => setBulkField(b.blockId, "projectCode", e.target.value)} className={cellSel} style={{ ...inputStyle, width: 128 }}><option value="">—</option>{OT_PROJECTS.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>
+                          <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Hành chính</div>
+                            <input type="number" step="0.5" min="0" value={bd.hours} onChange={(e) => setBulkField(b.blockId, "hours", e.target.value)} placeholder="Giờ" className="w-16 px-2 py-1.5 rounded-md text-[12px] outline-none text-right border" style={inputStyle} /></div>
+                          <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Mã CV</div>
+                            <select value={bd.workCode} onChange={(e) => setBulkField(b.blockId, "workCode", e.target.value)} className={cellSel} style={{ ...inputStyle, width: 120 }}><option value="">—</option>{WORK_CATALOG.map((w) => <option key={w.code} value={w.code}>{w.code} · {w.label}</option>)}</select></div>
+                          <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Mã chủng loại</div>
+                            <select value={bd.categoryCode} onChange={(e) => setBulkField(b.blockId, "categoryCode", e.target.value)} disabled={!bd.workCode || bulkCats.length === 0} className={cellSel} style={{ ...inputStyle, width: 130, opacity: (!bd.workCode || bulkCats.length === 0) ? 0.5 : 1 }}><option value="">—</option>{bulkCats.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.label}</option>)}</select></div>
+                          <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Tăng cường</div>
+                            <input value={bd.reinforce} onChange={(e) => setBulkField(b.blockId, "reinforce", e.target.value)} placeholder="..." className="px-2 py-1.5 rounded-md text-[12px] outline-none border" style={{ ...inputStyle, width: 110 }} /></div>
+                          <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Nội dung</div>
+                            <input value={bd.content} onChange={(e) => setBulkField(b.blockId, "content", e.target.value)} placeholder="..." className="px-2 py-1.5 rounded-md text-[12px] outline-none border" style={{ ...inputStyle, width: 150 }} /></div>
+                          <button type="button" onClick={() => applyBulk(b.blockId)} disabled={selCount === 0} className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold text-white" style={{ background: selCount ? "var(--ibs-accent)" : "rgba(0,180,216,0.4)" }}>Áp cho {selCount} người</button>
+                        </div>
+                      </div>
                       <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Dòng để trống sẽ tự bỏ khi lưu · bấm <b>＋ dự án</b> để 1 NV khai thêm dự án.</div>
                       <div className="rounded-lg border overflow-x-auto" style={{ borderColor: "var(--ibs-border)" }}>
-                        <table className="w-full text-[12px]" style={{ minWidth: 960 }}>
+                        <table className="w-full text-[12px]" style={{ minWidth: 990 }}>
                           <thead>
                             <tr style={{ borderBottom: "1px solid var(--ibs-border)", background: "var(--ibs-bg)" }}>
+                              <th className={th} style={{ color: "var(--ibs-text-dim)" }}><input type="checkbox" checked={allVisSel} onChange={(e) => setAllSel(visibleRows.map((r) => r.rowId), e.target.checked)} title="Chọn tất cả" /></th>
                               {["Mã NV", "Tên nhân viên", "Mã dự án", "Hành chính", "Mã CV", "Mã chủng loại", "Tăng cường", "Nội dung công việc", ""].map((h, i) => (
                                 <th key={i} className={th} style={{ color: "var(--ibs-text-dim)" }}>{h}</th>
                               ))}
@@ -516,13 +572,16 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
                           </thead>
                           <tbody>
                             {visibleRows.length === 0 && (
-                              <tr><td colSpan={9} className="px-3 py-4 text-center text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không tìm thấy NV khớp "{q}"</td></tr>
+                              <tr><td colSpan={10} className="px-3 py-4 text-center text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không tìm thấy NV khớp "{q}"</td></tr>
                             )}
                             {visibleRows.map((r) => r.projects.map((p, pi) => {
                               const cats = categoriesOf(p.workCode);
                               const first = pi === 0;
                               return (
                                 <tr key={p.key} style={{ borderBottom: pi === r.projects.length - 1 ? "2px solid var(--ibs-border)" : "1px dashed var(--ibs-border)" }}>
+                                  {first && (
+                                    <td className="px-2 py-1.5 align-top text-center" rowSpan={r.projects.length} style={{ borderRight: "1px solid var(--ibs-border)" }}><input type="checkbox" checked={!!sel[r.rowId]} onChange={() => toggleSel(r.rowId)} /></td>
+                                  )}
                                   {first && (
                                     <td className="px-2 py-1.5 align-top font-mono whitespace-nowrap" rowSpan={r.projects.length} style={{ color: "var(--ibs-text-muted)", borderRight: "1px solid var(--ibs-border)" }}>{r.employeeCode || "—"}</td>
                                   )}

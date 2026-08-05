@@ -179,6 +179,12 @@ function ProjectBlocks({ blocks, setBlocks, emps, departments, teams, membersOfK
   onDirty?: () => void;
 }) {
   const [search, setSearch] = useState<Record<string, string>>({});
+  const [sel, setSel] = useState<Record<string, boolean>>({});   // tick chọn NV để điền hàng loạt
+  const [bulk, setBulk] = useState<Record<string, { projectCode: string; startTime: string; endTime: string; reason: string }>>({});
+  const bulkOf = (blockId: string) => bulk[blockId] || { projectCode: "", startTime: "17:30", endTime: "19:30", reason: "" };
+  const setBulkField = (blockId: string, f: string, v: string) => setBulk((s) => ({ ...s, [blockId]: { ...(s[blockId] || { projectCode: "", startTime: "17:30", endTime: "19:30", reason: "" }), [f]: v } }));
+  const toggleSel = (rowId: string) => setSel((s) => ({ ...s, [rowId]: !s[rowId] }));
+  const setAllSel = (rowIds: string[], checked: boolean) => setSel((s) => { const n = { ...s }; rowIds.forEach((id) => (n[id] = checked)); return n; });
   const codeOf = (m: OtEmp) => m.code || "";
   const usedKeys = blocks.map((b) => b.deptKey).filter(Boolean);
   const keyName = (key: string) => {
@@ -213,6 +219,21 @@ function ProjectBlocks({ blocks, setBlocks, emps, departments, teams, membersOfK
     if (!m) return;
     patch(blockId, (b) => ({ ...b, rows: [...b.rows, { rowId: otUid(), employeeId: m.id, employeeCode: codeOf(m), employeeName: m.fullName, projects: [emptyOtProj(otUid())] }] }));
   }
+  // Áp tiêu chí chung vào DÒNG DỰ ÁN ĐẦU của mỗi NV đã tick (giờ đi/về + dự án luôn áp; lý do áp nếu có nhập).
+  function applyBulk(blockId: string) {
+    const d = bulkOf(blockId);
+    patch(blockId, (b) => ({
+      ...b,
+      rows: b.rows.map((r) => !sel[r.rowId] ? r : {
+        ...r,
+        projects: r.projects.map((p, i) => i !== 0 ? p : {
+          ...p, startTime: d.startTime, endTime: d.endTime,
+          ...(d.projectCode ? { projectCode: d.projectCode } : {}),
+          ...(d.reason.trim() ? { reason: d.reason } : {}),
+        }),
+      }),
+    }));
+  }
 
   const inputStyle = { background: "var(--ibs-bg)", borderColor: "var(--ibs-border)", color: "var(--ibs-text)" };
   const cellSel = "px-2 py-1.5 rounded-md text-[12px] outline-none border";
@@ -227,6 +248,9 @@ function ProjectBlocks({ blocks, setBlocks, emps, departments, teams, membersOfK
         const filledCount = b.rows.reduce((s, r) => s + r.projects.filter(otProjFilled).length, 0);
         const memberIds = new Set(b.rows.map((r) => r.employeeId));
         const missing = membersOfKey(b.deptKey).filter((m) => !memberIds.has(m.id));
+        const bd = bulkOf(b.blockId);
+        const selCount = b.rows.filter((r) => sel[r.rowId]).length;
+        const allVisSel = visibleRows.length > 0 && visibleRows.every((r) => sel[r.rowId]);
         return (
           <div key={b.blockId} className="rounded-lg border" style={{ borderColor: "var(--ibs-border)" }}>
             <div className="flex items-center gap-2 px-3 py-2.5 flex-wrap" style={{ background: "var(--ibs-bg)", borderBottom: b.collapsed ? "none" : "1px solid var(--ibs-border)" }}>
@@ -253,22 +277,36 @@ function ProjectBlocks({ blocks, setBlocks, emps, departments, teams, membersOfK
                       <button type="button" onClick={() => setSearch((s) => ({ ...s, [b.blockId]: "" }))} className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold text-white" style={{ background: "var(--ibs-accent)" }}>Xong</button>
                     </>)}
                   </div>
+                  {/* ⚡ Điền hàng loạt: tick NV rồi nhập tiêu chí chung → Áp (ghi đè dòng dự án đầu) */}
+                  <div className="rounded-lg border p-2.5" style={{ borderColor: "var(--ibs-accent)", background: "rgba(0,180,216,0.06)" }}>
+                    <div className="text-[12px] font-semibold mb-2" style={{ color: "var(--ibs-accent)" }}>⚡ Điền hàng loạt <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>— tick NV bên dưới, nhập tiêu chí chung rồi bấm Áp</span></div>
+                    <div className="flex items-end gap-2 flex-wrap">
+                      <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Mã dự án</div>
+                        <select value={bd.projectCode} onChange={(e) => setBulkField(b.blockId, "projectCode", e.target.value)} className={cellSel} style={{ ...inputStyle, width: 128 }}><option value="">—</option>{OT_PROJECTS.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>
+                      <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Giờ đi</div><div className="w-[54px]"><TimeInput value={bd.startTime} onChange={(e) => setBulkField(b.blockId, "startTime", e.target.value)} className="w-full px-1 py-1.5 rounded-md text-[12px] text-center outline-none border" style={inputStyle} /></div></div>
+                      <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Giờ về</div><div className="w-[54px]"><TimeInput value={bd.endTime} onChange={(e) => setBulkField(b.blockId, "endTime", e.target.value)} className="w-full px-1 py-1.5 rounded-md text-[12px] text-center outline-none border" style={inputStyle} /></div></div>
+                      <div className="flex-1 min-w-[150px]"><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Lý do</div><input value={bd.reason} onChange={(e) => setBulkField(b.blockId, "reason", e.target.value)} placeholder="..." className="px-2 py-1.5 rounded-md text-[12px] outline-none border w-full" style={inputStyle} /></div>
+                      <button type="button" onClick={() => applyBulk(b.blockId)} disabled={selCount === 0} className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold text-white" style={{ background: selCount ? "var(--ibs-accent)" : "rgba(0,180,216,0.4)" }}>Áp cho {selCount} người</button>
+                    </div>
+                  </div>
                   <div className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>Dòng chưa chọn dự án sẽ tự bỏ khi gửi · bấm <b>＋ dự án</b> để 1 NV khai thêm dự án · làm qua nửa đêm thì tách 2 đơn.</div>
                   <div className="rounded-lg border overflow-x-auto" style={{ borderColor: "var(--ibs-border)" }}>
-                    <table className="w-full text-[12px]" style={{ minWidth: 860 }}>
+                    <table className="w-full text-[12px]" style={{ minWidth: 900 }}>
                       <thead>
                         <tr style={{ borderBottom: "1px solid var(--ibs-border)", background: "var(--ibs-bg)" }}>
+                          <th className={th} style={{ color: "var(--ibs-text-dim)" }}><input type="checkbox" checked={allVisSel} onChange={(e) => setAllSel(visibleRows.map((r) => r.rowId), e.target.checked)} title="Chọn tất cả" /></th>
                           {["Mã NV", "Tên nhân viên", "Mã dự án", "Giờ đi", "Giờ về", "Số giờ", "Lý do", ""].map((h, i) => <th key={i} className={th} style={{ color: "var(--ibs-text-dim)" }}>{h}</th>)}
                         </tr>
                       </thead>
                       <tbody>
-                        {visibleRows.length === 0 && <tr><td colSpan={8} className="px-3 py-4 text-center text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không tìm thấy NV khớp &quot;{q}&quot;</td></tr>}
+                        {visibleRows.length === 0 && <tr><td colSpan={9} className="px-3 py-4 text-center text-[12px]" style={{ color: "var(--ibs-text-dim)" }}>Không tìm thấy NV khớp &quot;{q}&quot;</td></tr>}
                         {visibleRows.map((r) => r.projects.map((p, pi) => {
                           const first = pi === 0;
                           const parts = otRateParts(p.startTime, p.endTime, dateStr);
                           const h = calcHours(p.startTime, p.endTime);
                           return (
                             <tr key={p.key} style={{ borderBottom: pi === r.projects.length - 1 ? "2px solid var(--ibs-border)" : "1px dashed var(--ibs-border)" }}>
+                              {first && <td className="px-2 py-1.5 align-top text-center" rowSpan={r.projects.length} style={{ borderRight: "1px solid var(--ibs-border)" }}><input type="checkbox" checked={!!sel[r.rowId]} onChange={() => toggleSel(r.rowId)} /></td>}
                               {first && <td className="px-2 py-1.5 align-top font-mono whitespace-nowrap" rowSpan={r.projects.length} style={{ color: "var(--ibs-text-muted)", borderRight: "1px solid var(--ibs-border)" }}>{r.employeeCode || "—"}</td>}
                               {first && <td className="px-2 py-1.5 align-top" rowSpan={r.projects.length} style={{ borderRight: "1px solid var(--ibs-border)", minWidth: 140 }}>
                                 <div className="font-medium">{r.employeeName}</div>
