@@ -9,7 +9,7 @@ import { Plus, X, Clock, Calendar, Lock, Pencil, Trash2 } from "lucide-react";
 import { DateInput, TimeInput } from "@/components/shared/date-input";
 import { canSeeOTTab } from "@/lib/ot-access";
 import { useCan } from "@/hooks/use-permission";
-import { OT_PROJECTS } from "@/lib/projects";
+import { ProjectSelect } from "@/components/shared/project-select";
 import { confirmDialog, alertDialog } from "@/lib/confirm-dialog";
 
 type OTRequest = {
@@ -282,7 +282,7 @@ function ProjectBlocks({ blocks, setBlocks, emps, departments, teams, membersOfK
                     <div className="text-[12px] font-semibold mb-2" style={{ color: "var(--ibs-accent)" }}>⚡ Điền hàng loạt <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>— tick NV bên dưới, nhập tiêu chí chung rồi bấm Áp</span></div>
                     <div className="flex items-end gap-2 flex-wrap">
                       <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Mã dự án</div>
-                        <select value={bd.projectCode} onChange={(e) => setBulkField(b.blockId, "projectCode", e.target.value)} className={cellSel} style={{ ...inputStyle, width: 128 }}><option value="">—</option>{OT_PROJECTS.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>
+                        <ProjectSelect value={bd.projectCode} onChange={(v) => setBulkField(b.blockId, "projectCode", v)} cls={cellSel} style={inputStyle} wrapStyle={{ width: 128 }} /></div>
                       <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Giờ đi</div><div className="w-[54px]"><TimeInput value={bd.startTime} onChange={(e) => setBulkField(b.blockId, "startTime", e.target.value)} className="w-full px-1 py-1.5 rounded-md text-[12px] text-center outline-none border" style={inputStyle} /></div></div>
                       <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Giờ về</div><div className="w-[54px]"><TimeInput value={bd.endTime} onChange={(e) => setBulkField(b.blockId, "endTime", e.target.value)} className="w-full px-1 py-1.5 rounded-md text-[12px] text-center outline-none border" style={inputStyle} /></div></div>
                       <div className="flex-1 min-w-[150px]"><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Lý do</div><input value={bd.reason} onChange={(e) => setBulkField(b.blockId, "reason", e.target.value)} placeholder="..." className="px-2 py-1.5 rounded-md text-[12px] outline-none border w-full" style={inputStyle} /></div>
@@ -313,10 +313,7 @@ function ProjectBlocks({ blocks, setBlocks, emps, departments, teams, membersOfK
                                 <button type="button" onClick={() => addProj(b.blockId, r.rowId)} className="mt-1 text-[11px] font-medium inline-flex items-center gap-0.5" style={{ color: "var(--ibs-accent)" }}>＋ dự án</button>
                               </td>}
                               <td className="px-2 py-1.5">
-                                <select value={p.projectCode} onChange={(e) => setProj(b.blockId, r.rowId, p.key, "projectCode", e.target.value)} className={cellSel} style={{ ...inputStyle, width: 128 }}>
-                                  <option value="">—</option>
-                                  {OT_PROJECTS.map((x) => <option key={x} value={x}>{x}</option>)}
-                                </select>
+                                <ProjectSelect value={p.projectCode} onChange={(v) => setProj(b.blockId, r.rowId, p.key, "projectCode", v)} cls={cellSel} style={inputStyle} wrapStyle={{ width: 128 }} />
                               </td>
                               <td className="px-2 py-1.5"><div className="w-[54px]"><TimeInput value={p.startTime} onChange={(e) => setProj(b.blockId, r.rowId, p.key, "startTime", e.target.value)} className="w-full px-1 py-1.5 rounded-md text-[12px] text-center outline-none border" style={inputStyle} /></div></td>
                               <td className="px-2 py-1.5"><div className="w-[54px]"><TimeInput value={p.endTime} onChange={(e) => setProj(b.blockId, r.rowId, p.key, "endTime", e.target.value)} className="w-full px-1 py-1.5 rounded-md text-[12px] text-center outline-none border" style={inputStyle} /></div></td>
@@ -638,10 +635,7 @@ function NewOTDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
                       <div className="space-y-1.5">
                         {rows.map((r, idx) => (
                           <div key={idx} className="flex items-center gap-1.5">
-                            <select value={r.projectCode} onChange={(e) => setProj(id, idx, "projectCode", e.target.value)} className="flex-1 px-2 py-1.5 rounded-md text-[12px] outline-none" style={inputStyle}>
-                              <option value="">-- Dự án --</option>
-                              {OT_PROJECTS.map((p) => <option key={p} value={p}>{p}</option>)}
-                            </select>
+                            <ProjectSelect value={r.projectCode} onChange={(v) => setProj(id, idx, "projectCode", v)} cls="px-2 py-1.5 rounded-md text-[12px] outline-none" style={inputStyle} wrapClassName="flex-1" />
                             <input type="number" step="0.5" min="0" value={r.hours} onChange={(e) => setProj(id, idx, "hours", e.target.value)} className="w-16 px-2 py-1.5 rounded-md text-[12px] outline-none text-right" style={inputStyle} />
                             <span className="text-[11px]" style={{ color: "var(--ibs-text-dim)" }}>h</span>
                             {rows.length > 1 && (

@@ -4,8 +4,8 @@ import { useState, useEffect, useRef, Fragment } from "react";
 import { PageTitle } from "@/components/layout/page-title";
 import { DateInput } from "@/components/shared/date-input";
 import { useCan } from "@/hooks/use-permission";
-import { OT_PROJECTS } from "@/lib/projects";
 import { WORK_CATALOG, categoriesOf } from "@/lib/team-work-codes";
+import { ProjectSelect } from "@/components/shared/project-select";
 import { Plus, X, Send, Trash2, Pencil, ChevronRight, ChevronDown, Download } from "lucide-react";
 
 type LogEntry = { id: string; employeeId: string; employeeName: string; employeeCode?: string | null; projectCode: string; hours: number; workCode?: string | null; categoryCode?: string | null; reinforce?: string | null; category: string };
@@ -555,7 +555,7 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
                         <div className="text-[12px] font-semibold mb-2" style={{ color: "var(--ibs-accent)" }}>⚡ Điền hàng loạt <span className="font-normal" style={{ color: "var(--ibs-text-dim)" }}>— tick NV bên dưới, nhập tiêu chí chung rồi bấm Áp</span></div>
                         <div className="flex items-end gap-2 flex-wrap">
                           <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Mã dự án</div>
-                            <select value={bd.projectCode} onChange={(e) => setBulkField(b.blockId, "projectCode", e.target.value)} className={cellSel} style={{ ...inputStyle, width: 128 }}><option value="">—</option>{OT_PROJECTS.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>
+                            <ProjectSelect value={bd.projectCode} onChange={(v) => setBulkField(b.blockId, "projectCode", v)} cls={cellSel} style={inputStyle} wrapStyle={{ width: 128 }} /></div>
                           <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Hành chính</div>
                             <input type="number" step="0.5" min="0" value={bd.hours} onChange={(e) => setBulkField(b.blockId, "hours", e.target.value)} placeholder="Giờ" className="w-16 px-2 py-1.5 rounded-md text-[12px] outline-none text-right border" style={inputStyle} /></div>
                           <div><div className="text-[10px] mb-0.5" style={{ color: "var(--ibs-text-dim)" }}>Mã CV</div>
@@ -602,10 +602,7 @@ function PhieuModal({ logs, onClose, onDone }: { logs: Log[] | null; onClose: ()
                                     </td>
                                   )}
                                   <td className="px-2 py-1.5">
-                                    <select value={p.projectCode} onChange={(e) => setProj(b.blockId, r.rowId, p.key, "projectCode", e.target.value)} className={cellSel} style={{ ...inputStyle, width: 128 }}>
-                                      <option value="">—</option>
-                                      {OT_PROJECTS.map((x) => <option key={x} value={x}>{x}</option>)}
-                                    </select>
+                                    <ProjectSelect value={p.projectCode} onChange={(v) => setProj(b.blockId, r.rowId, p.key, "projectCode", v)} cls={cellSel} style={inputStyle} wrapStyle={{ width: 128 }} />
                                   </td>
                                   <td className="px-2 py-1.5">
                                     <input type="number" step="0.5" min="0" value={p.hours || ""} onChange={(e) => setProj(b.blockId, r.rowId, p.key, "hours", e.target.value)} placeholder="Giờ" className="w-16 px-2 py-1.5 rounded-md text-[12px] outline-none text-right border" style={inputStyle} />
